@@ -1,65 +1,865 @@
-import Image from "next/image";
+"use client";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { pb } from "./pb";
+import { RecordModel } from "pocketbase";
+import {
+  checkIfLearnerExist,
+  checkLearnerIn,
+  createLearner,
+  uidTF,
+} from "./utils/utils";
+import { listen } from "@tauri-apps/api/event";
+import { useNfcLearner } from "./hooks/useNfcLearner";
+import Account from "./components/Account";
+import CreateLearnerModal from "./components/CreateLearnerModal";
+import { LearnerCard } from "./components/LearnerCard";
 
-export default function Home() {
+// Note: useNfcLearner is called below after testTime state is defined
+
+const example = {
+  uid: "",
+  name: "Josh John",
+  email: "josh@john.com",
+  dob: "1990-01-01",
+  NFC_ID: null,
+};
+
+type Student = RecordModel & {
+  uid: string;
+  name: string;
+  email: string;
+  dob: string;
+  NFC_ID: string | null;
+  time_in?: string | null;
+  time_out?: string | null;
+  lunch_in?: string | null;
+  lunch_out?: string | null;
+  status?: string;
+  lunch_status?: string;
+  program?: string;
+};
+
+export default function AttendancePage() {
+  const [adminLoggedIn, setAdminLoggedIn] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [programFilter, setProgramFilter] = useState<string | "all">("all");
+  const [students, setStudents] = useState<RecordModel[]>([]);
+  
+  // Attendance records keyed by learner ID
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
+  
+  // Test mode: when enabled, can simulate different dates/times
+  const [testMode, setTestMode] = useState<boolean>(false);
+
+  // Test time: simulated time for testing the check-in flow (null = use real time)
+  const [testTime, setTestTime] = useState<Date | null>(null);
+  
+  // Test date: simulated date for testing historical records (null = use today)
+  const [testDate, setTestDate] = useState<string | null>(null);
+  
+  // Current viewing date (for fetching attendance)
+  const viewDate = testMode && testDate ? testDate : new Date().toISOString().split("T")[0];
+  
+  // NFC hook - pass test options so NFC scans respect test mode
+  const nfcOptions = testMode ? { testTime, testDate } : undefined;
+  const { uid, learner, exists, isLoading } = useNfcLearner(nfcOptions);
+  
+  // initialize to false to keep server/client markup consistent during hydration
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  // Modal state for creating learner
+  const [showModal, setShowModal] = useState(false);
+  
+  // History modal state
+  const router = useRouter();
+
+  // Pagination
+  const [page, setPage] = useState<number>(1);
+  const [perPage, setPerPage] = useState<number>(8);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [totalItems, setTotalItems] = useState<number>(0);
+
+  // View mode: grid or list
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
+  // Preset times for quick testing
+  const testTimePresets = [
+    { label: "9 AM", hour: 9 },
+    { label: "10 AM", hour: 10 },
+    { label: "1 PM", hour: 13 },
+    { label: "1:30 PM", hour: 13, minute: 30 },
+    { label: "2 PM", hour: 14 },
+    { label: "5 PM", hour: 17 },
+    { label: "6 PM", hour: 18 },
+  ];
+
+  const setTestTimePreset = (hour: number, minute = 0) => {
+    const d = new Date();
+    d.setHours(hour, minute, 0, 0);
+    console.log(`[page] Setting test time to: ${d.toLocaleTimeString()}`);
+    setTestTime(d);
+  };
+
+  async function handleCreateLearner(
+    name: string,
+    email: string,
+    dob: string,
+    uid: string,
+  ) {
+    await createLearner(name, email, dob, uid);
+  }
+
+  // Update logged-in state on the client after mount to avoid hydration mismatch
+  useEffect(() => {
+    setIsLoggedIn(pb.authStore.isValid);
+    const unsubscribe = pb.authStore.onChange(() => {
+      setIsLoggedIn(pb.authStore.isValid);
+    });
+
+    return () => unsubscribe();
+  }, []);
+  
+  // Debounce search input (300ms delay)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+  
+  // Fetch attendance records for the current view date
+  const fetchAttendance = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/attendance?date=${viewDate}&perPage=100`);
+      if (!res.ok) return;
+      const data = await res.json();
+      // Build map of learnerId -> attendance record
+      const map: Record<string, any> = {};
+      for (const record of data.items || []) {
+        map[record.learner] = record;
+      }
+      setAttendanceMap(map);
+    } catch (error) {
+      console.error("Error fetching attendance:", error);
+    }
+  }, [viewDate]);
+  
+  // Refresh attendance data after NFC scan completes
+  useEffect(() => {
+    if (!isLoading && learner) {
+      console.log("[page] NFC scan completed, refreshing attendance data");
+      // Small delay to ensure the backend has processed the check-in
+      const timer = setTimeout(() => {
+        fetchAttendance();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, learner, fetchAttendance]);
+  
+  useEffect(() => {
+    // fetchStudents will call our server-side API that proxies PocketBase
+    const fetchStudents = async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("perPage", String(perPage));
+        if (debouncedSearch && debouncedSearch.trim().length > 0)
+          params.set("search", debouncedSearch.trim());
+        if (programFilter && programFilter !== "all")
+          params.set("program", programFilter as string);
+
+        const res = await fetch(`/api/learners?${params.toString()}`);
+        if (!res.ok) throw new Error(`fetch error ${res.status}`);
+        const data = await res.json();
+        setStudents(data.items || []);
+        setTotalItems(data.totalItems || 0);
+        setTotalPages(data.totalPages || 1);
+      } catch (error) {
+        console.error("Error fetching students:", error);
+      }
+    };
+
+    fetchStudents();
+    fetchAttendance();
+
+    // subscribe to changes and refresh page if something changes
+    let unsubscribeLearners: (() => void) | undefined;
+    let unsubscribeAttendance: (() => void) | undefined;
+    (async () => {
+      unsubscribeLearners = await pb.collection("learners").subscribe("*", () => {
+        fetchStudents();
+      });
+      unsubscribeAttendance = await pb.collection("attendance").subscribe("*", () => {
+        fetchAttendance();
+      });
+    })();
+
+    return () => {
+      if (unsubscribeLearners) unsubscribeLearners();
+      if (unsubscribeAttendance) unsubscribeAttendance();
+    };
+  }, [page, perPage, debouncedSearch, programFilter, fetchAttendance]);
+  
+  // Merge learners with their attendance data for the current date
+  const studentsWithAttendance = useMemo(() => {
+    return students.map((s) => {
+      const attendance = attendanceMap[s.id] || {};
+      return {
+        ...s,
+        time_in: attendance.time_in || null,
+        time_out: attendance.time_out || null,
+        lunch_in: attendance.lunch_in || null,
+        lunch_out: attendance.lunch_out || null,
+        status: attendance.status || null,
+        lunch_status: attendance.lunch_status || null,
+        attendanceId: attendance.id || null,
+      } as Student & { attendanceId: string | null };
+    });
+  }, [students, attendanceMap]);
+
+  // Update attendance field via API
+  const updateAttendance = useCallback(
+    async (
+      learnerId: string,
+      field: string,
+      options?: { value?: string; timestamp?: string }
+    ): Promise<{ wrote: boolean; value?: string; attendance?: any }> => {
+      try {
+        const res = await fetch(`/api/attendance/${learnerId}/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            field, 
+            date: viewDate,
+            value: options?.value,
+            timestamp: options?.timestamp,
+          }),
+        });
+        const data = await res.json();
+
+        if (res.status === 409) {
+          return { wrote: false, value: data.existingValue, attendance: data.attendance };
+        }
+
+        if (!res.ok) {
+          console.error("[updateAttendance] server error", data);
+          return { wrote: false };
+        }
+
+        // Update local attendance map
+        if (data.attendance) {
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [learnerId]: data.attendance,
+          }));
+        }
+
+        return { wrote: true, value: data.value, attendance: data.attendance };
+      } catch (err) {
+        console.error("[updateAttendance] request failed", err);
+        return { wrote: false };
+      }
+    },
+    [viewDate]
+  );
+
+  const handleSetStatus = useCallback(
+    async (id: string, status: string, field: "status" | "lunch_status" = "status") => {
+      // Optimistic update
+      setAttendanceMap((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], [field]: status },
+      }));
+      try {
+        await updateAttendance(id, field, { value: status });
+      } catch (err) {
+        console.error("Failed to save status", err);
+      }
+    },
+    [updateAttendance]
+  );
+
+  const handleCheckAction = useCallback(
+    async (id: string, action: string) => {
+      console.log(`[handleCheckAction] Called with id=${id}, action=${action}`);
+      // Use test time if in test mode, otherwise real time
+      const now = testMode && testTime ? testTime : new Date();
+      console.log(`[handleCheckAction] Using time: ${now.toLocaleTimeString()} (test mode: ${testMode})`);
+      
+      // Get attendance from map (merged with learner data)
+      const attendance = attendanceMap[id] || {};
+      const { time_in, time_out, lunch_in, lunch_out } = attendance;
+      console.log(`[handleCheckAction] Attendance state:`, { time_in, time_out, lunch_in, lunch_out });
+
+      try {
+        if (action === "morning-in") {
+          if (time_in) {
+            console.log("[handleCheckAction] morning-in: already checked in");
+            return;
+          }
+          const result = await updateAttendance(id, "time_in", { timestamp: now.toISOString() });
+          if (!result.wrote) return;
+          
+          // Determine status: present if before 10am, late if after
+          const tenAM = new Date(now);
+          tenAM.setHours(10, 0, 0, 0);
+          const status = now <= tenAM ? "present" : "late";
+          console.log(`[handleCheckAction] Check-in at ${now.toLocaleTimeString()}, status: ${status}`);
+          await handleSetStatus(id, status, "status");
+        } else if (action === "lunch-out") {
+          if (!time_in) {
+            console.log("[handleCheckAction] lunch-out: must check in first");
+            return;
+          }
+          if (lunch_out) {
+            console.log("[handleCheckAction] lunch-out: already went to lunch");
+            return;
+          }
+          await updateAttendance(id, "lunch_out", { timestamp: now.toISOString() });
+        } else if (action === "lunch-in") {
+          if (!lunch_out) {
+            console.log("[handleCheckAction] lunch-in: must go to lunch first");
+            return;
+          }
+          if (lunch_in) {
+            console.log("[handleCheckAction] lunch-in: already returned from lunch");
+            return;
+          }
+          const result = await updateAttendance(id, "lunch_in", { timestamp: now.toISOString() });
+          if (!result.wrote) return;
+          
+          // Determine lunch status based on 2pm cutoff
+          const twoPM = new Date(now);
+          twoPM.setHours(14, 0, 0, 0);
+          const lunchStatus = now > twoPM ? "late" : "present";
+          console.log(`[handleCheckAction] Lunch return at ${now.toLocaleTimeString()}, status: ${lunchStatus}`);
+          await handleSetStatus(id, lunchStatus, "lunch_status");
+        } else if (action === "day-out") {
+          if (!time_in) {
+            console.log("[handleCheckAction] day-out: must check in first");
+            return;
+          }
+          if (time_out) {
+            console.log("[handleCheckAction] day-out: already checked out");
+            return;
+          }
+          await updateAttendance(id, "time_out", { timestamp: now.toISOString() });
+        }
+      } catch (err) {
+        console.error("check action failed", err);
+      }
+    },
+    [attendanceMap, updateAttendance, handleSetStatus, testMode, testTime],
+  );
+
+  // Reset a learner's daily attendance (for testing)
+  const handleReset = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/attendance/${id}/reset`, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: viewDate }),
+      });
+      const data = await res.json();
+      if (res.ok && data.attendance) {
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [id]: data.attendance,
+        }));
+      } else if (data.status === "no_record") {
+        // No record to reset, clear from map
+        setAttendanceMap((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Reset failed", err);
+    }
+  }, [viewDate]);
+
+  // Client-side filter for instant feedback while typing (before debounce triggers server fetch)
+  // Uses studentsWithAttendance which merges learners with their attendance data
+  const filtered = useMemo(() => {
+    // If search matches what server fetched, no need to filter again
+    if (search === debouncedSearch) return studentsWithAttendance;
+    // Otherwise, filter locally for instant feedback
+    return studentsWithAttendance.filter((s) => {
+      const matchesName = s.name.toLowerCase().includes(search.toLowerCase());
+      const matchesProgram =
+        programFilter === "all" || s.program === programFilter;
+      return matchesName && matchesProgram;
+    });
+  }, [studentsWithAttendance, search, debouncedSearch, programFilter]);
+
+  // kid-friendly program colors
+  const programColor = (program: string) =>
+    program === "exp"
+      ? "bg-rose-100 text-rose-800"
+      : program === "cre"
+        ? "bg-emerald-100 text-emerald-800"
+        : "bg-sky-100 text-sky-800";
+
+  if (!isLoggedIn) {
+    return <Account />;
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
+      <div className="w-full max-w-7xl mx-auto">
+        {/* Header Row */}
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Attender</h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowModal(true)}
+              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              + Learner
+            </button>
+            <button
+              onClick={() => router.push("/history")}
+              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              📊 History
+            </button>
+            <button
+              onClick={() => pb.authStore.clear()}
+              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
+            >
+              Logout
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Controls Row */}
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Search */}
+            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 flex-1 min-w-[200px] max-w-md">
+              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search learners..."
+                className="outline-none text-sm bg-transparent flex-1"
+              />
+              {search && (
+                <button onClick={() => setSearch("")} className="text-gray-400 hover:text-gray-600">
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Program Filter */}
+            <select
+              value={programFilter}
+              onChange={(e) => setProgramFilter(e.target.value as string)}
+              className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer"
+            >
+              <option value="all">All programs</option>
+              <option value="Explorers">Explorers</option>
+              <option value="Creators">Creators</option>
+              <option value="Changemakers">Changemakers</option>
+            </select>
+
+            {/* View toggle */}
+            <div className="flex rounded-xl overflow-hidden border border-gray-200">
+              <button
+                onClick={() => setViewMode("grid")}
+                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "grid" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
+              >
+                ▦ Grid
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "list" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
+              >
+                ☰ List
+              </button>
+            </div>
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Test Mode Toggle */}
+            <button
+              onClick={() => {
+                setTestMode((t) => !t);
+                if (testMode) {
+                  setTestTime(null);
+                  setTestDate(null);
+                }
+              }}
+              className={`px-3 py-2 rounded-xl text-sm cursor-pointer font-medium ${
+                testMode 
+                  ? "bg-orange-500 text-white" 
+                  : "bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              {testMode ? "🧪 Test Mode ON" : "🧪 Test Mode"}
+            </button>
+          </div>
         </div>
-      </main>
+
+        {/* Test Mode Panel - Only visible when test mode is on */}
+        {testMode && (
+          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-orange-800">Simulate Date:</span>
+                <input
+                  type="date"
+                  value={testDate || new Date().toISOString().split("T")[0]}
+                  onChange={(e) => setTestDate(e.target.value || null)}
+                  className="px-3 py-1.5 rounded-lg bg-white text-gray-900 text-sm border border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-orange-800">Simulate Time:</span>
+                <select
+                  value={testTime ? `${testTime.getHours()}:${testTime.getMinutes()}` : ""}
+                  onChange={(e) => {
+                    if (!e.target.value) {
+                      setTestTime(null);
+                    } else {
+                      const [h, m] = e.target.value.split(":").map(Number);
+                      setTestTimePreset(h, m);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-white text-gray-900 text-sm border border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                >
+                  <option value="">Use real time</option>
+                  {testTimePresets.map((p) => (
+                    <option key={p.label} value={`${p.hour}:${p.minute || 0}`}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1" />
+              <div className="text-sm text-orange-700">
+                <span className="font-medium">Active:</span> {viewDate}
+                {testTime && ` @ ${testTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+              </div>
+            </div>
+            <p className="text-xs text-orange-600 mt-2">
+              Test mode lets you simulate check-ins for different dates and times. Records are saved to the selected date.
+            </p>
+          </div>
+        )}
+
+        {/* NFC Status - Compact */}
+        {uid && (
+          <div className={`mb-4 px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 ${
+            exists ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+          }`}>
+            <span className="font-medium">NFC:</span>
+            <code className="font-mono">{uid}</code>
+            <span>•</span>
+            <span>{exists ? "✓ Learner found" : "✗ Not registered"}</span>
+          </div>
+        )}
+
+        {/* Date indicator (non-test mode) */}
+        {!testMode && (
+          <div className="mb-4 text-sm text-gray-500">
+            Showing attendance for <span className="font-medium text-gray-700">{new Date(viewDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          </div>
+        )}
+
+        {/* Students grid or list */}
+        {viewMode === "grid" ? (
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {filtered.map((s) => {
+              const programClass = programColor((s.program as string) || "");
+              const programLabel =
+                s.program === "exp"
+                  ? "EXP"
+                  : s.program === "cre"
+                    ? "CRT"
+                    : "CHMK";
+
+              return (
+                <LearnerCard
+                  key={s.id}
+                  s={s}
+                  isCurrent={s.NFC_ID === uid}
+                  programClass={programClass}
+                  programLabel={programLabel}
+                  onStatusChange={handleSetStatus}
+                  onCheckAction={(id: string, action: string) =>
+                    handleCheckAction(id as any, action as any)
+                  }
+                  onReset={handleReset}
+                  testTime={testMode ? testTime : undefined}
+                  testMode={testMode}
+                />
+              );
+            })}
+
+            {filtered.length === 0 && (
+              <div className="col-span-full text-center text-gray-600 py-20">
+                No learners match your search / filter.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {/* List header */}
+            <div className="grid grid-cols-[1.5fr_0.8fr_0.8fr_1fr_1fr_0.8fr_1fr_1fr] gap-3 px-4 py-2 bg-gray-100 rounded-lg text-xs font-semibold text-gray-600">
+              <div>Name</div>
+              <div>Program</div>
+              <div>Status</div>
+              <div>Check-in</div>
+              <div>Lunch Out</div>
+              <div>Lunch Status</div>
+              <div>Lunch In</div>
+              <div>Check-out</div>
+            </div>
+            {filtered.map((s) => {
+              const programClass = programColor((s.program as string) || "");
+              const programLabel =
+                s.program === "exp"
+                  ? "EXP"
+                  : s.program === "cre"
+                    ? "CRT"
+                    : "CHMK";
+              const isCurrent = s.NFC_ID === uid;
+
+              // Format time only (no date) for compact display
+              const formatTime = (val?: string | null) => {
+                if (!val) return "—";
+                const d = new Date(val);
+                if (Number.isNaN(d.getTime())) return val;
+                return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              };
+
+              // Status badge helper
+              const statusBadge = (status: string | undefined, type: "morning" | "lunch") => {
+                if (!status) return <span className="text-gray-400 text-xs">—</span>;
+                const colors = {
+                  present: "bg-green-100 text-green-800",
+                  late: "bg-yellow-100 text-yellow-800",
+                  absent: "bg-red-100 text-red-800",
+                };
+                const labels = {
+                  present: type === "lunch" ? "On Time" : "Present",
+                  late: "Late",
+                  absent: "Absent",
+                };
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-600"}`}>
+                    {labels[status as keyof typeof labels] || status}
+                  </span>
+                );
+              };
+
+              return (
+                <div
+                  key={s.id}
+                  className={`grid grid-cols-[1.5fr_0.8fr_0.8fr_1fr_1fr_0.8fr_1fr_1fr] gap-3 items-center px-4 py-2 bg-white rounded-lg shadow-sm ${isCurrent ? "border-2 border-green-400" : ""}`}
+                >
+                  {/* Name */}
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-linear-to-br from-indigo-400 to-pink-400 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                      {s.name
+                        ? String(s.name.split(" ")[0][0]).toUpperCase()
+                        : "?"}
+                    </div>
+                    <span className="font-medium text-gray-900 text-sm truncate" title={s.name}>
+                      {s.name}
+                    </span>
+                  </div>
+                  {/* Program */}
+                  <div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${programClass}`}
+                    >
+                      {programLabel}
+                    </span>
+                  </div>
+                  {/* Morning Status */}
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => handleSetStatus(s.id, "present")}
+                      className={`px-1.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${s.status === "present" ? "bg-green-200 text-green-900" : "bg-gray-100 text-gray-700 hover:bg-green-50"}`}
+                      title="Present"
+                    >
+                      P
+                    </button>
+                    <button
+                      onClick={() => handleSetStatus(s.id, "late")}
+                      className={`px-1.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${s.status === "late" ? "bg-yellow-200 text-yellow-900" : "bg-gray-100 text-gray-700 hover:bg-yellow-50"}`}
+                      title="Late"
+                    >
+                      L
+                    </button>
+                    <button
+                      onClick={() => handleSetStatus(s.id, "absent")}
+                      className={`px-1.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${s.status === "absent" ? "bg-red-200 text-red-900" : "bg-gray-100 text-gray-700 hover:bg-red-50"}`}
+                      title="Absent"
+                    >
+                      A
+                    </button>
+                  </div>
+                  {/* Check-in */}
+                  <div className="flex items-center gap-1">
+                    <span className={`text-sm ${s.time_in ? "text-gray-900" : "text-gray-400"}`}>
+                      {formatTime(s.time_in)}
+                    </span>
+                    {!s.time_in && (
+                      <button
+                        onClick={() => handleCheckAction(s.id, "morning-in")}
+                        className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 cursor-pointer hover:bg-green-200"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                  {/* Lunch Out */}
+                  <div className="flex items-center gap-1">
+                    <span className={`text-sm ${s.lunch_out ? "text-gray-900" : "text-gray-400"}`}>
+                      {formatTime(s.lunch_out)}
+                    </span>
+                    {s.time_in && !s.lunch_out && (
+                      <button
+                        onClick={() => handleCheckAction(s.id, "lunch-out")}
+                        className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                  {/* Lunch Status */}
+                  <div>
+                    {s.lunch_out ? (
+                      s.lunch_in ? (
+                        statusBadge(s.lunch_status, "lunch")
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">At Lunch</span>
+                      )
+                    ) : (
+                      <span className="text-gray-400 text-xs">—</span>
+                    )}
+                  </div>
+                  {/* Lunch In */}
+                  <div className="flex items-center gap-1">
+                    <span className={`text-sm ${s.lunch_in ? "text-gray-900" : "text-gray-400"}`}>
+                      {formatTime(s.lunch_in)}
+                    </span>
+                    {s.lunch_out && !s.lunch_in && (
+                      <button
+                        onClick={() => handleCheckAction(s.id, "lunch-in")}
+                        className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 cursor-pointer hover:bg-green-200"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                  {/* Check-out */}
+                  <div className="flex items-center gap-1">
+                    <span className={`text-sm ${s.time_out ? "text-gray-900" : "text-gray-400"}`}>
+                      {formatTime(s.time_out)}
+                    </span>
+                    {s.time_in && !s.time_out && (
+                      <button
+                        onClick={() => handleCheckAction(s.id, "day-out")}
+                        className="px-1.5 py-0.5 rounded text-xs bg-blue-100 text-blue-700 cursor-pointer hover:bg-blue-200"
+                      >
+                        +
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {filtered.length === 0 && (
+              <div className="text-center text-gray-600 py-20">
+                No learners match your search / filter.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Pagination controls */}
+        <div className="bg-white rounded-2xl shadow-sm p-4 mt-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="text-sm text-gray-600">
+              Showing <span className="font-semibold">{filtered.length}</span> of{" "}
+              <span className="font-semibold">{totalItems}</span> learners
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page <= 1 ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
+              >
+                ← Prev
+              </button>
+
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 text-sm">
+                <span className="text-gray-500">Page</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={page}
+                  onChange={(e) =>
+                    setPage(
+                      Math.max(
+                        1,
+                        Math.min(totalPages, Number(e.target.value || 1)),
+                      ),
+                    )
+                  }
+                  className="w-12 text-center text-sm outline-none bg-white border border-gray-200 rounded px-1 py-0.5"
+                />
+                <span className="text-gray-500">of {totalPages}</span>
+              </div>
+
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page >= totalPages ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
+              >
+                Next →
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Show:</span>
+              <select
+                value={perPage}
+                onChange={(e) => {
+                  setPerPage(Number(e.target.value));
+                  setPage(1);
+                }}
+                className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-sm cursor-pointer"
+              >
+                <option value={4}>4</option>
+                <option value={8}>8</option>
+                <option value={12}>12</option>
+                <option value={24}>24</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Modal for creating learner */}
+      <CreateLearnerModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onCreate={handleCreateLearner}
+        uid={uid}
+      />
     </div>
   );
 }

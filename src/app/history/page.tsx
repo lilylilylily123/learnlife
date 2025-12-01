@@ -1,0 +1,480 @@
+"use client";
+import React, { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+
+interface AttendanceRecord {
+  id: string;
+  learner: string;
+  date: string;
+  time_in: string | null;
+  time_out: string | null;
+  lunch_out: string | null;
+  lunch_in: string | null;
+  status: string | null;
+  lunch_status: string | null;
+  expand?: {
+    learner?: {
+      id: string;
+      name: string;
+      email: string;
+      program: string;
+    };
+  };
+}
+
+interface Learner {
+  id: string;
+  name: string;
+  email: string;
+  program: string;
+}
+
+export default function HistoryPage() {
+  const router = useRouter();
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [learners, setLearners] = useState<Learner[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [selectedLearnerId, setSelectedLearnerId] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // Editing state
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+  const [editForm, setEditForm] = useState({
+    time_in: "",
+    time_out: "",
+    lunch_out: "",
+    lunch_in: "",
+    status: "",
+    lunch_status: "",
+  });
+
+  // Fetch learners for dropdown
+  useEffect(() => {
+    const fetchLearners = async () => {
+      try {
+        const res = await fetch("/api/learners?perPage=100");
+        if (res.ok) {
+          const data = await res.json();
+          setLearners(data.items || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch learners:", err);
+      }
+    };
+    fetchLearners();
+  }, []);
+
+  const fetchHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ date: selectedDate, perPage: "100" });
+      if (selectedLearnerId) params.set("learnerId", selectedLearnerId);
+      const res = await fetch(`/api/attendance?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecords(data.items || []);
+      } else {
+        setRecords([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history:", err);
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDate, selectedLearnerId]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  // Filter records by search query
+  const filteredRecords = records.filter((record) => {
+    if (!searchQuery.trim()) return true;
+    const name = record.expand?.learner?.name?.toLowerCase() || "";
+    const email = record.expand?.learner?.email?.toLowerCase() || "";
+    const query = searchQuery.toLowerCase();
+    return name.includes(query) || email.includes(query);
+  });
+
+  const formatTime = (val: string | null) => {
+    if (!val) return "—";
+    const d = new Date(val);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatTimeForInput = (val: string | null) => {
+    if (!val) return "";
+    const d = new Date(val);
+    return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+  };
+
+  const statusBadge = (status: string | null) => {
+    if (!status) return <span className="text-gray-400">—</span>;
+    const colors: Record<string, string> = {
+      present: "bg-green-100 text-green-800",
+      late: "bg-yellow-100 text-yellow-800",
+      absent: "bg-red-100 text-red-800",
+    };
+    return (
+      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100"}`}>
+        {status}
+      </span>
+    );
+  };
+
+  const startEditing = (record: AttendanceRecord) => {
+    setEditingRecord(record);
+    setEditForm({
+      time_in: formatTimeForInput(record.time_in),
+      time_out: formatTimeForInput(record.time_out),
+      lunch_out: formatTimeForInput(record.lunch_out),
+      lunch_in: formatTimeForInput(record.lunch_in),
+      status: record.status || "",
+      lunch_status: record.lunch_status || "",
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingRecord(null);
+    setEditForm({
+      time_in: "",
+      time_out: "",
+      lunch_out: "",
+      lunch_in: "",
+      status: "",
+      lunch_status: "",
+    });
+  };
+
+  const saveEditing = async () => {
+    if (!editingRecord) return;
+    
+    try {
+      // Convert time inputs to ISO timestamps
+      const dateBase = selectedDate;
+      const updates: Array<{ field: string; value?: string; timestamp?: string }> = [];
+      
+      // Time fields
+      const timeFields = ["time_in", "time_out", "lunch_out", "lunch_in"] as const;
+      for (const field of timeFields) {
+        const timeVal = editForm[field];
+        if (timeVal) {
+          const [hours, minutes] = timeVal.split(":").map(Number);
+          const dt = new Date(dateBase);
+          dt.setHours(hours, minutes, 0, 0);
+          updates.push({ field, timestamp: dt.toISOString() });
+        }
+      }
+      
+      // Status fields
+      if (editForm.status) {
+        updates.push({ field: "status", value: editForm.status });
+      }
+      if (editForm.lunch_status) {
+        updates.push({ field: "lunch_status", value: editForm.lunch_status });
+      }
+      
+      // Send updates with force=true to allow overwriting
+      for (const update of updates) {
+        await fetch(`/api/attendance/${editingRecord.learner}/update`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: selectedDate,
+            field: update.field,
+            value: update.value,
+            timestamp: update.timestamp,
+            force: true,
+          }),
+        });
+      }
+      
+      // Refresh and close editor
+      await fetchHistory();
+      cancelEditing();
+    } catch (err) {
+      console.error("Failed to save:", err);
+      alert("Failed to save changes");
+    }
+  };
+
+  const resetRecord = async (record: AttendanceRecord) => {
+    if (!confirm(`Reset attendance for ${record.expand?.learner?.name || "this learner"}?`)) return;
+    
+    try {
+      await fetch(`/api/attendance/${record.learner}/reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: selectedDate }),
+      });
+      await fetchHistory();
+    } catch (err) {
+      console.error("Failed to reset:", err);
+      alert("Failed to reset record");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Attendance History</h1>
+          <button
+            onClick={() => router.push("/")}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 cursor-pointer"
+          >
+            ← Back to Dashboard
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Date picker */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-600">Date:</label>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+              />
+            </div>
+
+            {/* Learner dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-600">Learner:</label>
+              <select
+                value={selectedLearnerId}
+                onChange={(e) => setSelectedLearnerId(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm min-w-[200px]"
+              >
+                <option value="">All Learners</option>
+                {learners.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Search */}
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <label className="text-sm font-medium text-gray-600">Search:</label>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name or email..."
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm flex-1"
+              />
+            </div>
+
+            <button
+              onClick={fetchHistory}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 cursor-pointer"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Records table */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          {loading ? (
+            <div className="text-center py-12 text-gray-500">Loading...</div>
+          ) : filteredRecords.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              No attendance records found for this date.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Learner</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Check In</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch Out</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch In</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch Status</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Check Out</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRecords.map((record) => (
+                    <tr key={record.id} className="border-b hover:bg-gray-50">
+                      <td className="py-3 px-4">
+                        <div className="font-medium">{record.expand?.learner?.name || "Unknown"}</div>
+                        <div className="text-xs text-gray-500">{record.expand?.learner?.email}</div>
+                      </td>
+                      <td className="py-3 px-4">{statusBadge(record.status)}</td>
+                      <td className="py-3 px-4">{formatTime(record.time_in)}</td>
+                      <td className="py-3 px-4">{formatTime(record.lunch_out)}</td>
+                      <td className="py-3 px-4">{formatTime(record.lunch_in)}</td>
+                      <td className="py-3 px-4">{statusBadge(record.lunch_status)}</td>
+                      <td className="py-3 px-4">{formatTime(record.time_out)}</td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => startEditing(record)}
+                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => resetRecord(record)}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Summary stats */}
+        {!loading && filteredRecords.length > 0 && (
+          <div className="mt-4 bg-white rounded-xl shadow-sm p-4 flex gap-8 text-sm">
+            <div>
+              <span className="text-gray-600">Total:</span>{" "}
+              <span className="font-semibold">{filteredRecords.length}</span>
+            </div>
+            <div>
+              <span className="text-gray-600">Present:</span>{" "}
+              <span className="font-semibold text-green-600">
+                {filteredRecords.filter((r) => r.status === "present").length}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600">Late:</span>{" "}
+              <span className="font-semibold text-yellow-600">
+                {filteredRecords.filter((r) => r.status === "late").length}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600">Absent:</span>{" "}
+              <span className="font-semibold text-red-600">
+                {filteredRecords.filter((r) => r.status === "absent").length}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600">No Status:</span>{" "}
+              <span className="font-semibold text-gray-600">
+                {filteredRecords.filter((r) => !r.status).length}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Modal */}
+        {editingRecord && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full">
+              <h3 className="text-lg font-bold mb-4">
+                Edit Attendance: {editingRecord.expand?.learner?.name}
+              </h3>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Check In</label>
+                    <input
+                      type="time"
+                      value={editForm.time_in}
+                      onChange={(e) => setEditForm({ ...editForm, time_in: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Status</label>
+                    <select
+                      value={editForm.status}
+                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    >
+                      <option value="">— None —</option>
+                      <option value="present">Present</option>
+                      <option value="late">Late</option>
+                      <option value="absent">Absent</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch Out</label>
+                    <input
+                      type="time"
+                      value={editForm.lunch_out}
+                      onChange={(e) => setEditForm({ ...editForm, lunch_out: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch In</label>
+                    <input
+                      type="time"
+                      value={editForm.lunch_in}
+                      onChange={(e) => setEditForm({ ...editForm, lunch_in: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch Status</label>
+                    <select
+                      value={editForm.lunch_status}
+                      onChange={(e) => setEditForm({ ...editForm, lunch_status: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    >
+                      <option value="">— None —</option>
+                      <option value="present">Present</option>
+                      <option value="late">Late</option>
+                      <option value="absent">Absent</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Check Out</label>
+                    <input
+                      type="time"
+                      value={editForm.time_out}
+                      onChange={(e) => setEditForm({ ...editForm, time_out: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={cancelEditing}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEditing}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 cursor-pointer"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
