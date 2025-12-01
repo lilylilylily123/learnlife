@@ -12,7 +12,7 @@ Welcome to NFC Attender! This guide will help you understand how to use the atte
 
 - **Tap your NFC card** on the reader when you arrive
 - If you check in **before 10:00 AM**, you'll be marked as **Present** ✅
-- If you check in **after 10:00 AM**, you'll be marked as **Late** ⚠️
+- If you check in **at 10:00 AM or later**, you'll be marked as **Late** ⚠️
 
 **Lunch Break**
 
@@ -23,7 +23,7 @@ Welcome to NFC Attender! This guide will help you understand how to use the atte
 
 **End of Day Check-Out**
 
-- Tap your NFC card **after 5:00 PM** to check out for the day
+- Tap your NFC card **after 4:59 PM** to check out for the day
 
 ## Understanding Your Status
 
@@ -68,7 +68,7 @@ On the main dashboard, you can see your attendance card showing:
 
 1. **Arrive early** — Check in before 10:00 AM to be marked as Present
 2. **Don't forget lunch** — Tap when leaving AND returning from lunch
-3. **Check out at the end** — Tap after 5:00 PM before leaving
+3. **Check out at the end** — Tap after 4:59 PM before leaving
 4. **Keep your NFC card safe** — You need it for all check-ins
 
 ## Troubleshooting

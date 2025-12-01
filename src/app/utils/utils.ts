@@ -135,7 +135,7 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions) {
       if (result.wrote) {
         const tenAM = new Date(now);
         tenAM.setHours(10, 0, 0, 0);
-        const status = now <= tenAM ? "present" : "late";
+        const status = now < tenAM ? "present" : "late";
         await updateAttendanceViaApi(learner.id, "status", { value: status, date: dateStr });
         console.log(`Learner checked in (${status})`);
       }
@@ -179,8 +179,9 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions) {
     return;
   }
 
-  // Step 4: Day checkout (5pm+, if not already checked out)
-  if (hour >= 17 && !time_out) {
+  // Step 4: Day checkout (4:59pm+, if not already checked out)
+  const minute = now.getMinutes();
+  if ((hour > 16 || (hour === 16 && minute >= 59)) && !time_out) {
     try {
       await updateAttendanceViaApi(learner.id, "time_out", {
         timestamp: now.toISOString(),
