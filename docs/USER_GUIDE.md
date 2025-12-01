@@ -2,13 +2,9 @@
 
 Welcome to NFC Attender! This guide will help you understand how to use the attendance tracking system.
 
-## Getting Started
 
-**Logging In**
 
-1. Open the app on your device
-2. Enter your email and password on the login screen
-3. Click **Login** to access the dashboard
+## **CHECK THAT YOU HAVE A REGISTERED CARD WITH LILY**
 
 ## Daily Check-In Process
 
