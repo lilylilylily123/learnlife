@@ -1,7 +1,8 @@
 "use client";
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { trpc } from "@/lib/trpc";
+import * as pbClient from "@/lib/pb-client";
+import { pb } from "@/app/pb";
 
 interface AttendanceRecord {
   id: string;
@@ -32,9 +33,21 @@ interface Learner {
 
 export default function HistoryPage() {
   const router = useRouter();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [selectedLearnerId, setSelectedLearnerId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [learners, setLearners] = useState<Learner[]>([]);
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Check auth state
+  useEffect(() => {
+    setIsLoggedIn(pb.authStore.isValid);
+    if (!pb.authStore.isValid) {
+      router.push("/");
+    }
+  }, [router]);
   
   // Editing state
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
@@ -47,29 +60,46 @@ export default function HistoryPage() {
     lunch_status: "",
   });
 
-  // tRPC queries
-  const learnersQuery = trpc.learners.list.useQuery(
-    { perPage: 100 },
-    { staleTime: 60000 }
-  );
+  // Fetch learners
+  const fetchLearners = useCallback(async () => {
+    try {
+      const result = await pbClient.listLearners({ perPage: 100 });
+      setLearners(result.items as unknown as Learner[]);
+    } catch (err) {
+      console.error("Failed to fetch learners:", err);
+    }
+  }, []);
   
-  const attendanceQuery = trpc.attendance.list.useQuery(
-    {
-      date: selectedDate,
-      learnerId: selectedLearnerId || undefined,
-      perPage: 100,
-    },
-    { staleTime: 5000 }
-  );
+  // Fetch attendance
+  const fetchAttendance = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await pbClient.listAttendance({
+        date: selectedDate,
+        learnerId: selectedLearnerId || undefined,
+        perPage: 100,
+      });
+      setRecords(result.items as unknown as AttendanceRecord[]);
+    } catch (err) {
+      console.error("Failed to fetch attendance:", err);
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDate, selectedLearnerId]);
   
-  // tRPC mutations
-  const updateMutation = trpc.attendance.update.useMutation();
-  const resetMutation = trpc.attendance.reset.useMutation();
+  // Initial fetch - only when logged in
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchLearners();
+    }
+  }, [fetchLearners, isLoggedIn]);
   
-  // Derived state
-  const learners = useMemo(() => learnersQuery.data?.items || [], [learnersQuery.data]);
-  const records = useMemo(() => (attendanceQuery.data?.items || []) as unknown as AttendanceRecord[], [attendanceQuery.data]);
-  const loading = attendanceQuery.isLoading;
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchAttendance();
+    }
+  }, [fetchAttendance, isLoggedIn]);
 
   // Filter records by search query
   const filteredRecords = useMemo(() => {
@@ -100,6 +130,8 @@ export default function HistoryPage() {
       present: "bg-green-100 text-green-800",
       late: "bg-yellow-100 text-yellow-800",
       absent: "bg-red-100 text-red-800",
+      jLate: "bg-blue-100 text-blue-800",
+      jAbsent: "bg-purple-100 text-purple-800",
     };
     return (
       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100"}`}>
@@ -160,9 +192,9 @@ export default function HistoryPage() {
         updates.push({ field: "lunch_status", value: editForm.lunch_status });
       }
       
-      // Send updates with force=true to allow overwriting using tRPC
+      // Send updates with force=true to allow overwriting
       for (const update of updates) {
-        await updateMutation.mutateAsync({
+        await pbClient.updateAttendance({
           learnerId: editingRecord.learner,
           date: selectedDate,
           field: update.field,
@@ -173,7 +205,7 @@ export default function HistoryPage() {
       }
       
       // Refresh and close editor
-      await attendanceQuery.refetch();
+      await fetchAttendance();
       cancelEditing();
     } catch (err) {
       console.error("Failed to save:", err);
@@ -185,11 +217,8 @@ export default function HistoryPage() {
     if (!confirm(`Reset attendance for ${record.expand?.learner?.name || "this learner"}?`)) return;
     
     try {
-      await resetMutation.mutateAsync({
-        learnerId: record.learner,
-        date: selectedDate,
-      });
-      await attendanceQuery.refetch();
+      await pbClient.resetAttendance(record.learner, selectedDate);
+      await fetchAttendance();
     } catch (err) {
       console.error("Failed to reset:", err);
       alert("Failed to reset record");
@@ -254,7 +283,7 @@ export default function HistoryPage() {
             </div>
 
             <button
-              onClick={() => attendanceQuery.refetch()}
+              onClick={() => fetchAttendance()}
               className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 cursor-pointer"
             >
               Refresh
@@ -348,6 +377,18 @@ export default function HistoryPage() {
               </span>
             </div>
             <div>
+              <span className="text-gray-600">Justified Late:</span>{" "}
+              <span className="font-semibold text-blue-600">
+                {filteredRecords.filter((r) => r.status === "jLate").length}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600">Justified Absent:</span>{" "}
+              <span className="font-semibold text-purple-600">
+                {filteredRecords.filter((r) => r.status === "jAbsent").length}
+              </span>
+            </div>
+            <div>
               <span className="text-gray-600">No Status:</span>{" "}
               <span className="font-semibold text-gray-600">
                 {filteredRecords.filter((r) => !r.status).length}
@@ -386,6 +427,8 @@ export default function HistoryPage() {
                       <option value="present">Present</option>
                       <option value="late">Late</option>
                       <option value="absent">Absent</option>
+                      <option value="jLate">Justified Late</option>
+                      <option value="jAbsent">Justified Absent</option>
                     </select>
                   </div>
                 </div>
@@ -423,6 +466,8 @@ export default function HistoryPage() {
                       <option value="present">Present</option>
                       <option value="late">Late</option>
                       <option value="absent">Absent</option>
+                      <option value="jLate">Justified Late</option>
+                      <option value="jAbsent">Justified Absent</option>
                     </select>
                   </div>
                   <div>

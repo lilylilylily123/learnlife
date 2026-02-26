@@ -9,6 +9,7 @@ interface CreateLearnerModalProps {
   onCreate: (
     name: string,
     email: string,
+    program: string,
     dob: string,
     uid: string,
   ) => Promise<void>;
@@ -17,6 +18,7 @@ interface CreateLearnerModalProps {
 const initialForm = {
   name: "",
   email: "",
+  program: "",
   dob: "",
 };
 
@@ -58,7 +60,9 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
     };
   }, [open, handleKeyDown]);
 
-  function handleInputChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+  function handleInputChange(
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+  ) {
     setForm({ ...form, [e.target.name]: e.target.value });
   }
 
@@ -67,10 +71,10 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
     setCreating(true);
     setError(null);
     try {
-      await onCreate(form.name, form.email, form.dob, uid);
+      await onCreate(form.name, form.email, form.program, form.dob, uid);
       setForm(initialForm);
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError("Failed to create learner.");
     } finally {
       setCreating(false);
@@ -106,8 +110,18 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
           type="button"
           aria-label="Close modal"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
 
@@ -124,7 +138,10 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="name"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Full Name
             </label>
             <input
@@ -140,7 +157,10 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="email"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Email Address
             </label>
             <input
@@ -154,9 +174,30 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
               required
             />
           </div>
-
           <div>
-            <label htmlFor="dob" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="program"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
+              Program
+            </label>
+            <select
+              id="program"
+              name="program"
+              value={form.program}
+              onChange={handleInputChange}
+              className="w-full border border-gray-300 rounded-lg px-3 py-12 cursor-pointer"
+            >
+              <option>Changemaker</option>
+              <option>Explorer</option>
+              <option>Creator</option>
+            </select>
+          </div>
+          <div>
+            <label
+              htmlFor="dob"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               Date of Birth
             </label>
             <input
@@ -171,7 +212,10 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
           </div>
 
           <div>
-            <label htmlFor="uid-display" className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="uid-display"
+              className="block text-sm font-medium text-gray-700 mb-1"
+            >
               NFC UID
             </label>
             <input
@@ -211,8 +255,20 @@ const CreateLearnerModal: React.FC<CreateLearnerModalProps> = ({
               {creating ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                      fill="none"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
                   </svg>
                   Creating...
                 </span>

@@ -1,10 +1,10 @@
 [package]
-name = "app"
+name = "nfc-attender"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "NFC-based attendance tracking system for learners"
+authors = ["LearnLife"]
+license = "MIT"
+repository = "https://github.com/lilylilylily123/nfc-attender"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -23,5 +23,6 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.9.2", features = [] }
 tauri-plugin-log = "2"
+tauri-plugin-updater = "2"
 pcsc = "2.9.0"
 hex = "0.4.3"

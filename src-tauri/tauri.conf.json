@@ -1,37 +1,59 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "nfc-attender",
+  "productName": "NFC Attender",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.learnlife.nfc-attender",
   "build": {
-    "frontendDist": ".././out",
+    "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm run dev",
+    "beforeDevCommand": "pnpm dev",
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
     "windows": [
       {
-        "title": "nfc-attender",
-        "width": 800,
-        "height": 600,
+        "title": "NFC Attender",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' https://learnlife.pockethost.io wss://learnlife.pockethost.io; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/lilylilylily123/nfc-attender/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1Rjg1QjA3ODUxNThEMUQKUldRZGpSV0ZCMXY0NVdLbWx1WWZaOVdwS1cxTGtoMEhnUXlPM3hTb1FJNnFHbFJ6aHJ2SEtqUngK"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Utility",
+    "shortDescription": "NFC-based attendance tracking system",
+    "longDescription": "A desktop application for tracking learner attendance using NFC cards. Features include check-in/check-out, lunch tracking, and attendance history.",
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": null
+    }
   }
 }

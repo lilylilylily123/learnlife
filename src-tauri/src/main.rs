@@ -4,8 +4,8 @@
 )]
 use hex;
 use pcsc::*;
-use std::{thread, time::Duration};
 use tauri::{Emitter, Manager, WebviewWindow};
+use tauri_plugin_updater::UpdaterExt;
 
 // Function to get UID from the card
 fn get_uid(card: &Card) -> Option<String> {
@@ -104,6 +104,7 @@ fn start_nfc_listener(window: WebviewWindow) -> Result<(), String> {
 }
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Tauri v2: get the main window
             let window = app
@@ -113,6 +114,52 @@ fn main() {
                 .expect("failed to get main window");
 
             start_nfc_listener(window)?;
+
+            // Check for updates on startup
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match handle.updater() {
+                    Ok(updater) => {
+                        if let Ok(Some(update)) = updater.check().await {
+                            println!("Update available: {} -> {}", update.current_version, update.version);
+                            
+                            let size_bytes = update.body.as_ref()
+                                .and_then(|body| body.parse::<u64>().ok())
+                                .unwrap_or(0);
+                            
+                            let size_mb = size_bytes as f64 / 1024.0 / 1024.0;
+                            
+                            println!("Would download and install {} MB", size_mb);
+                            
+                            // Attempt to download and install the update
+                            match update.download_and_install(
+                                |chunk_length, content_length| {
+                                    if let Some(total) = content_length {
+                                        println!("Downloaded {} of {} bytes", chunk_length, total);
+                                    }
+                                },
+                                || {
+                                    println!("Download finished, installing...");
+                                }
+                            ).await {
+                                Ok(_) => {
+                                    println!("Update installed successfully! Restart required.");
+                                    std::process::exit(0);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to download/install update: {}", e);
+                                }
+                            }
+                        } else {
+                            println!("No updates available");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to get updater: {}", e);
+                    }
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

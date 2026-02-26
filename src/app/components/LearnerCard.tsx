@@ -1,6 +1,7 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import prettyTimestamp from "../utils/format";
+import { Learner } from "@/lib/pb-client";
 
 interface LearnerCardProps {
   s: any;
@@ -9,18 +10,28 @@ interface LearnerCardProps {
   programLabel: string;
   onStatusChange: (id: string, status: string) => void;
   onCheckAction: (id: string, action: string) => void;
+  onCommentUpdate?: (id: string, comment: string) => Promise<void>; // callback to update comments
   onReset?: (id: string) => void; // optional reset handler for test mode
   testTime?: Date | null; // optional override time for testing
   testMode?: boolean; // whether test mode is enabled
 }
 
 // Determine what action is currently available based on time and state
-function getNextAction(s: any, now: Date): { action: string; label: string; available: boolean; reason?: string } | null {
+function getNextAction(
+  s: any,
+  now: Date,
+): {
+  action: string;
+  label: string;
+  available: boolean;
+  reason?: string;
+} | null {
   const hour = now.getHours();
   const minute = now.getMinutes();
   const timeValue = hour + minute / 60; // e.g., 13.5 = 1:30 PM
 
   // Step 1: Morning check-in (available until they check in)
+
   if (!s.time_in) {
     return {
       action: "morning-in",
@@ -29,32 +40,36 @@ function getNextAction(s: any, now: Date): { action: string; label: string; avai
     };
   }
 
-  // Step 2: Lunch out (available after 1pm, only if not already out)
-  if (!s.lunch_out) {
-    if (timeValue >= 13) {
+  // Step 2 & 3: Lunch events (multiple possible during 1-2pm window)
+  const lunchEvents = s.lunch_events || [];
+  const lastLunchEvent =
+    lunchEvents.length > 0 ? lunchEvents[lunchEvents.length - 1] : null;
+
+  // If hour is 1pm (13:00) to before 2pm (14:00), allow multiple lunch events
+  if (timeValue >= 13 && timeValue < 14) {
+    // Determine next action based on last event
+    if (!lastLunchEvent || lastLunchEvent.type === "in") {
       return {
         action: "lunch-out",
-        label: "Lunch Out",
+        label: `Lunch Out ${lunchEvents.length > 0 ? `(#${Math.ceil(lunchEvents.length / 2) + 1})` : ""}`,
+        available: true,
+      };
+    } else {
+      return {
+        action: "lunch-in",
+        label: `Lunch In ${lunchEvents.length > 1 ? `(#${Math.ceil(lunchEvents.length / 2)})` : ""}`,
         available: true,
       };
     }
-    // Before lunch window, show as upcoming
-    return {
-      action: "lunch-out",
-      label: "Lunch Out",
-      available: false,
-      reason: "Available at 1:00 PM",
-    };
   }
 
-  // Step 3: Lunch in (if they went to lunch, must return before 2pm)
-  if (s.lunch_out && !s.lunch_in) {
-    const isLate = timeValue >= 14;
+  // After 2pm, only allow lunch-in if currently at lunch
+  if (timeValue >= 14 && lastLunchEvent && lastLunchEvent.type === "out") {
     return {
       action: "lunch-in",
-      label: isLate ? "Lunch In (Late!)" : "Lunch In",
+      label: "Lunch In (Late!)",
       available: true,
-      reason: isLate ? "After 2:00 PM deadline" : undefined,
+      reason: "After 2:00 PM deadline",
     };
   }
 
@@ -86,15 +101,41 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
   programLabel,
   onStatusChange,
   onCheckAction,
+  onCommentUpdate,
   onReset,
   testTime,
   testMode,
 }) => {
-  const firstInitial = s?.name ? String(s.name.split(" ")[0][0]).toUpperCase() : "?";
-  const formatTimestamp = (val?: string | null) => prettyTimestamp(val, { compact: true });
-  
+  const firstInitial = s?.name
+    ? String(s.name.split(" ")[0][0]).toUpperCase()
+    : "?";
+  const formatTimestamp = (val?: string | null) =>
+    prettyTimestamp(val, { compact: true });
+
   const now = testTime || new Date();
   const nextAction = getNextAction(s, now);
+
+  // Comment state
+  const [commentInput, setCommentInput] = useState("");
+  const [isCommentExpanded, setIsCommentExpanded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Lunch events state
+  const [showAllLunchEvents, setShowAllLunchEvents] = useState(false);
+
+  const handleCommentSubmit = async () => {
+    if (!commentInput.trim() || !onCommentUpdate) return;
+    setIsSaving(true);
+    try {
+      await onCommentUpdate(s.id, commentInput.trim());
+      setCommentInput("");
+      setIsCommentExpanded(false);
+    } catch (err) {
+      console.error("Failed to save comment:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Show lunch section for all learners (removed program-based filter)
   const showLunchSection = true;
@@ -109,10 +150,15 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
           {firstInitial}
         </div>
         <div className="mt-3">
-          <div title={s.name} className="font-semibold text-base text-gray-900 leading-tight wrap-break-word max-w-56">
+          <div
+            title={s.name}
+            className="font-semibold text-base text-gray-900 leading-tight wrap-break-word max-w-56"
+          >
             {s.name}
           </div>
-          <div className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${programClass}`}>
+          <div
+            className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${programClass}`}
+          >
             {programLabel}
           </div>
         </div>
@@ -125,21 +171,33 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
           <div className="inline-flex rounded-full bg-gray-100 p-0.5 transition-all duration-200 items-center">
             <button
               onClick={() => onStatusChange(s.id, "present")}
-              className={`px-2 py-0.5 rounded-full text-sm font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "present" ? "bg-green-200 text-green-900" : "text-gray-900"}`}
+              className={`px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "present" ? "bg-green-200 text-green-900" : "text-gray-900"}`}
             >
-              Present
+              P
             </button>
             <button
               onClick={() => onStatusChange(s.id, "late")}
-              className={`ml-1 px-2 py-0.5 rounded-full text-sm font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "late" ? "bg-yellow-200 text-yellow-900" : "text-gray-900"}`}
+              className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "late" ? "bg-yellow-200 text-yellow-900" : "text-gray-900"}`}
             >
-              Late
+              L
             </button>
             <button
               onClick={() => onStatusChange(s.id, "absent")}
-              className={`ml-1 px-2 py-0.5 rounded-full text-sm font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "absent" ? "bg-red-200 text-red-900" : "text-gray-900"}`}
+              className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "absent" ? "bg-red-200 text-red-900" : "text-gray-900"}`}
             >
-              Absent
+              A
+            </button>
+            <button
+              onClick={() => onStatusChange(s.id, "jLate")}
+              className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "jLate" ? "bg-blue-200 text-blue-900" : "text-gray-900"}`}
+            >
+              JL
+            </button>
+            <button
+              onClick={() => onStatusChange(s.id, "jAbsent")}
+              className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-transform duration-150 active:scale-95 hover:scale-105 ${s.status === "jAbsent" ? "bg-purple-200 text-purple-900" : "text-gray-900"}`}
+            >
+              JA
             </button>
           </div>
         </div>
@@ -154,26 +212,77 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
         </div>
         <div className="flex items-center gap-1">
           {/* Morning check-in dot */}
-          <div className={`w-3 h-3 rounded-full ${s.time_in ? "bg-green-500" : "bg-gray-300"}`} title={s.time_in ? `Checked in: ${formatTimestamp(s.time_in)}` : "Not checked in"} />
-          <div className={`flex-1 h-0.5 ${s.time_in ? "bg-green-500" : "bg-gray-300"}`} />
-          
+          <div
+            className={`w-3 h-3 rounded-full ${s.time_in ? "bg-green-500" : "bg-gray-300"}`}
+            title={
+              s.time_in
+                ? `Checked in: ${formatTimestamp(s.time_in)}`
+                : "Not checked in"
+            }
+          />
+          <div
+            className={`flex-1 h-0.5 ${s.time_in ? "bg-green-500" : "bg-gray-300"}`}
+          />
+
           {showLunchSection && (
             <>
-              {/* Lunch out dot */}
-              <div className={`w-3 h-3 rounded-full ${s.lunch_out ? "bg-yellow-500" : "bg-gray-300"}`} title={s.lunch_out ? `Lunch out: ${formatTimestamp(s.lunch_out)}` : "No lunch break"} />
-              <div className={`flex-1 h-0.5 ${s.lunch_in ? "bg-green-500" : s.lunch_out ? "bg-yellow-500" : "bg-gray-300"}`} />
-              {/* Lunch in dot */}
-              <div className={`w-3 h-3 rounded-full ${s.lunch_in ? "bg-green-500" : s.lunch_out ? "bg-yellow-500" : "bg-gray-300"}`} title={s.lunch_in ? `Back from lunch: ${formatTimestamp(s.lunch_in)}` : s.lunch_out ? "Still at lunch" : "—"} />
-              <div className={`flex-1 h-0.5 ${s.time_out ? "bg-green-500" : s.lunch_in || !s.lunch_out ? (s.time_in ? "bg-gray-300" : "bg-gray-300") : "bg-yellow-500"}`} />
+              {/* Lunch indicator - show based on lunch_events */}
+              {(() => {
+                const lunchEvents = s.lunch_events || [];
+                const lastEvent =
+                  lunchEvents.length > 0
+                    ? lunchEvents[lunchEvents.length - 1]
+                    : null;
+                const hasLunch = lunchEvents.length > 0;
+                const atLunch = lastEvent && lastEvent.type === "out";
+
+                return (
+                  <>
+                    <div
+                      className={`w-3 h-3 rounded-full ${hasLunch ? (atLunch ? "bg-yellow-500" : "bg-green-500") : "bg-gray-300"}`}
+                      title={
+                        hasLunch
+                          ? `Lunch events: ${lunchEvents.length > 1 ? `${Math.ceil(lunchEvents.length / 2)}x` : ""} ${atLunch ? "Currently at lunch" : "Back from lunch"}`
+                          : "No lunch break"
+                      }
+                    />
+                    <div
+                      className={`flex-1 h-0.5 ${hasLunch ? (atLunch ? "bg-yellow-500" : "bg-green-500") : "bg-gray-300"}`}
+                    />
+                    <div
+                      className={`w-3 h-3 rounded-full ${hasLunch ? (atLunch ? "bg-yellow-500" : "bg-green-500") : "bg-gray-300"}`}
+                      title={
+                        hasLunch
+                          ? atLunch
+                            ? "Still at lunch"
+                            : "Back from lunch"
+                          : "—"
+                      }
+                    />
+                    <div
+                      className={`flex-1 h-0.5 ${s.time_out ? "bg-green-500" : hasLunch && !atLunch ? "bg-gray-300" : atLunch ? "bg-yellow-500" : "bg-gray-300"}`}
+                    />
+                  </>
+                );
+              })()}
             </>
           )}
-          
+
           {!showLunchSection && (
-            <div className={`flex-1 h-0.5 ${s.time_out ? "bg-green-500" : "bg-gray-300"}`} />
+            <div
+              className={`flex-1 h-0.5 ${s.time_out ? "bg-green-500" : "bg-gray-300"}`}
+            />
           )}
-          
+
           {/* Day checkout dot */}
-          <div className={`w-3 h-3 rounded-full ${s.time_out ? "bg-green-500" : "bg-gray-300"}`} title={s.time_out ? `Checked out: ${formatTimestamp(s.time_out)}` : "Not checked out"} />
+          <div
+            className={`w-3 h-3 rounded-full ${s.time_out ? "bg-green-500" : "bg-gray-300"}`}
+            title={
+              s.time_out
+                ? `Checked out: ${formatTimestamp(s.time_out)}`
+                : "Not checked out"
+            }
+          />
         </div>
       </div>
 
@@ -188,41 +297,105 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
           <div className="font-medium">{formatTimestamp(s.time_out)}</div>
         </div>
       </div>
-      
+
       {/* Lunch timestamps and status - always visible */}
-      {showLunchSection && (
-        <div className="w-full mt-2 border-t border-gray-100 pt-2">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="text-center">
-              <div className="text-yellow-600">🍽️ Lunch out</div>
-              <div className="font-medium">{formatTimestamp(s.lunch_out)}</div>
+      {showLunchSection &&
+        (() => {
+          const lunchEvents = s.lunch_events || [];
+          const lastEvent =
+            lunchEvents.length > 0 ? lunchEvents[lunchEvents.length - 1] : null;
+          const hasLunch = lunchEvents.length > 0;
+          const atLunch = lastEvent && lastEvent.type === "out";
+          const lunchCount = Math.ceil(lunchEvents.length / 2);
+
+          return (
+            <div className="w-full mt-2 border-t border-gray-100 pt-2">
+              {hasLunch ? (
+                <>
+                  <div className="text-center text-xs mb-2">
+                    <span className="font-medium text-gray-600">
+                      🍽️ Lunch {lunchCount > 1 ? `(${lunchCount}x)` : ""}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1 text-xs">
+                    {(showAllLunchEvents
+                      ? lunchEvents
+                      : lunchEvents.slice(-3)
+                    ).map((event: any, idx: any) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between px-2"
+                      >
+                        <span
+                          className={
+                            event.type === "out"
+                              ? "text-yellow-600"
+                              : "text-green-600"
+                          }
+                        >
+                          {event.type === "out" ? "→ Out" : "← In"}
+                        </span>
+                        <span className="font-medium">
+                          {formatTimestamp(event.time)}
+                        </span>
+                      </div>
+                    ))}
+                    {lunchEvents.length > 3 && !showAllLunchEvents && (
+                      <button
+                        onClick={() => setShowAllLunchEvents(true)}
+                        className="text-center text-blue-500 hover:text-blue-700 cursor-pointer hover:underline"
+                      >
+                        ... {lunchEvents.length - 3} more
+                      </button>
+                    )}
+                    {lunchEvents.length > 3 && showAllLunchEvents && (
+                      <button
+                        onClick={() => setShowAllLunchEvents(false)}
+                        className="text-center text-blue-500 hover:text-blue-700 cursor-pointer hover:underline"
+                      >
+                        Show less
+                      </button>
+                    )}
+                  </div>
+                  {/* Lunch Status */}
+                  {!atLunch && (
+                    <div className="mt-2 flex flex-col items-center">
+                      <div className="text-xs text-gray-500 mb-1">Status</div>
+                      <div className="inline-flex rounded-full bg-gray-100 p-0.5 items-center">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            s.lunch_status === "present"
+                              ? "bg-green-200 text-green-900"
+                              : s.lunch_status === "late"
+                                ? "bg-yellow-200 text-yellow-900"
+                                : "bg-gray-200 text-gray-600"
+                          }`}
+                        >
+                          {s.lunch_status === "present"
+                            ? "On Time"
+                            : s.lunch_status === "late"
+                              ? "Late"
+                              : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {atLunch && (
+                    <div className="mt-2 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                        Currently at Lunch
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center text-xs text-gray-400">
+                  No lunch events
+                </div>
+              )}
             </div>
-            <div className="text-center">
-              <div className="text-green-600">🍽️ Lunch in</div>
-              <div className="font-medium">{formatTimestamp(s.lunch_in)}</div>
-            </div>
-          </div>
-          {/* Lunch Status */}
-          {s.lunch_out && (
-            <div className="mt-2 flex flex-col items-center">
-              <div className="text-xs text-gray-500 mb-1">Lunch Status</div>
-              <div className="inline-flex rounded-full bg-gray-100 p-0.5 items-center">
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    s.lunch_status === "present"
-                      ? "bg-green-200 text-green-900"
-                      : s.lunch_status === "late"
-                        ? "bg-yellow-200 text-yellow-900"
-                        : "bg-gray-200 text-gray-600"
-                  }`}
-                >
-                  {s.lunch_status === "present" ? "On Time" : s.lunch_status === "late" ? "Late" : s.lunch_in ? "—" : "At Lunch"}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+          );
+        })()}
 
       {/* Next Action Button */}
       <div className="w-full mt-3">
@@ -231,10 +404,14 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
             <button
               onClick={async () => {
                 if (!nextAction.available) return;
-                console.log(`[LearnerCard] Button clicked: ${nextAction.action} for ${s.id}`);
+                console.log(
+                  `[LearnerCard] Button clicked: ${nextAction.action} for ${s.id}`,
+                );
                 try {
                   await onCheckAction(s.id, nextAction.action);
-                  console.log(`[LearnerCard] Action completed: ${nextAction.action}`);
+                  console.log(
+                    `[LearnerCard] Action completed: ${nextAction.action}`,
+                  );
                 } catch (err) {
                   console.error(`[LearnerCard] Action failed:`, err);
                 }
@@ -257,7 +434,9 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
               {nextAction.label}
             </button>
             {nextAction.reason && (
-              <div className={`text-xs mt-1 ${nextAction.available ? "text-red-600" : "text-gray-500"}`}>
+              <div
+                className={`text-xs mt-1 ${nextAction.available ? "text-red-600" : "text-gray-500"}`}
+              >
                 {nextAction.reason}
               </div>
             )}
@@ -278,6 +457,88 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
           🔄 Reset Day
         </button>
       )}
+
+      {/* Comments Section */}
+      <div className="w-full mt-3 border-t border-gray-100 pt-3">
+        {!isCommentExpanded ? (
+          <div className="relative group">
+            <button
+              onClick={() => setIsCommentExpanded(true)}
+              className={`w-full py-1.5 px-3 rounded-lg border text-xs hover:bg-gray-50 cursor-pointer flex items-center justify-center gap-1 ${
+                s.comments
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-gray-300 bg-white text-gray-700"
+              }`}
+            >
+              {s.comments ? "Comment" : "Add comment"}
+            </button>
+
+            {/* Tooltip on hover */}
+            {s.comments && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 p-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10 pointer-events-none">
+                <div className="wrap-break-word">{s.comments}</div>
+                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={commentInput}
+              onChange={(e) => setCommentInput(e.target.value)}
+              placeholder={s.comments || "Add a comment..."}
+              className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+              rows={3}
+              disabled={isSaving}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleCommentSubmit}
+                disabled={!commentInput.trim() || isSaving}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium ${
+                  commentInput.trim() && !isSaving
+                    ? "bg-blue-500 text-white hover:bg-blue-600 cursor-pointer"
+                    : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                }`}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+              {s.comments && (
+                <button
+                  onClick={async () => {
+                    if (!onCommentUpdate) return;
+                    setIsSaving(true);
+                    try {
+                      await onCommentUpdate(s.id, "");
+                      setCommentInput("");
+                      setIsCommentExpanded(false);
+                    } catch (err) {
+                      console.error("Failed to clear comment:", err);
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  disabled={isSaving}
+                  className="px-3 py-1.5 rounded-lg border border-red-300 bg-red-50 text-red-700 text-xs hover:bg-red-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Remove comment"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setIsCommentExpanded(false);
+                  setCommentInput("");
+                }}
+                disabled={isSaving}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs hover:bg-gray-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -14,7 +14,7 @@ import { useNfcLearner } from "./hooks/useNfcLearner";
 import Account from "./components/Account";
 import CreateLearnerModal from "./components/CreateLearnerModal";
 import { LearnerCard } from "./components/LearnerCard";
-import { trpc } from "@/lib/trpc";
+import * as pbClient from "@/lib/pb-client";
 
 // Note: useNfcLearner is called below after testTime state is defined
 
@@ -24,6 +24,11 @@ const example = {
   email: "josh@john.com",
   dob: "1990-01-01",
   NFC_ID: null,
+};
+
+type LunchEvent = {
+  type: 'out' | 'in';
+  time: string;
 };
 
 type Student = RecordModel & {
@@ -36,9 +41,11 @@ type Student = RecordModel & {
   time_out?: string | null;
   lunch_in?: string | null;
   lunch_out?: string | null;
+  lunch_events?: LunchEvent[] | null;
   status?: string;
   lunch_status?: string;
   program?: string;
+  comments?: string;
 };
 
 export default function AttendancePage() {
@@ -47,29 +54,30 @@ export default function AttendancePage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [programFilter, setProgramFilter] = useState<string | "all">("all");
   const [students, setStudents] = useState<RecordModel[]>([]);
-  
+
   // Test mode: when enabled, can simulate different dates/times
   const [testMode, setTestMode] = useState<boolean>(false);
 
   // Test time: simulated time for testing the check-in flow (null = use real time)
   const [testTime, setTestTime] = useState<Date | null>(null);
-  
+
   // Test date: simulated date for testing historical records (null = use today)
   const [testDate, setTestDate] = useState<string | null>(null);
-  
+
   // Current viewing date (for fetching attendance)
-  const viewDate = testMode && testDate ? testDate : new Date().toISOString().split("T")[0];
-  
+  const viewDate =
+    testMode && testDate ? testDate : new Date().toISOString().split("T")[0];
+
   // NFC hook - pass test options so NFC scans respect test mode
   const nfcOptions = testMode ? { testTime, testDate } : undefined;
   const { uid, learner, exists, isLoading } = useNfcLearner(nfcOptions);
-  
+
   // initialize to false to keep server/client markup consistent during hydration
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // Modal state for creating learner
   const [showModal, setShowModal] = useState(false);
-  
+
   // History modal state
   const router = useRouter();
 
@@ -80,7 +88,12 @@ export default function AttendancePage() {
   const [totalItems, setTotalItems] = useState<number>(0);
 
   // View mode: grid or list
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+
+  // List view comment editing state
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const [commentEditValue, setCommentEditValue] = useState<string>("");
+  const [isSavingComment, setIsSavingComment] = useState(false);
 
   // Preset times for quick testing
   const testTimePresets = [
@@ -106,7 +119,7 @@ export default function AttendancePage() {
     dob: string,
     uid: string,
   ) {
-    await createLearner(name, email, dob, uid);
+    await createLearner(name, email, "Explorer", dob, uid);
   }
 
   // Update logged-in state on the client after mount to avoid hydration mismatch
@@ -118,7 +131,7 @@ export default function AttendancePage() {
 
     return () => unsubscribe();
   }, []);
-  
+
   // Debounce search input (300ms delay)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -126,79 +139,92 @@ export default function AttendancePage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
-  
-  // tRPC queries
-  const learnersQuery = trpc.learners.list.useQuery(
-    {
-      page,
-      perPage,
-      search: debouncedSearch.trim() || undefined,
-      program: programFilter !== "all" ? programFilter : undefined,
-    },
-    { staleTime: 5000 }
-  );
 
-  const attendanceQuery = trpc.attendance.list.useQuery(
-    { date: viewDate, perPage: 100 },
-    { staleTime: 5000 }
-  );
-  
-  // tRPC mutations
-  const updateMutation = trpc.attendance.update.useMutation();
-  const resetMutation = trpc.attendance.reset.useMutation();
-  
-  // Build attendance map from query
-  const attendanceMap = useMemo(() => {
-    const map: Record<string, any> = {};
-    for (const record of attendanceQuery.data?.items || []) {
-      map[record.learner] = record;
+  // Attendance records keyed by learner ID
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
+  const [isDataLoading, setIsDataLoading] = useState(false);
+
+  // Fetch learners
+  const fetchLearners = useCallback(async () => {
+    try {
+      const result = await pbClient.listLearners({
+        page,
+        perPage,
+        search: debouncedSearch.trim() || undefined,
+        program: programFilter !== "all" ? programFilter : undefined,
+      });
+      setStudents(result.items as unknown as RecordModel[]);
+      setTotalItems(result.totalItems);
+      setTotalPages(result.totalPages);
+    } catch (error) {
+      console.error("Error fetching learners:", error);
     }
-    return map;
-  }, [attendanceQuery.data?.items]);
-  
-  // Set students from query data
+  }, [page, perPage, debouncedSearch, programFilter]);
+
+  // Fetch attendance
+  const fetchAttendance = useCallback(async () => {
+    try {
+      const result = await pbClient.listAttendance({
+        date: viewDate,
+        perPage: 100,
+      });
+      const map: Record<string, any> = {};
+      for (const record of result.items) {
+        map[record.learner] = record;
+      }
+      setAttendanceMap(map);
+    } catch (error) {
+      console.error("Error fetching attendance:", error);
+    }
+  }, [viewDate]);
+
+  // Initial data fetch - only when logged in
   useEffect(() => {
-    if (learnersQuery.data) {
-      setStudents(learnersQuery.data.items || []);
-      setTotalItems(learnersQuery.data.totalItems || 0);
-      setTotalPages(learnersQuery.data.totalPages || 1);
+    if (isLoggedIn) {
+      fetchLearners();
+      fetchAttendance();
     }
-  }, [learnersQuery.data]);
-  
+  }, [fetchLearners, fetchAttendance, isLoggedIn]);
+
   // Refresh attendance data after NFC scan completes
   useEffect(() => {
-    if (!isLoading && learner) {
+    if (!isLoading && learner && isLoggedIn) {
       console.log("[page] NFC scan completed, refreshing attendance data");
-      // Small delay to ensure the backend has processed the check-in
       const timer = setTimeout(() => {
-        attendanceQuery.refetch();
+        fetchAttendance();
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [isLoading, learner, attendanceQuery]);
-  
-  // Subscribe to real-time changes via PocketBase
+  }, [isLoading, learner, fetchAttendance, isLoggedIn]);
+
+  // Subscribe to real-time changes via PocketBase - only when logged in
   useEffect(() => {
+    if (!isLoggedIn) return;
+
     let unsubscribeLearners: (() => void) | undefined;
     let unsubscribeAttendance: (() => void) | undefined;
     (async () => {
-      unsubscribeLearners = await pb.collection("learners").subscribe("*", () => {
-        learnersQuery.refetch();
-      });
-      unsubscribeAttendance = await pb.collection("attendance").subscribe("*", () => {
-        attendanceQuery.refetch();
-      });
+      unsubscribeLearners = await pb
+        .collection("learners")
+        .subscribe("*", () => {
+          fetchLearners();
+        });
+      unsubscribeAttendance = await pb
+        .collection("attendance")
+        .subscribe("*", () => {
+          fetchAttendance();
+        });
     })();
 
     return () => {
       if (unsubscribeLearners) unsubscribeLearners();
       if (unsubscribeAttendance) unsubscribeAttendance();
     };
-  }, [learnersQuery, attendanceQuery]);
-  
+  }, [fetchLearners, fetchAttendance, isLoggedIn]);
+
   // Merge learners with their attendance data for the current date
   const studentsWithAttendance = useMemo(() => {
-    return students.map((s) => {
+    const merged = students.map((s) => {
       const attendance = attendanceMap[s.id] || {};
       return {
         ...s,
@@ -206,22 +232,25 @@ export default function AttendancePage() {
         time_out: attendance.time_out || null,
         lunch_in: attendance.lunch_in || null,
         lunch_out: attendance.lunch_out || null,
+        lunch_events: attendance.lunch_events || null,
         status: attendance.status || null,
         lunch_status: attendance.lunch_status || null,
         attendanceId: attendance.id || null,
       } as Student & { attendanceId: string | null };
     });
+    // Ensure alphabetical sorting by name
+    return merged.sort((a, b) => a.name.localeCompare(b.name));
   }, [students, attendanceMap]);
 
-  // Update attendance field via tRPC mutation
+  // Update attendance field via direct PocketBase call
   const updateAttendance = useCallback(
     async (
       learnerId: string,
       field: string,
-      options?: { value?: string; timestamp?: string }
+      options?: { value?: string; timestamp?: string },
     ): Promise<{ wrote: boolean; value?: string; attendance?: any }> => {
       try {
-        const result = await updateMutation.mutateAsync({
+        const result = await pbClient.updateAttendance({
           learnerId,
           field,
           date: viewDate,
@@ -230,30 +259,60 @@ export default function AttendancePage() {
         });
 
         if (result.status === "already_set") {
-          return { wrote: false, value: result.existingValue, attendance: result.attendance };
+          return {
+            wrote: false,
+            value: result.existingValue,
+            attendance: result.attendance,
+          };
         }
 
         // Refetch attendance data to sync
-        attendanceQuery.refetch();
+        fetchAttendance();
 
-        return { wrote: true, value: result.value, attendance: result.attendance };
+        return {
+          wrote: true,
+          value: result.value,
+          attendance: result.attendance,
+        };
       } catch (err) {
-        console.error("[updateAttendance] mutation failed", err);
+        console.error("[updateAttendance] call failed", err);
         return { wrote: false };
       }
     },
-    [viewDate, updateMutation, attendanceQuery]
+    [viewDate, fetchAttendance],
   );
 
   const handleSetStatus = useCallback(
-    async (id: string, status: string, field: "status" | "lunch_status" = "status") => {
+    async (
+      id: string,
+      status: string,
+      field: "status" | "lunch_status" = "status",
+    ) => {
+      // Optimistic update: immediately update local state
+      const previousValue = attendanceMap[id]?.[field];
+      setAttendanceMap((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          [field]: status,
+        },
+      }));
+
       try {
         await updateAttendance(id, field, { value: status });
       } catch (err) {
         console.error("Failed to save status", err);
+        // Revert on failure
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [id]: {
+            ...prev[id],
+            [field]: previousValue,
+          },
+        }));
       }
     },
-    [updateAttendance]
+    [updateAttendance, attendanceMap],
   );
 
   const handleCheckAction = useCallback(
@@ -261,12 +320,19 @@ export default function AttendancePage() {
       console.log(`[handleCheckAction] Called with id=${id}, action=${action}`);
       // Use test time if in test mode, otherwise real time
       const now = testMode && testTime ? testTime : new Date();
-      console.log(`[handleCheckAction] Using time: ${now.toLocaleTimeString()} (test mode: ${testMode})`);
-      
+      console.log(
+        `[handleCheckAction] Using time: ${now.toLocaleTimeString()} (test mode: ${testMode})`,
+      );
+
       // Get attendance from map (merged with learner data)
       const attendance = attendanceMap[id] || {};
-      const { time_in, time_out, lunch_in, lunch_out } = attendance;
-      console.log(`[handleCheckAction] Attendance state:`, { time_in, time_out, lunch_in, lunch_out });
+      const { time_in, time_out, lunch_events } = attendance;
+      const lunchEventsArray = lunch_events || [];
+      console.log(`[handleCheckAction] Attendance state:`, {
+        time_in,
+        time_out,
+        lunch_events: lunchEventsArray,
+      });
 
       try {
         if (action === "morning-in") {
@@ -274,43 +340,119 @@ export default function AttendancePage() {
             console.log("[handleCheckAction] morning-in: already checked in");
             return;
           }
-          const result = await updateAttendance(id, "time_in", { timestamp: now.toISOString() });
-          if (!result.wrote) return;
           
-          // Determine status: present if before 10am, late if after
-          const tenAM = new Date(now);
-          tenAM.setHours(10, 0, 0, 0);
-          const status = now <= tenAM ? "present" : "late";
-          console.log(`[handleCheckAction] Check-in at ${now.toLocaleTimeString()}, status: ${status}`);
+          // Determine status first: present if before 10:01am, late if 10:01am+
+          const lateTime = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            10,
+            1,
+            0,
+            0,
+          );
+          const isLate = now.getTime() >= lateTime.getTime();
+          const status = isLate ? "late" : "present";
+          
+          // Optimistic update
+          const timestamp = now.toISOString();
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [id]: {
+              ...prev[id],
+              time_in: timestamp,
+              status: status,
+            },
+          }));
+          
+          const result = await updateAttendance(id, "time_in", {
+            timestamp: timestamp,
+          });
+          if (!result.wrote) {
+            // Revert on failure
+            setAttendanceMap((prev) => ({
+              ...prev,
+              [id]: {
+                ...prev[id],
+                time_in: undefined,
+                status: undefined,
+              },
+            }));
+            return;
+          }
+
+          console.log(
+            `[handleCheckAction] Check-in at ${now.toLocaleTimeString()}, lateTime: ${lateTime.toLocaleTimeString()}, isLate: ${isLate}, status: ${status}`,
+          );
           await handleSetStatus(id, status, "status");
-        } else if (action === "lunch-out") {
+        } else if (action === "lunch-out" || action === "lunch-in") {
           if (!time_in) {
-            console.log("[handleCheckAction] lunch-out: must check in first");
+            console.log("[handleCheckAction] lunch action: must check in first");
             return;
           }
-          if (lunch_out) {
-            console.log("[handleCheckAction] lunch-out: already went to lunch");
-            return;
-          }
-          await updateAttendance(id, "lunch_out", { timestamp: now.toISOString() });
-        } else if (action === "lunch-in") {
-          if (!lunch_out) {
-            console.log("[handleCheckAction] lunch-in: must go to lunch first");
-            return;
-          }
-          if (lunch_in) {
-            console.log("[handleCheckAction] lunch-in: already returned from lunch");
-            return;
-          }
-          const result = await updateAttendance(id, "lunch_in", { timestamp: now.toISOString() });
-          if (!result.wrote) return;
           
-          // Determine lunch status based on 2pm cutoff
-          const twoPM = new Date(now);
-          twoPM.setHours(14, 0, 0, 0);
-          const lunchStatus = now > twoPM ? "late" : "present";
-          console.log(`[handleCheckAction] Lunch return at ${now.toLocaleTimeString()}, status: ${lunchStatus}`);
-          await handleSetStatus(id, lunchStatus, "lunch_status");
+          // Determine next event type based on last event
+          const lastEvent = lunchEventsArray.length > 0 ? lunchEventsArray[lunchEventsArray.length - 1] : null;
+          const nextEventType: 'out' | 'in' = !lastEvent || lastEvent.type === 'in' ? 'out' : 'in';
+          
+          // If manually clicking, respect the action type
+          const eventType = action === "lunch-out" ? 'out' as const : 'in' as const;
+          
+          // Only allow if it matches the expected next event
+          if (eventType !== nextEventType) {
+            console.log(`[handleCheckAction] Cannot ${eventType}, must ${nextEventType} first`);
+            return;
+          }
+          
+          const newEvent: LunchEvent = {
+            type: eventType,
+            time: now.toISOString()
+          };
+          
+          const updatedEvents = [...lunchEventsArray, newEvent];
+          
+          // Optimistic update
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [id]: {
+              ...prev[id],
+              lunch_events: updatedEvents,
+            },
+          }));
+          
+          try {
+            await pbClient.updateAttendance({
+              learnerId: id,
+              field: "lunch_events",
+              value: JSON.stringify(updatedEvents),
+              date: viewDate,
+              force: true,
+            });
+            
+            // If checking in from lunch, update lunch_status
+            if (eventType === 'in') {
+              const lunchLateTime = new Date(now);
+              lunchLateTime.setHours(14, 1, 0, 0);
+              const lunchStatus = now >= lunchLateTime ? "late" : "present";
+              await handleSetStatus(id, lunchStatus, "lunch_status");
+              console.log(`[handleCheckAction] Lunch return at ${now.toLocaleTimeString()}, status: ${lunchStatus}`);
+            } else {
+              console.log(`[handleCheckAction] Lunch out at ${now.toLocaleTimeString()}`);
+            }
+            
+            // Refresh to get updated data
+            fetchAttendance();
+          } catch (err) {
+            // Revert on failure
+            setAttendanceMap((prev) => ({
+              ...prev,
+              [id]: {
+                ...prev[id],
+                lunch_events: lunchEventsArray,
+              },
+            }));
+            throw err;
+          }
         } else if (action === "day-out") {
           if (!time_in) {
             console.log("[handleCheckAction] day-out: must check in first");
@@ -320,25 +462,86 @@ export default function AttendancePage() {
             console.log("[handleCheckAction] day-out: already checked out");
             return;
           }
-          await updateAttendance(id, "time_out", { timestamp: now.toISOString() });
+          
+          // Optimistic update
+          const timestamp = now.toISOString();
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [id]: {
+              ...prev[id],
+              time_out: timestamp,
+            },
+          }));
+          
+          try {
+            await updateAttendance(id, "time_out", {
+              timestamp: timestamp,
+            });
+          } catch (err) {
+            // Revert on failure
+            setAttendanceMap((prev) => ({
+              ...prev,
+              [id]: {
+                ...prev[id],
+                time_out: undefined,
+              },
+            }));
+            throw err;
+          }
         }
       } catch (err) {
         console.error("check action failed", err);
       }
     },
-    [attendanceMap, updateAttendance, handleSetStatus, testMode, testTime],
+    [attendanceMap, updateAttendance, handleSetStatus, testMode, testTime, viewDate, fetchAttendance],
   );
 
   // Reset a learner's daily attendance (for testing)
-  const handleReset = useCallback(async (id: string) => {
-    try {
-      await resetMutation.mutateAsync({ learnerId: id, date: viewDate });
-      // Refetch attendance data to sync
-      attendanceQuery.refetch();
-    } catch (err) {
-      console.error("Reset failed", err);
-    }
-  }, [viewDate, resetMutation, attendanceQuery]);
+  const handleReset = useCallback(
+    async (id: string) => {
+      try {
+        await pbClient.resetAttendance(id, viewDate);
+        // Refetch attendance data to sync
+        fetchAttendance();
+      } catch (err) {
+        console.error("Reset failed", err);
+      }
+    },
+    [viewDate, fetchAttendance],
+  );
+
+  // Update learner's comment
+  const handleCommentUpdate = useCallback(
+    async (id: string, comment: string) => {
+      // Optimistic update
+      const previousComment = attendanceMap[id]?.comments;
+      setAttendanceMap((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          comments: comment,
+        },
+      }));
+      
+      try {
+        await pbClient.updateLearnerComment(id, comment);
+        // Refetch learners data to show the updated comment
+        fetchAttendance();
+      } catch (err) {
+        console.error("Failed to update comment:", err);
+        // Revert on failure
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [id]: {
+            ...prev[id],
+            comments: previousComment,
+          },
+        }));
+        throw err; // Re-throw so the UI can show error state
+      }
+    },
+    [fetchAttendance, attendanceMap],
+  );
 
   // Client-side filter for instant feedback while typing (before debounce triggers server fetch)
   // Uses studentsWithAttendance which merges learners with their attendance data
@@ -346,12 +549,14 @@ export default function AttendancePage() {
     // If search matches what server fetched, no need to filter again
     if (search === debouncedSearch) return studentsWithAttendance;
     // Otherwise, filter locally for instant feedback
-    return studentsWithAttendance.filter((s) => {
+    const filteredResults = studentsWithAttendance.filter((s) => {
       const matchesName = s.name.toLowerCase().includes(search.toLowerCase());
       const matchesProgram =
         programFilter === "all" || s.program === programFilter;
       return matchesName && matchesProgram;
     });
+    // Sort alphabetically by name
+    return filteredResults.sort((a, b) => a.name.localeCompare(b.name));
   }, [studentsWithAttendance, search, debouncedSearch, programFilter]);
 
   // kid-friendly program colors
@@ -371,7 +576,9 @@ export default function AttendancePage() {
       <div className="w-full max-w-7xl mx-auto">
         {/* Header Row */}
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Attender</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            Attender
+          </h1>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowModal(true)}
@@ -399,8 +606,18 @@ export default function AttendancePage() {
           <div className="flex flex-wrap items-center gap-3">
             {/* Search */}
             <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 flex-1 min-w-[200px] max-w-md">
-              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              <svg
+                className="w-4 h-4 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
               </svg>
               <input
                 value={search}
@@ -409,7 +626,10 @@ export default function AttendancePage() {
                 className="outline-none text-sm bg-transparent flex-1"
               />
               {search && (
-                <button onClick={() => setSearch("")} className="text-gray-400 hover:text-gray-600">
+                <button
+                  onClick={() => setSearch("")}
+                  className="text-gray-400 hover:text-gray-600"
+                >
                   ×
                 </button>
               )}
@@ -422,9 +642,9 @@ export default function AttendancePage() {
               className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer"
             >
               <option value="all">All programs</option>
-              <option value="Explorers">Explorers</option>
-              <option value="Creators">Creators</option>
-              <option value="Changemakers">Changemakers</option>
+              <option value="exp">Explorers</option>
+              <option value="cre">Creators</option>
+              <option value="chmk">Changemakers</option>
             </select>
 
             {/* View toggle */}
@@ -456,8 +676,8 @@ export default function AttendancePage() {
                 }
               }}
               className={`px-3 py-2 rounded-xl text-sm cursor-pointer font-medium ${
-                testMode 
-                  ? "bg-orange-500 text-white" 
+                testMode
+                  ? "bg-orange-500 text-white"
                   : "bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100"
               }`}
             >
@@ -471,7 +691,9 @@ export default function AttendancePage() {
           <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 mb-4">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-orange-800">Simulate Date:</span>
+                <span className="text-sm font-medium text-orange-800">
+                  Simulate Date:
+                </span>
                 <input
                   type="date"
                   value={testDate || new Date().toISOString().split("T")[0]}
@@ -480,9 +702,15 @@ export default function AttendancePage() {
                 />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-orange-800">Simulate Time:</span>
+                <span className="text-sm font-medium text-orange-800">
+                  Simulate Time:
+                </span>
                 <select
-                  value={testTime ? `${testTime.getHours()}:${testTime.getMinutes()}` : ""}
+                  value={
+                    testTime
+                      ? `${testTime.getHours()}:${testTime.getMinutes()}`
+                      : ""
+                  }
                   onChange={(e) => {
                     if (!e.target.value) {
                       setTestTime(null);
@@ -504,20 +732,24 @@ export default function AttendancePage() {
               <div className="flex-1" />
               <div className="text-sm text-orange-700">
                 <span className="font-medium">Active:</span> {viewDate}
-                {testTime && ` @ ${testTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                {testTime &&
+                  ` @ ${testTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
               </div>
             </div>
             <p className="text-xs text-orange-600 mt-2">
-              Test mode lets you simulate check-ins for different dates and times. Records are saved to the selected date.
+              Test mode lets you simulate check-ins for different dates and
+              times. Records are saved to the selected date.
             </p>
           </div>
         )}
 
         {/* NFC Status - Compact */}
         {uid && (
-          <div className={`mb-4 px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 ${
-            exists ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-          }`}>
+          <div
+            className={`mb-4 px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 ${
+              exists ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+            }`}
+          >
             <span className="font-medium">NFC:</span>
             <code className="font-mono">{uid}</code>
             <span>•</span>
@@ -528,7 +760,15 @@ export default function AttendancePage() {
         {/* Date indicator (non-test mode) */}
         {!testMode && (
           <div className="mb-4 text-sm text-gray-500">
-            Showing attendance for <span className="font-medium text-gray-700">{new Date(viewDate).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            Showing attendance for{" "}
+            <span className="font-medium text-gray-700">
+              {new Date(viewDate).toLocaleDateString(undefined, {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
           </div>
         )}
 
@@ -541,7 +781,7 @@ export default function AttendancePage() {
                 s.program === "exp"
                   ? "EXP"
                   : s.program === "cre"
-                    ? "CRT"
+                    ? "CRE"
                     : "CHMK";
 
               return (
@@ -555,6 +795,7 @@ export default function AttendancePage() {
                   onCheckAction={(id: string, action: string) =>
                     handleCheckAction(id as any, action as any)
                   }
+                  onCommentUpdate={handleCommentUpdate}
                   onReset={handleReset}
                   testTime={testMode ? testTime : undefined}
                   testMode={testMode}
@@ -571,15 +812,14 @@ export default function AttendancePage() {
         ) : (
           <div className="flex flex-col gap-2">
             {/* List header */}
-            <div className="grid grid-cols-[1.5fr_0.8fr_0.8fr_1fr_1fr_0.8fr_1fr_1fr] gap-3 px-4 py-2 bg-gray-100 rounded-lg text-xs font-semibold text-gray-600">
+            <div className="grid grid-cols-[1.5fr_0.8fr_1.5fr_1fr_1.8fr_1fr_1.5fr] gap-3 px-4 py-2 bg-gray-100 rounded-lg text-xs font-semibold text-gray-600">
               <div>Name</div>
               <div>Program</div>
               <div>Status</div>
               <div>Check-in</div>
-              <div>Lunch Out</div>
-              <div>Lunch Status</div>
-              <div>Lunch In</div>
+              <div>Lunch</div>
               <div>Check-out</div>
+              <div>Comments</div>
             </div>
             {filtered.map((s) => {
               const programClass = programColor((s.program as string) || "");
@@ -596,12 +836,19 @@ export default function AttendancePage() {
                 if (!val) return "—";
                 const d = new Date(val);
                 if (Number.isNaN(d.getTime())) return val;
-                return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                return d.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
               };
 
               // Status badge helper
-              const statusBadge = (status: string | undefined, type: "morning" | "lunch") => {
-                if (!status) return <span className="text-gray-400 text-xs">—</span>;
+              const statusBadge = (
+                status: string | undefined,
+                type: "morning" | "lunch",
+              ) => {
+                if (!status)
+                  return <span className="text-gray-400 text-xs">—</span>;
                 const colors = {
                   present: "bg-green-100 text-green-800",
                   late: "bg-yellow-100 text-yellow-800",
@@ -613,16 +860,32 @@ export default function AttendancePage() {
                   absent: "Absent",
                 };
                 return (
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-600"}`}>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status as keyof typeof colors] || "bg-gray-100 text-gray-600"}`}
+                  >
                     {labels[status as keyof typeof labels] || status}
                   </span>
                 );
               };
 
+              // Lunch events helper: determine current state and what action is next
+              const getLunchState = () => {
+                const events = s.lunch_events || [];
+                if (events.length === 0) return { state: 'none' as const, lastEvent: null, count: 0 };
+                const lastEvent = events[events.length - 1];
+                if (lastEvent.type === 'out') {
+                  return { state: 'out' as const, lastEvent, count: Math.ceil(events.length / 2) };
+                } else {
+                  return { state: 'in' as const, lastEvent, count: Math.ceil(events.length / 2) };
+                }
+              };
+
+              const lunchState = getLunchState();
+
               return (
                 <div
                   key={s.id}
-                  className={`grid grid-cols-[1.5fr_0.8fr_0.8fr_1fr_1fr_0.8fr_1fr_1fr] gap-3 items-center px-4 py-2 bg-white rounded-lg shadow-sm ${isCurrent ? "border-2 border-green-400" : ""}`}
+                  className={`grid grid-cols-[1.5fr_0.8fr_1.5fr_1fr_1.8fr_1fr_1.5fr] gap-3 items-center px-4 py-2 bg-white rounded-lg shadow-sm ${isCurrent ? "border-2 border-green-400" : ""}`}
                 >
                   {/* Name */}
                   <div className="flex items-center gap-2">
@@ -631,7 +894,10 @@ export default function AttendancePage() {
                         ? String(s.name.split(" ")[0][0]).toUpperCase()
                         : "?"}
                     </div>
-                    <span className="font-medium text-gray-900 text-sm truncate" title={s.name}>
+                    <span
+                      className="font-medium text-gray-900 text-sm truncate"
+                      title={s.name}
+                    >
                       {s.name}
                     </span>
                   </div>
@@ -666,10 +932,26 @@ export default function AttendancePage() {
                     >
                       A
                     </button>
+                    <button
+                      onClick={() => handleSetStatus(s.id, "jLate")}
+                      className={`px-1.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${s.status === "jLate" ? "bg-blue-200 text-blue-900" : "bg-gray-100 text-gray-700 hover:bg-blue-50"}`}
+                      title="Justified Late"
+                    >
+                      JL
+                    </button>
+                    <button
+                      onClick={() => handleSetStatus(s.id, "jAbsent")}
+                      className={`px-1.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${s.status === "jAbsent" ? "bg-purple-200 text-purple-900" : "bg-gray-100 text-gray-700 hover:bg-purple-50"}`}
+                      title="Justified Absent"
+                    >
+                      JA
+                    </button>
                   </div>
                   {/* Check-in */}
-                  <div className="flex items-center gap-1">
-                    <span className={`text-sm ${s.time_in ? "text-gray-900" : "text-gray-400"}`}>
+                  <div className="flex items-center gap-1 pl-3">
+                    <span
+                      className={`text-sm ${s.time_in ? "text-gray-900" : "text-gray-400"}`}
+                    >
                       {formatTime(s.time_in)}
                     </span>
                     {!s.time_in && (
@@ -681,49 +963,73 @@ export default function AttendancePage() {
                       </button>
                     )}
                   </div>
-                  {/* Lunch Out */}
-                  <div className="flex items-center gap-1">
-                    <span className={`text-sm ${s.lunch_out ? "text-gray-900" : "text-gray-400"}`}>
-                      {formatTime(s.lunch_out)}
-                    </span>
-                    {s.time_in && !s.lunch_out && (
-                      <button
-                        onClick={() => handleCheckAction(s.id, "lunch-out")}
-                        className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
-                      >
-                        +
-                      </button>
-                    )}
-                  </div>
-                  {/* Lunch Status */}
-                  <div>
-                    {s.lunch_out ? (
-                      s.lunch_in ? (
-                        statusBadge(s.lunch_status, "lunch")
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">At Lunch</span>
-                      )
+                  {/* Lunch (combined events display) */}
+                  <div className="flex flex-col gap-0.5">
+                    {lunchState.state === 'none' ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-gray-400">—</span>
+                        {s.time_in && (
+                          <button
+                            onClick={() => handleCheckAction(s.id, "lunch-out")}
+                            className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
+                          >
+                            Out
+                          </button>
+                        )}
+                      </div>
+                    ) : lunchState.state === 'out' ? (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">
+                            At Lunch {lunchState.count > 1 ? `(${lunchState.count})` : ''}
+                          </span>
+                          <button
+                            onClick={() => handleCheckAction(s.id, "lunch-in")}
+                            className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 cursor-pointer hover:bg-green-200"
+                          >
+                            In
+                          </button>
+                        </div>
+                        {lunchState.lastEvent && (
+                          <span className="text-xs text-gray-500">
+                            Out: {formatTime(lunchState.lastEvent.time)}
+                          </span>
+                        )}
+                      </div>
                     ) : (
-                      <span className="text-gray-400 text-xs">—</span>
-                    )}
-                  </div>
-                  {/* Lunch In */}
-                  <div className="flex items-center gap-1">
-                    <span className={`text-sm ${s.lunch_in ? "text-gray-900" : "text-gray-400"}`}>
-                      {formatTime(s.lunch_in)}
-                    </span>
-                    {s.lunch_out && !s.lunch_in && (
-                      <button
-                        onClick={() => handleCheckAction(s.id, "lunch-in")}
-                        className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 cursor-pointer hover:bg-green-200"
-                      >
-                        +
-                      </button>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1">
+                          {statusBadge(s.lunch_status, "lunch")}
+                          {lunchState.count > 1 && (
+                            <span className="text-xs text-gray-500">×{lunchState.count}</span>
+                          )}
+                          <button
+                            onClick={() => handleCheckAction(s.id, "lunch-out")}
+                            className="px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-700 cursor-pointer hover:bg-yellow-200"
+                          >
+                            Out
+                          </button>
+                        </div>
+                        {s.lunch_events && s.lunch_events.length > 0 && (
+                          <div className="text-xs text-gray-500 truncate" title={
+                            s.lunch_events.map(e => `${e.type === 'out' ? 'Out' : 'In'}: ${formatTime(e.time)}`).join(', ')
+                          }>
+                            {s.lunch_events.slice(-2).map((e, i) => (
+                              <span key={i}>
+                                {e.type === 'out' ? '→' : '←'}{formatTime(e.time)}
+                                {i < Math.min(1, s.lunch_events!.length - 1) && ' '}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   {/* Check-out */}
                   <div className="flex items-center gap-1">
-                    <span className={`text-sm ${s.time_out ? "text-gray-900" : "text-gray-400"}`}>
+                    <span
+                      className={`text-sm ${s.time_out ? "text-gray-900" : "text-gray-400"}`}
+                    >
                       {formatTime(s.time_out)}
                     </span>
                     {s.time_in && !s.time_out && (
@@ -733,6 +1039,89 @@ export default function AttendancePage() {
                       >
                         +
                       </button>
+                    )}
+                  </div>
+                  {/* Comments */}
+                  <div className="relative">
+                    {editingCommentId === s.id ? (
+                      // Editing mode
+                      <div className="flex flex-col gap-1">
+                        <textarea
+                          value={commentEditValue}
+                          onChange={(e) => setCommentEditValue(e.target.value)}
+                          placeholder="Add a comment..."
+                          className="w-full px-2 py-1 text-xs border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
+                          rows={2}
+                          disabled={isSavingComment}
+                          autoFocus
+                        />
+                        <div className="flex gap-1">
+                          <button
+                            onClick={async () => {
+                              if (!commentEditValue.trim()) return;
+                              setIsSavingComment(true);
+                              try {
+                                await handleCommentUpdate(
+                                  s.id,
+                                  commentEditValue.trim(),
+                                );
+                                setEditingCommentId(null);
+                                setCommentEditValue("");
+                              } catch (err) {
+                                console.error("Failed to save comment:", err);
+                              } finally {
+                                setIsSavingComment(false);
+                              }
+                            }}
+                            disabled={
+                              !commentEditValue.trim() || isSavingComment
+                            }
+                            className={`flex-1 px-2 py-1 rounded text-xs font-medium ${
+                              commentEditValue.trim() && !isSavingComment
+                                ? "bg-blue-500 text-white hover:bg-blue-600 cursor-pointer"
+                                : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                            }`}
+                          >
+                            {isSavingComment ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingCommentId(null);
+                              setCommentEditValue("");
+                            }}
+                            disabled={isSavingComment}
+                            className="px-2 py-1 rounded text-xs border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      // Display mode with tooltip
+                      <div className="group">
+                        <button
+                          onClick={() => {
+                            setEditingCommentId(s.id);
+                            setCommentEditValue(s.comments || "");
+                          }}
+                          className={`px-2 py-0.5 rounded text-xs cursor-pointer ${
+                            s.comments
+                              ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          }`}
+                          title={s.comments || "Add comment"}
+                        >
+                          {s.comments ? "Comment" : "+ Add"}
+                        </button>
+
+                        {/* Tooltip on hover */}
+                        {s.comments && (
+                          <div className="absolute bottom-full left-0 mb-2 p-2 bg-gray-900 text-white text-xs rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none whitespace-normal max-w-xs">
+                            {s.comments}
+                            <div className="absolute top-full left-4 -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -751,8 +1140,8 @@ export default function AttendancePage() {
         <div className="bg-white rounded-2xl shadow-sm p-4 mt-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="text-sm text-gray-600">
-              Showing <span className="font-semibold">{filtered.length}</span> of{" "}
-              <span className="font-semibold">{totalItems}</span> learners
+              Showing <span className="font-semibold">{filtered.length}</span>{" "}
+              of <span className="font-semibold">{totalItems}</span> learners
             </div>
 
             <div className="flex items-center gap-2">
