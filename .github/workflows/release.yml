@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
     runs-on: macos-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,3 +54,38 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: '--target aarch64-apple-darwin'
+
+      - name: Generate and upload latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
+          SIG_FILE="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/NFC Attender.app.tar.gz.sig"
+
+          if [ ! -f "$SIG_FILE" ]; then
+            echo "ERROR: Signature file not found at $SIG_FILE"
+            exit 1
+          fi
+
+          SIGNATURE=$(cat "$SIG_FILE")
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/NFC.Attender_aarch64.app.tar.gz"
+
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "pub_date": "${PUB_DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIGNATURE}",
+                "url": "${DOWNLOAD_URL}"
+              }
+            }
+          }
+          EOF
+
+          # Pretty-print to verify
+          cat latest.json
+
+          # Upload to the release
+          gh release upload "${{ github.ref_name }}" latest.json --clobber
