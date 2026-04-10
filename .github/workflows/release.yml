@@ -71,7 +71,7 @@ jobs:
             # Download the tar.gz from the release and sign it
             gh release download "${{ github.ref_name }}" --pattern "*.app.tar.gz" --dir /tmp
             TAR_FILE=$(ls /tmp/*.app.tar.gz | head -1)
-            pnpm tauri signer sign "$TAR_FILE"
+            pnpm tauri signer sign --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TAR_FILE"
             SIG_FILE="${TAR_FILE}.sig"
           fi
 
