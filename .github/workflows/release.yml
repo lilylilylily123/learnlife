@@ -56,8 +56,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
-          SIGNATURE=$(cat "src-tauri/target/release/bundle/macos/NFC Attender.app.tar.gz.sig")
+          VERSION=$(grep '"version"' "$GITHUB_WORKSPACE/src-tauri/tauri.conf.json" | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
+          SIGNATURE=$(cat "$GITHUB_WORKSPACE/src-tauri/target/release/bundle/macos/NFC Attender.app.tar.gz.sig")
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/NFC.Attender_aarch64.app.tar.gz"
 
