@@ -1,6 +1,11 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 
+interface LunchEvent {
+  type: 'out' | 'in';
+  time: string;
+}
+
 interface AttendanceRecord {
   id: string;
   learner: string;
@@ -9,6 +14,7 @@ interface AttendanceRecord {
   time_out: string | null;
   lunch_out: string | null;
   lunch_in: string | null;
+  lunch_events: LunchEvent[] | null;
   status: string | null;
   lunch_status: string | null;
   expand?: {
@@ -58,6 +64,25 @@ export default function AttendanceHistory({ learnerId, onClose }: AttendanceHist
     if (!val) return "—";
     const d = new Date(val);
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const getLunchOut = (record: AttendanceRecord): string | null => {
+    if (record.lunch_events && record.lunch_events.length > 0) {
+      const firstOut = record.lunch_events.find(e => e.type === 'out');
+      return firstOut?.time || null;
+    }
+    return record.lunch_out;
+  };
+
+  const getLunchIn = (record: AttendanceRecord): string | null => {
+    if (record.lunch_events && record.lunch_events.length > 0) {
+      const events = record.lunch_events;
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].type === 'in') return events[i].time;
+      }
+      return null;
+    }
+    return record.lunch_in;
   };
 
   const statusBadge = (status: string | null) => {
@@ -135,8 +160,8 @@ export default function AttendanceHistory({ learnerId, onClose }: AttendanceHist
                   )}
                   <td className="py-2 px-3">{statusBadge(record.status)}</td>
                   <td className="py-2 px-3">{formatTime(record.time_in)}</td>
-                  <td className="py-2 px-3">{formatTime(record.lunch_out)}</td>
-                  <td className="py-2 px-3">{formatTime(record.lunch_in)}</td>
+                  <td className="py-2 px-3">{formatTime(getLunchOut(record))}</td>
+                  <td className="py-2 px-3">{formatTime(getLunchIn(record))}</td>
                   <td className="py-2 px-3">{statusBadge(record.lunch_status)}</td>
                   <td className="py-2 px-3">{formatTime(record.time_out)}</td>
                 </tr>

@@ -4,6 +4,11 @@ import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
 
+interface LunchEvent {
+  type: 'out' | 'in';
+  time: string;
+}
+
 interface AttendanceRecord {
   id: string;
   learner: string;
@@ -12,6 +17,7 @@ interface AttendanceRecord {
   time_out: string | null;
   lunch_out: string | null;
   lunch_in: string | null;
+  lunch_events: LunchEvent[] | null;
   status: string | null;
   lunch_status: string | null;
   expand?: {
@@ -124,6 +130,27 @@ export default function HistoryPage() {
     return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   };
 
+  // Derive lunch out/in from lunch_events (new format) or fall back to legacy fields
+  const getLunchOut = (record: AttendanceRecord): string | null => {
+    if (record.lunch_events && record.lunch_events.length > 0) {
+      const firstOut = record.lunch_events.find(e => e.type === 'out');
+      return firstOut?.time || null;
+    }
+    return record.lunch_out;
+  };
+
+  const getLunchIn = (record: AttendanceRecord): string | null => {
+    if (record.lunch_events && record.lunch_events.length > 0) {
+      const events = record.lunch_events;
+      // Get the last 'in' event
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].type === 'in') return events[i].time;
+      }
+      return null;
+    }
+    return record.lunch_in;
+  };
+
   const statusBadge = (status: string | null) => {
     if (!status) return <span className="text-gray-400">—</span>;
     const colors: Record<string, string> = {
@@ -145,8 +172,8 @@ export default function HistoryPage() {
     setEditForm({
       time_in: formatTimeForInput(record.time_in),
       time_out: formatTimeForInput(record.time_out),
-      lunch_out: formatTimeForInput(record.lunch_out),
-      lunch_in: formatTimeForInput(record.lunch_in),
+      lunch_out: formatTimeForInput(getLunchOut(record)),
+      lunch_in: formatTimeForInput(getLunchIn(record)),
       status: record.status || "",
       lunch_status: record.lunch_status || "",
     });
@@ -173,7 +200,7 @@ export default function HistoryPage() {
       const updates: Array<{ field: string; value?: string; timestamp?: string }> = [];
       
       // Time fields
-      const timeFields = ["time_in", "time_out", "lunch_out", "lunch_in"] as const;
+      const timeFields = ["time_in", "time_out"] as const;
       for (const field of timeFields) {
         const timeVal = editForm[field];
         if (timeVal) {
@@ -182,6 +209,24 @@ export default function HistoryPage() {
           dt.setHours(hours, minutes, 0, 0);
           updates.push({ field, timestamp: dt.toISOString() });
         }
+      }
+
+      // Build lunch_events from lunch_out/lunch_in form values
+      const lunchEvents: Array<{ type: 'out' | 'in'; time: string }> = [];
+      if (editForm.lunch_out) {
+        const [h, m] = editForm.lunch_out.split(":").map(Number);
+        const dt = new Date(dateBase);
+        dt.setHours(h, m, 0, 0);
+        lunchEvents.push({ type: 'out', time: dt.toISOString() });
+      }
+      if (editForm.lunch_in) {
+        const [h, m] = editForm.lunch_in.split(":").map(Number);
+        const dt = new Date(dateBase);
+        dt.setHours(h, m, 0, 0);
+        lunchEvents.push({ type: 'in', time: dt.toISOString() });
+      }
+      if (lunchEvents.length > 0) {
+        updates.push({ field: "lunch_events", value: JSON.stringify(lunchEvents) });
       }
       
       // Status fields
@@ -322,8 +367,8 @@ export default function HistoryPage() {
                       </td>
                       <td className="py-3 px-4">{statusBadge(record.status)}</td>
                       <td className="py-3 px-4">{formatTime(record.time_in)}</td>
-                      <td className="py-3 px-4">{formatTime(record.lunch_out)}</td>
-                      <td className="py-3 px-4">{formatTime(record.lunch_in)}</td>
+                      <td className="py-3 px-4">{formatTime(getLunchOut(record))}</td>
+                      <td className="py-3 px-4">{formatTime(getLunchIn(record))}</td>
                       <td className="py-3 px-4">{statusBadge(record.lunch_status)}</td>
                       <td className="py-3 px-4">{formatTime(record.time_out)}</td>
                       <td className="py-3 px-4">
