@@ -108,6 +108,24 @@ export interface Conversation {
   };
 }
 
+export interface Invite {
+  id: string;
+  code: string;
+  learner: string; // FK to learners
+  email: string;
+  expires_at: string;
+  used: boolean;
+  used_at: string;
+  created_by: string; // FK to users
+  collectionId: string;
+  collectionName: string;
+  created: string;
+  updated: string;
+  expand?: {
+    learner?: Learner;
+  };
+}
+
 export interface Message {
   id: string;
   conversation: string;

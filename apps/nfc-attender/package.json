@@ -1,6 +1,6 @@
 {
   "name": "nfc-attender",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23,6 +23,8 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "class-variance-authority": "0.7.1",
     "clsx": "^2.1.1",
+    "@learnlife/pb-client": "workspace:*",
+    "@learnlife/shared": "workspace:*",
     "event": "link:@tauri-apps/api/event",
     "lucide-react": "^0.552.0",
     "next": "16.0.1",

@@ -3,39 +3,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
-
-interface LunchEvent {
-  type: 'out' | 'in';
-  time: string;
-}
-
-interface AttendanceRecord {
-  id: string;
-  learner: string;
-  date: string;
-  time_in: string | null;
-  time_out: string | null;
-  lunch_out: string | null;
-  lunch_in: string | null;
-  lunch_events: LunchEvent[] | null;
-  status: string | null;
-  lunch_status: string | null;
-  expand?: {
-    learner?: {
-      id: string;
-      name: string;
-      email: string;
-      program: string;
-    };
-  };
-}
-
-interface Learner {
-  id: string;
-  name: string;
-  email: string;
-  program: string;
-}
+import type { AttendanceRecord, Learner, LunchEvent } from "@learnlife/pb-client";
 
 export default function HistoryPage() {
   const router = useRouter();

@@ -198,9 +198,7 @@ export default function CalendarScreen() {
             <Text style={s.emptyEmoji}>🌙</Text>
             <Text style={s.emptyText}>Nothing scheduled!</Text>
             <Pressable style={s.emptyAddBtn} onPress={openCreateForm}>
-              <Text style={s.emptyAddText}>
-                {role === "lg" || role === "admin" ? "+ Add Event" : "+ Add Class"}
-              </Text>
+              <Text style={s.emptyAddText}>+ Add Event</Text>
             </Pressable>
           </View>
         ) : (

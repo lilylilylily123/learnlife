@@ -1,203 +1,122 @@
-import PocketBase, { AsyncAuthStore } from "pocketbase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { CalRecord, CalEvent, CalRecurrence } from "./calendar-utils";
-export type { CalRecord, CalEvent, CalRecurrence };
-export { expandEvents } from "./calendar-utils";
+import { AsyncAuthStore } from "pocketbase";
+import { Platform } from "react-native";
+import {
+  createPBClient,
+  PB_URL,
+  auth,
+  calendar as calendarQ,
+  messages as messagesQ,
+  invites as invitesQ,
+} from "@learnlife/pb-client";
+export { expandEvents } from "@learnlife/shared";
+export type {
+  CalRecord,
+  CalEvent,
+  CalRecurrence,
+  CreateCalEntryPayload as CreateEntryPayload,
+  Conversation,
+  Message,
+} from "@learnlife/pb-client";
 
-// Replace with your actual PocketBase URL.
-// Note: For Android Emulator, use 'http://10.0.2.2:8090' instead of localhost
-// For iOS Simulator, 'http://127.0.0.1:8090' works.
-const POCKETBASE_URL = "https://learnlife.pockethost.io";
-
-const store = new AsyncAuthStore({
-  save: async (serialized) => AsyncStorage.setItem("pb_auth", serialized),
-  initial: AsyncStorage.getItem("pb_auth"),
-  clear: async () => AsyncStorage.removeItem("pb_auth"),
-});
-
-export const pb = new PocketBase(POCKETBASE_URL, store);
-
-export async function login(email: string, password: string) {
-  try {
-    const authData = await pb
-      .collection("users")
-      .authWithPassword(email, password);
-    return authData;
-  } catch (error) {
-    console.error("Login failed:", error);
-    throw error;
+function createAuthStore() {
+  if (Platform.OS === "web") {
+    const hasLocalStorage = typeof window !== "undefined" && window.localStorage;
+    return new AsyncAuthStore({
+      save: async (serialized) => hasLocalStorage && localStorage.setItem("pb_auth", serialized),
+      initial: hasLocalStorage ? localStorage.getItem("pb_auth") ?? "" : "",
+      clear: async () => hasLocalStorage && localStorage.removeItem("pb_auth"),
+    });
   }
+  // Native: use AsyncStorage
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+  return new AsyncAuthStore({
+    save: async (serialized: string) => AsyncStorage.setItem("pb_auth", serialized),
+    initial: AsyncStorage.getItem("pb_auth"),
+    clear: async () => AsyncStorage.removeItem("pb_auth"),
+  });
+}
+
+export const pb = createPBClient({ url: PB_URL, authStore: createAuthStore() });
+
+// Auth — bound to singleton
+export async function login(email: string, password: string) {
+  return auth.login(pb, email, password);
 }
 
 export function logout() {
-  pb.authStore.clear();
+  auth.logout(pb);
 }
 
 export async function register(userData: any) {
-  try {
-    const record = await pb.collection("users").create(userData);
-    await login(userData.email, userData.password);
-    return record;
-  } catch (error) {
-    console.error("Registration failed:", error);
-    throw error;
-  }
+  const record = await pb.collection("users").create(userData);
+  await auth.login(pb, userData.email, userData.password);
+  return record;
 }
 
 export function isAuthenticated() {
-  return pb.authStore.isValid;
+  return auth.isAuthenticated(pb);
 }
 
-// ─── Calendar types ────────────────────────────────────────────────────────
-
-export interface CreateEntryPayload {
-  title: string;
-  start: string;
-  end: string;
-  color: string;
-  emoji: string;
-  type: "event" | "class";
-  recurrence: CalRecurrence;
-  recurrence_days: number[];
-  recurrence_end: string;
-  created_by: string;
+// Invites — bound to singleton
+export async function lookupInvite(code: string) {
+  return invitesQ.lookupInvite(pb, code);
 }
 
-// ─── Calendar API ──────────────────────────────────────────────────────────
+export async function redeemInvite(code: string, password: string) {
+  return invitesQ.redeemInvite(pb, { code, password });
+}
 
+// Calendar — bound to singleton
 export async function fetchCalendarEvents(
   userId: string,
   _monthStart: Date,
-  _monthEnd: Date
-): Promise<CalRecord[]> {
-  const result = await pb.collection("calendar").getFullList<CalRecord>({
-    filter: `created_by = "${userId}"`,
-    sort: "start",
-  });
-  return result;
+  _monthEnd: Date,
+) {
+  return calendarQ.fetchCalendarEvents(pb, userId);
 }
 
 export async function createCalendarEntry(
-  data: CreateEntryPayload
-): Promise<CalRecord> {
-  return pb.collection("calendar").create<CalRecord>(data);
+  data: import("@learnlife/pb-client").CreateCalEntryPayload,
+) {
+  return calendarQ.createCalendarEntry(pb, data);
 }
 
-export async function deleteCalendarEntry(id: string): Promise<void> {
-  await pb.collection("calendar").delete(id);
+export async function deleteCalendarEntry(id: string) {
+  return calendarQ.deleteCalendarEntry(pb, id);
 }
 
-// ─── Messaging types ──────────────────────────────────────────────────────
-
-export interface Conversation {
-  id: string;
-  participants: string[];
-  last_message: string;
-  last_message_at: string;
-  last_sender: string;
-  created: string;
-  updated: string;
-  expand?: {
-    participants?: { id: string; name: string; username: string; email: string; avatar: string }[];
-    last_sender?: { id: string; name: string; username: string };
-  };
+// Messaging — bound to singleton
+export async function fetchConversations(userId: string) {
+  return messagesQ.fetchConversations(pb, userId);
 }
 
-export interface Message {
-  id: string;
-  conversation: string;
-  sender: string;
-  body: string;
-  read_by: string[];
-  created: string;
-  expand?: {
-    sender?: { id: string; name: string; username: string; avatar: string };
-  };
-}
-
-// ─── Messaging API ────────────────────────────────────────────────────────
-
-export async function fetchConversations(
-  userId: string
-): Promise<Conversation[]> {
-  return pb.collection("conversations").getFullList<Conversation>({
-    filter: `participants.id ?= "${userId}"`,
-    sort: "-last_message_at",
-    expand: "participants,last_sender",
-  });
-}
-
-export async function fetchMessages(
-  conversationId: string
-): Promise<Message[]> {
-  return pb.collection("messages").getFullList<Message>({
-    filter: `conversation = "${conversationId}"`,
-    sort: "created",
-    expand: "sender",
-  });
+export async function fetchMessages(conversationId: string) {
+  return messagesQ.fetchMessages(pb, conversationId);
 }
 
 export async function sendMessage(
   conversationId: string,
   senderId: string,
-  body: string
-): Promise<Message> {
-  const message = await pb.collection("messages").create<Message>({
-    conversation: conversationId,
-    sender: senderId,
-    body,
-    read_by: [senderId],
-  });
-
-  await pb.collection("conversations").update(conversationId, {
-    last_message: body,
-    last_message_at: new Date().toISOString(),
-    last_sender: senderId,
-  });
-
-  return message;
+  body: string,
+) {
+  return messagesQ.sendMessage(pb, conversationId, senderId, body);
 }
 
-export async function createConversation(
-  participantIds: string[]
-): Promise<Conversation> {
-  return pb.collection("conversations").create<Conversation>({
-    participants: participantIds,
-    last_message: "",
-    last_message_at: new Date().toISOString(),
-    last_sender: "",
-  });
+export async function createConversation(participantIds: string[]) {
+  return messagesQ.createConversation(pb, participantIds);
 }
 
 export async function markMessagesRead(
   conversationId: string,
-  userId: string
-): Promise<void> {
-  const unread = await pb.collection("messages").getFullList<Message>({
-    filter: `conversation = "${conversationId}" && read_by !~ "${userId}"`,
-  });
-
-  await Promise.all(
-    unread.map((msg) =>
-      pb.collection("messages").update(msg.id, {
-        read_by: [...msg.read_by, userId],
-      })
-    )
-  );
+  userId: string,
+) {
+  return messagesQ.markMessagesRead(pb, conversationId, userId);
 }
 
 export function subscribeToMessages(
   conversationId: string,
-  callback: (message: Message) => void
-): () => void {
-  pb.collection("messages").subscribe<Message>("*", (e) => {
-    if (e.record.conversation === conversationId) {
-      callback(e.record);
-    }
-  });
-
-  return () => {
-    pb.collection("messages").unsubscribe("*");
-  };
+  callback: (message: import("@learnlife/pb-client").Message) => void,
+) {
+  return messagesQ.subscribeToMessages(pb, conversationId, callback);
 }
-

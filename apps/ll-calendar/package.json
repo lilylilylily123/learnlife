@@ -17,16 +17,21 @@
       "**/__tests__/**/*.test.ts"
     ],
     "transform": {
-      "^.+\\.tsx?$": [
+      "^.+\\.m?[tj]sx?$": [
         "ts-jest",
         {
-          "tsconfig": "tsconfig.test.json"
+          "tsconfig": "tsconfig.test.json",
+          "diagnostics": false
         }
       ]
     },
     "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
-    }
+      "^@/(.*)$": "<rootDir>/$1",
+      "^@learnlife/pb-client$": "<rootDir>/../../packages/pb-client/src/index.ts",
+      "^@learnlife/shared$": "<rootDir>/../../packages/shared/src/index.ts",
+      "^pocketbase$": "<rootDir>/__mocks__/pocketbase.ts"
+    },
+    "rootDir": "."
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -35,6 +40,8 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@learnlife/pb-client": "workspace:*",
+    "@learnlife/shared": "workspace:*",
     "event-source-polyfill": "^1.0.31",
     "expo": "~54.0.33",
     "expo-constants": "~18.0.13",

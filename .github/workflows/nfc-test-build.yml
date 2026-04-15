@@ -1,12 +1,22 @@
-name: Test Build
+name: "NFC Attender: Test Build"
 
 on:
   push:
     branches:
       - main
+    paths:
+      - "apps/nfc-attender/**"
+      - "packages/**"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
   pull_request:
     branches:
       - main
+    paths:
+      - "apps/nfc-attender/**"
+      - "packages/**"
+      - "pnpm-workspace.yaml"
+      - "pnpm-lock.yaml"
 
 jobs:
   test-tauri:
@@ -14,10 +24,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: ''
+          - platform: "macos-latest"
+            args: "--target aarch64-apple-darwin"
+          - platform: "ubuntu-22.04"
+            args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -40,7 +50,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: 'pnpm'
+          cache: "pnpm"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -50,10 +60,11 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: "./apps/nfc-attender/src-tauri -> target"
 
       - name: Install frontend dependencies
         run: pnpm install
 
       - name: Build the app (without signing)
         run: pnpm tauri build ${{ matrix.args }}
+        working-directory: apps/nfc-attender

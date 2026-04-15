@@ -129,7 +129,7 @@ function ConversationRow({ row, card = false }: { row: DisplayRow; card?: boolea
 }
 
 export default function InboxScreen() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, role } = useAuth();
   const [conversations, setConversations] = useState<DisplayRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -166,9 +166,11 @@ export default function InboxScreen() {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <Text style={s.title}>Messages</Text>
-        <Pressable style={s.addBtn}>
-          <MaterialIcons name="add" size={28} color="#2D1B4E" />
-        </Pressable>
+        {(role === "lg" || role === "admin") && (
+          <Pressable style={s.addBtn}>
+            <MaterialIcons name="add" size={28} color="#2D1B4E" />
+          </Pressable>
+        )}
       </View>
 
       {loading ? (

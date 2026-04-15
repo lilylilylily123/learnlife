@@ -1,9 +1,9 @@
-name: Release Build
+name: "NFC Attender: Release"
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: ''
+            args: ""
           - platform: windows-latest
-            args: ''
+            args: ""
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -34,7 +34,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
-          cache: 'pnpm'
+          cache: "pnpm"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -42,7 +42,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: "./apps/nfc-attender/src-tauri -> target"
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -54,8 +54,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          projectPath: apps/nfc-attender
           tagName: ${{ github.ref_name }}
-          releaseName: 'NFC Attender ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download the app and install.'
+          releaseName: "NFC Attender ${{ github.ref_name }}"
+          releaseBody: "See the assets to download the app and install."
           releaseDraft: false
           prerelease: false

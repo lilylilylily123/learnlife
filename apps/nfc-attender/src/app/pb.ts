@@ -1,31 +1,24 @@
 "use client";
-import PocketBase from "pocketbase";
+import { createPBClient, PB_URL } from "@learnlife/pb-client";
 
-const url = "https://learnlife.pockethost.io/";
-
-// Extend Window interface for global pb instance
 declare global {
   interface Window {
-    __pb?: PocketBase;
+    __pb?: ReturnType<typeof createPBClient>;
   }
 }
 
-// Create singleton instance and store globally
-function createPb(): PocketBase {
-  if (typeof window !== "undefined") {
-    if (window.__pb) {
-      return window.__pb;
-    }
+function getPb() {
+  if (typeof window !== "undefined" && window.__pb) {
+    return window.__pb;
   }
-  
-  const instance = new PocketBase(url);
-  instance.autoCancellation(false);
-  
+
+  const instance = createPBClient({ url: PB_URL });
+
   if (typeof window !== "undefined") {
     window.__pb = instance;
   }
-  
+
   return instance;
 }
 
-export const pb = createPb();
+export const pb = getPb();

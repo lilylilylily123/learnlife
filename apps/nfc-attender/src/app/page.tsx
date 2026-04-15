@@ -14,6 +14,7 @@ import Account from "./components/Account";
 import CreateLearnerModal from "./components/CreateLearnerModal";
 import { LearnerCard } from "./components/LearnerCard";
 import * as pbClient from "@/lib/pb-client";
+import type { LunchEvent } from "@learnlife/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 
 // Note: useNfcLearner is called below after testTime state is defined
@@ -24,11 +25,6 @@ const example = {
   email: "josh@john.com",
   dob: "1990-01-01",
   NFC_ID: null,
-};
-
-type LunchEvent = {
-  type: 'out' | 'in';
-  time: string;
 };
 
 type Student = RecordModel & {

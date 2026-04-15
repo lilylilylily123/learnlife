@@ -1,13 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { pb } from '../lib/pocketbase';
 import type { AuthModel } from 'pocketbase';
-
-export type UserRole = "learner" | "lg" | "admin" | null;
+import type { UserRole } from '@learnlife/pb-client';
 
 interface AuthContextType {
   user: AuthModel | null;
   isAuthenticated: boolean;
-  role: UserRole;
+  role: UserRole | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -27,7 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const role = (user?.role ?? null) as UserRole;
+  const role = (user?.role ?? null) as UserRole | null;
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated: pb.authStore.isValid, role }}>

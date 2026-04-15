@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Image } from "expo-image";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { BottomNav } from "@/components/bottom-nav";
 import {
@@ -154,6 +154,16 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           </View>
+
+          <Pressable
+            style={styles.inviteLink}
+            onPress={() => router.push("/register")}
+          >
+            <MaterialIcons name="mail" size={18} color="#B892FF" />
+            <Text style={styles.inviteLinkText}>
+              Have an invite code? <Text style={styles.inviteLinkBold}>Register here</Text>
+            </Text>
+          </Pressable>
 
           <View style={styles.tipBox}>
             <View style={styles.tipIconCircle}>
@@ -478,6 +488,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "800",
     letterSpacing: 0.5,
+  },
+  inviteLink: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    paddingVertical: 4,
+  },
+  inviteLinkText: {
+    color: "#8A7E9E",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  inviteLinkBold: {
+    color: "#B892FF",
+    fontWeight: "700",
   },
   tipBox: {
     alignItems: "center",

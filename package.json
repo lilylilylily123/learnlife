@@ -3,9 +3,9 @@
   "private": true,
   "scripts": {
     "dev:nfc": "pnpm --filter nfc-attender tauri:dev",
-    "dev:calendar": "pnpm --filter ll-calendar start",
+    "dev:calendar": "pnpm --filter ll_calendar start",
     "build:nfc": "pnpm --filter nfc-attender tauri:build",
-    "build:calendar": "pnpm --filter ll-calendar build",
+    "build:calendar": "pnpm --filter ll_calendar build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "clean": "pnpm -r exec rm -rf node_modules && rm -rf node_modules",

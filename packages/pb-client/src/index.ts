@@ -19,6 +19,7 @@ export type {
   CreateCalEntryPayload,
   Conversation,
   Message,
+  Invite,
 } from "./types";
 
 // Queries
@@ -27,6 +28,7 @@ export * as learners from "./queries/learners";
 export * as attendance from "./queries/attendance";
 export * as calendar from "./queries/calendar";
 export * as messages from "./queries/messages";
+export * as invites from "./queries/invites";
 
 // Utils
 export { withRetry } from "./utils/retry";
