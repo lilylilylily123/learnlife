@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# nfc-attender
 
-## Getting Started
+`nfc-attender` is the LearnLife desktop attendance app.  
+It combines Next.js UI + Tauri (Rust) NFC scanning to track learner check-in, lunch, and check-out events.
 
-First, run the development server:
+## Tech stack
+
+- Next.js (App Router) frontend
+- Tauri 2 desktop shell
+- Rust NFC scanning (`pcsc`) in `src-tauri/`
+- PocketBase access via `@learnlife/pb-client`
+- Attendance decision logic via `@learnlife/shared`
+
+## Run locally
+
+From repository root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm dev:nfc
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+From this app:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm --filter nfc-attender tauri:dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Build
 
-## Learn More
+```bash
+pnpm build:nfc
+```
 
-To learn more about Next.js, take a look at the following resources:
+Windows cross-build helper:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+pnpm --filter nfc-attender tauri:build:windows
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Quality checks
 
-## Deploy on Vercel
+```bash
+pnpm --filter nfc-attender lint
+pnpm --filter nfc-attender test
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## App structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/app/` — Next.js pages/components/hooks
+- `src/lib/pb-client.ts` — app-bound PocketBase query wrappers
+- `src/app/hooks/useNfcLearner.ts` — scan listener + queue processing
+- `src/app/utils/utils.ts` — attendance write/update workflow
+- `src-tauri/src/main.rs` — NFC reader polling + Tauri event emission
+
+## NFC attendance flow
+
+1. Rust background thread polls the NFC reader.
+2. Card UID is emitted to frontend as `nfc-scanned`.
+3. React hook resolves UID to learner and invokes check-in workflow.
+4. Shared attendance state logic computes next action.
+5. PocketBase attendance record is updated.
+
+## Related docs
+
+- Scheduler jobs: `/apps/nfc-attender/README_SCHEDULER.md`
+- User onboarding: `/apps/nfc-attender/docs/USER_GUIDE.md`
+- Monorepo architecture: `/docs/monorepo-architecture.md`

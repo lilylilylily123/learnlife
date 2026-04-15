@@ -1,50 +1,59 @@
-# Welcome to your Expo app 👋
+# ll-calendar
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+`ll-calendar` is the LearnLife Expo app for calendar, messaging, and learner-facing workflows.
 
-## Get started
+## Tech stack
 
-1. Install dependencies
+- Expo + React Native + Expo Router
+- TypeScript
+- PocketBase via `@learnlife/pb-client`
+- Shared domain logic from `@learnlife/shared`
 
-   ```bash
-   npm install
-   ```
+## Run locally
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+From repository root:
 
 ```bash
-npm run reset-project
+pnpm install
+pnpm dev:calendar
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Or directly in this app:
 
-## Learn more
+```bash
+pnpm --filter ll_calendar start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Platform shortcuts:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+pnpm --filter ll_calendar android
+pnpm --filter ll_calendar ios
+pnpm --filter ll_calendar web
+```
 
-## Join the community
+## Quality checks
 
-Join our community of developers creating universal apps.
+```bash
+pnpm --filter ll_calendar lint
+pnpm --filter ll_calendar test
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## App structure
+
+- `app/` — Expo Router routes (tabs, modals, register flow)
+- `context/AuthContext.tsx` — auth state + user role context
+- `lib/pocketbase.ts` — PocketBase singleton + auth store persistence (`pb_auth`)
+- `components/`, `hooks/`, `constants/` — shared UI and utilities
+
+## Auth and data flow
+
+1. `lib/pocketbase.ts` creates a PocketBase client.
+2. Auth state is persisted to `pb_auth` (web localStorage / native AsyncStorage).
+3. `AuthContext` subscribes to auth changes and exposes `user`, `role`, and auth actions.
+4. Screens call `@learnlife/pb-client` query helpers for learners, calendar, invites, and messages.
+
+## Related docs
+
+- Monorepo overview: `/README.md`
+- Architecture details: `/docs/monorepo-architecture.md`
