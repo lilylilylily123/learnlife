@@ -21,8 +21,11 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout monorepo
         uses: actions/checkout@v4
+        with:
+          repository: lilylilylily123/learnlife
+          ref: main
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -44,7 +47,7 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: './apps/nfc-attender/src-tauri -> target'
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -56,6 +59,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          projectPath: apps/nfc-attender
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
           releaseName: 'NFC Attender ${{ github.ref_name }}'
