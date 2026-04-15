@@ -1,6 +1,8 @@
-# LearnLife Calendar App (`ll_calendar`)
+# LearnLife Calendar App (`apps/ll-calendar`)
 
 Expo + React Native app for learners and guides, including calendar views, inbox, and role-based flows.
+
+> Package name in `package.json`: `ll_calendar`
 
 ## Tech Stack
 
@@ -45,8 +47,8 @@ pnpm test
 From monorepo root:
 
 ```bash
-pnpm --filter ll_calendar lint
-pnpm --filter ll_calendar test
+pnpm --filter ./apps/ll-calendar lint
+pnpm --filter ./apps/ll-calendar test
 ```
 
 ## Key Structure

@@ -39,7 +39,7 @@ Keep this package pure and side-effect free so both apps can reuse behavior cons
 
 ## Runtime Architecture
 
-## NFC Attender
+### NFC Attender
 
 Core flow:
 
@@ -48,7 +48,7 @@ Core flow:
 3. React hook (`useNfcLearner`) queues scans and resolves learner records.
 4. Attendance updates are computed via `@learnlife/shared` and persisted via PocketBase queries.
 
-## Calendar App
+### Calendar App
 
 Core flow:
 
