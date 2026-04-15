@@ -29,6 +29,19 @@ export async function createInvite(
   return record as unknown as Invite;
 }
 
+export async function listInvites(
+  pb: PocketBase,
+  opts: { showUsed?: boolean } = {},
+): Promise<Invite[]> {
+  const filter = opts.showUsed ? "" : "used = false && expires_at > @now";
+  const records = await pb.collection("invites").getFullList({
+    filter: filter || undefined,
+    sort: "-created",
+    expand: "learner",
+  });
+  return records as unknown as Invite[];
+}
+
 export async function lookupInvite(
   pb: PocketBase,
   code: string,

@@ -4,6 +4,7 @@ import {
   createPBClient,
   PB_URL,
   auth,
+  learners as learnersQ,
   calendar as calendarQ,
   messages as messagesQ,
   invites as invitesQ,
@@ -59,6 +60,14 @@ export function isAuthenticated() {
 }
 
 // Invites — bound to singleton
+export async function listInvites(opts?: { showUsed?: boolean }) {
+  return invitesQ.listInvites(pb, opts);
+}
+
+export async function createInvite(data: { learnerId: string; email: string; createdBy: string }) {
+  return invitesQ.createInvite(pb, data);
+}
+
 export async function lookupInvite(code: string) {
   return invitesQ.lookupInvite(pb, code);
 }
