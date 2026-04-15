@@ -59,6 +59,11 @@ export function isAuthenticated() {
   return auth.isAuthenticated(pb);
 }
 
+// Learners — bound to singleton
+export async function listLearners(params?: { search?: string; program?: string }) {
+  return learnersQ.listLearners(pb, params);
+}
+
 // Invites — bound to singleton
 export async function listInvites(opts?: { showUsed?: boolean }) {
   return invitesQ.listInvites(pb, opts);
