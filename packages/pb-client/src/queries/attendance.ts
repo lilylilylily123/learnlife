@@ -1,9 +1,10 @@
 import type PocketBase from "pocketbase";
 import type { AttendanceRecord } from "../types";
 
+/** Parameters accepted by listAttendance. All are optional — defaults to today's records. */
 export interface ListAttendanceParams {
-  date?: string;
-  learnerId?: string;
+  date?: string;       // YYYY-MM-DD — defaults to today
+  learnerId?: string;  // Filter to a single learner
   page?: number;
   perPage?: number;
 }
@@ -12,13 +13,18 @@ export interface ListAttendanceResult {
   items: AttendanceRecord[];
   totalItems: number;
   totalPages: number;
-  date: string;
+  date: string; // The resolved date that was queried (useful when caller omitted it)
 }
 
+/** Returns today as a YYYY-MM-DD string in the local timezone. */
 function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+/**
+ * Paginated list of attendance records, optionally filtered by date and learner.
+ * Always expands the `learner` relation so UI can display names without a second query.
+ */
 export async function listAttendance(
   pb: PocketBase,
   params: ListAttendanceParams = {},
@@ -26,6 +32,7 @@ export async function listAttendance(
   const { learnerId, page = 1, perPage = 50 } = params;
   const date = params.date || todayStr();
 
+  // Build filter: always filter by date; optionally narrow to a specific learner.
   const filterParts: string[] = [`date ~ "${date}"`];
   if (learnerId) {
     filterParts.push(`learner = "${learnerId}"`);
@@ -45,6 +52,11 @@ export async function listAttendance(
   };
 }
 
+/**
+ * Fetch a single attendance record for a learner on a given date.
+ * Returns `{ attendance: null, exists: false }` when no record exists rather
+ * than throwing, so callers can handle the "first scan of the day" case cleanly.
+ */
 export async function getAttendance(
   pb: PocketBase,
   learnerId: string,
@@ -59,10 +71,21 @@ export async function getAttendance(
       });
     return { attendance: record as unknown as AttendanceRecord, exists: true };
   } catch {
+    // PocketBase throws when no record is found — treat that as "does not exist".
     return { attendance: null, exists: false };
   }
 }
 
+/**
+ * Get-or-create an attendance record, then optionally patch specific fields.
+ *
+ * NOTE: Despite the "batch" name, this upserts a single record. The name
+ * reflects the pattern of combining a fetch + optional update in one call.
+ *
+ * Returns both the final state (`attendance`) and the pre-update snapshot
+ * (`existing`) so callers can feed `existing` into the state machine before
+ * deciding what to write.
+ */
 export async function batchUpdateAttendance(
   pb: PocketBase,
   params: { learnerId: string; date?: string; fields?: Record<string, string> },
@@ -73,16 +96,19 @@ export async function batchUpdateAttendance(
   let attendance: AttendanceRecord;
   let created = false;
   try {
+    // Try to find an existing record for this learner/date.
     const existing = await pb
       .collection("attendance")
       .getFirstListItem(`learner = "${learnerId}" && date ~ "${date}"`);
     attendance = existing as unknown as AttendanceRecord;
   } catch {
+    // No record yet — create a blank one so subsequent field updates have an ID to target.
     const record = await pb.collection("attendance").create({ learner: learnerId, date });
     attendance = record as unknown as AttendanceRecord;
     created = true;
   }
 
+  // Snapshot the record before any mutations so the caller can compare old vs new.
   const existing = { ...attendance };
 
   if (fields && Object.keys(fields).length > 0) {
@@ -93,6 +119,10 @@ export async function batchUpdateAttendance(
   return { attendance, existing, created };
 }
 
+/**
+ * Reset all time/status fields on an attendance record back to null.
+ * Used by guides to undo a mistaken check-in without deleting the record.
+ */
 export async function resetAttendance(
   pb: PocketBase,
   learnerId: string,
@@ -116,6 +146,7 @@ export async function resetAttendance(
 
     return { status: "reset", attendance: updated as unknown as AttendanceRecord };
   } catch {
+    // Nothing to reset — the record may have been deleted or never created.
     return { status: "no_record" };
   }
 }

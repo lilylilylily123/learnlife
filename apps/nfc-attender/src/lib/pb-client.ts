@@ -25,8 +25,9 @@ export interface AttendanceListResult {
   date: string;
 }
 
-// Bound query functions — pre-inject the singleton pb instance
-// so existing call sites (pbClient.listLearners({...})) keep working
+// ── Bound query wrappers ──────────────────────────────────────────────────────
+// Pre-inject the singleton `pb` instance so existing call sites can use
+// `pbClient.listLearners({...})` without threading `pb` through every caller.
 
 export function listLearners(params: learnersQ.ListLearnersParams = {}) {
   return learnersQ.listLearners(pb, params);
@@ -60,7 +61,10 @@ export function resetAttendance(learnerId: string, date?: string) {
   return attendanceQ.resetAttendance(pb, learnerId, date);
 }
 
-// App-specific: single-field update with validation (used by UI inline editing + tests)
+// ── App-specific single-field update ─────────────────────────────────────────
+// Used by the UI's inline time/status editors. Validates field names and values
+// before writing to PocketBase to prevent accidental corruption.
+
 const TIMESTAMP_FIELDS = ["time_in", "time_out", "lunch_out", "lunch_in"] as const;
 const STATUS_FIELDS = ["status", "lunch_status"] as const;
 const JSON_FIELDS = ["lunch_events"] as const;
@@ -69,10 +73,10 @@ const ALLOWED_STATUSES = ["present", "late", "absent", "jLate", "jAbsent"] as co
 export interface UpdateAttendanceParams {
   learnerId: string;
   field: string;
-  date?: string;
-  value?: string;
-  timestamp?: string;
-  force?: boolean;
+  date?: string;       // Defaults to today
+  value?: string;      // For status / JSON fields
+  timestamp?: string;  // For timestamp fields — defaults to now if omitted
+  force?: boolean;     // Overwrite even if the field is already set
 }
 
 export interface UpdateAttendanceResult {
@@ -87,6 +91,7 @@ export async function updateAttendance(params: UpdateAttendanceParams): Promise<
   const { learnerId, field, value, timestamp, force } = params;
   const date = params.date || new Date().toISOString().split("T")[0];
 
+  // Validate that the requested field is one we allow editing via this path.
   const isTimestampField = TIMESTAMP_FIELDS.includes(field as any);
   const isStatusField = STATUS_FIELDS.includes(field as any);
   const isJsonField = JSON_FIELDS.includes(field as any);
@@ -95,10 +100,12 @@ export async function updateAttendance(params: UpdateAttendanceParams): Promise<
     throw new Error(`Invalid field. Allowed: ${[...TIMESTAMP_FIELDS, ...STATUS_FIELDS, ...JSON_FIELDS].join(", ")}`);
   }
 
+  // Validate status values to prevent unknown strings entering the DB.
   if (isStatusField && value && value !== "" && !ALLOWED_STATUSES.includes(value as any)) {
     throw new Error(`Invalid status value. Allowed: ${ALLOWED_STATUSES.join(", ")}`);
   }
 
+  // Get-or-create the attendance record for this learner/date.
   let attendance: import("@learnlife/pb-client").AttendanceRecord;
   try {
     const existing = await pb.collection("attendance").getFirstListItem(
@@ -113,6 +120,7 @@ export async function updateAttendance(params: UpdateAttendanceParams): Promise<
     attendance = created as unknown as import("@learnlife/pb-client").AttendanceRecord;
   }
 
+  // Guard: don't overwrite an existing timestamp unless `force` is set.
   if (isTimestampField && (attendance as any)[field] && !force) {
     return {
       status: "already_set",
@@ -122,6 +130,7 @@ export async function updateAttendance(params: UpdateAttendanceParams): Promise<
     };
   }
 
+  // Resolve the value to write: use the provided timestamp or default to now.
   let updateValue: string;
   if (isTimestampField) {
     updateValue = timestamp || new Date().toISOString();
