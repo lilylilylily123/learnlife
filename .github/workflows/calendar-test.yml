@@ -26,6 +26,8 @@ jobs:
   test-and-lint:
     name: Test & Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
