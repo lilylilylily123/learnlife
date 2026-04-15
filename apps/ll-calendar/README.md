@@ -1,50 +1,71 @@
-# Welcome to your Expo app 👋
+# LearnLife Calendar App (`apps/ll-calendar`)
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Expo + React Native app for learners and guides, including calendar views, inbox, and role-based flows.
 
-## Get started
+> Package name in `package.json`: `ll_calendar`
 
-1. Install dependencies
+## Tech Stack
 
-   ```bash
-   npm install
-   ```
+- Expo + React Native + Expo Router
+- TypeScript (strict)
+- PocketBase via `@learnlife/pb-client`
+- Shared domain logic via `@learnlife/shared`
 
-2. Start the app
+## Run Locally
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+From repo root:
 
 ```bash
-npm run reset-project
+pnpm install
+pnpm dev:calendar
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Or from this app directory:
 
-## Learn more
+```bash
+pnpm install
+pnpm start
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Platform targets:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+pnpm android
+pnpm ios
+pnpm web
+```
 
-## Join the community
+## Quality Commands
 
-Join our community of developers creating universal apps.
+From app directory:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+pnpm lint
+pnpm test
+```
+
+From monorepo root:
+
+```bash
+pnpm --filter ./apps/ll-calendar lint
+pnpm --filter ./apps/ll-calendar test
+```
+
+## Key Structure
+
+- `app/` — Expo Router routes (tabs, modals, auth/register)
+- `context/` — auth and app-level context providers
+- `lib/pocketbase.ts` — PocketBase client + auth persistence (`pb_auth`)
+- `components/`, `hooks/`, `constants/` — UI and feature modules
+- `__tests__/` — Jest/ts-jest tests
+
+## Auth & Data Notes
+
+- Auth store is persisted (AsyncStorage/native, localStorage/web) under key `pb_auth`.
+- Role and shared logic are consumed from `@learnlife/shared`.
+- API types and query helpers come from `@learnlife/pb-client`.
+
+## Related Docs
+
+- Monorepo overview: [`../../README.md`](../../README.md)
+- Architecture details: [`../../docs/MONOREPO_ARCHITECTURE.md`](../../docs/MONOREPO_ARCHITECTURE.md)
