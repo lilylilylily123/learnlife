@@ -1,6 +1,6 @@
 [package]
 name = "nfc-attender"
-version = "0.2.0"
+version = "0.2.1"
 description = "NFC-based attendance tracking system for learners"
 authors = ["LearnLife"]
 license = "MIT"

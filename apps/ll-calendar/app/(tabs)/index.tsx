@@ -189,7 +189,7 @@ export default function HomeScreen() {
 }
 
 function DashboardMainScreen() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
 
@@ -229,6 +229,19 @@ function DashboardMainScreen() {
   }
 
   const urgentCards = [
+    ...(role === "admin" || role === "lg"
+      ? [
+          {
+            id: "invites",
+            title: "Manage Invites",
+            description: "Create & track learner invites",
+            cta: "Open",
+            icon: "mail" as const,
+            bg: "#8D67FF",
+            onPress: () => router.push("/(modals)/manage-invites"),
+          },
+        ]
+      : []),
     {
       id: "meeting",
       title: "Meeting Request",
@@ -267,7 +280,7 @@ function DashboardMainScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.urgentList}
             renderItem={({ item }) => (
-              <Pressable style={[styles.urgentCard, { backgroundColor: item.bg }]}>
+              <Pressable style={[styles.urgentCard, { backgroundColor: item.bg }]} onPress={item.onPress}>
                 <View style={styles.urgentIconCircle}>
                   <MaterialIcons name={item.icon} size={24} color="#FFFFFF" />
                 </View>

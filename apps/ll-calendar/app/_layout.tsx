@@ -42,6 +42,10 @@ export default function RootLayout() {
             name="(modals)/chat"
             options={{ presentation: "modal", headerShown: false }}
           />
+          <Stack.Screen
+            name="(modals)/manage-invites"
+            options={{ presentation: "modal", headerShown: false }}
+          />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

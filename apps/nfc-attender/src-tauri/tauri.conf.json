@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "NFC Attender",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "identifier": "com.learnlife.nfc-attender",
   "build": {
     "frontendDist": "../out",
@@ -29,7 +29,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/lilylilylily123/nfc-attender/releases/latest/download/latest.json"
+        "https://github.com/lilylilylily123/learnlife/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYzQkQxNUYyMjFGREQ4NEYKUldSUDJQMGg4aFc5ODVhOUY3YklTTm1SRzBLMmlaWlVLWk9CNmlBQnRrdTcvS3ZoOGpGMEF0aEQK",
       "windows": {
