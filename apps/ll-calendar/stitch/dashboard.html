@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Learnlife Learner App - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&amp;family=Nunito:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#C4F34A",
+              "background": "#F9FAFC",
+              "surface": "#FFFFFF",
+              "text-main": "#2D1B4E",
+              "muted": "#8A7E9E",
+              "accent-orange": "#FF6B35",
+              "accent-purple": "#B892FF",
+              "background-light": "#f7f8f6",
+              "background-dark": "#1d2210",
+            },
+            fontFamily: {
+              "heading": ["Fredoka", "sans-serif"],
+              "body": ["Nunito", "sans-serif"],
+              "display": ["Spline Sans", "sans-serif"]
+            },
+            borderRadius: {
+                "sm": "12px",
+                "md": "24px",
+                "pill": "9999px",
+                "DEFAULT": "1rem", 
+                "lg": "2rem", 
+                "xl": "3rem", 
+                "full": "9999px"
+            },
+            boxShadow: {
+                'soft': '0 12px 24px rgba(45, 27, 78, 0.08)',
+                'float': '0 20px 40px rgba(45, 27, 78, 0.12)',
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #F9FAFC;
+            color: #2D1B4E;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, h4, h5, h6, .font-heading {
+            font-family: 'Fredoka', sans-serif;
+        }
+        
+        /* Hide scrollbar for horizontal scroll but keep functionality */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-text-main flex flex-col min-h-screen max-w-md mx-auto relative overflow-x-hidden">
+<!-- Sticky Header -->
+<header class="sticky top-0 z-50 bg-background/90 backdrop-blur-md px-6 pt-12 pb-4 transition-all duration-300" id="main-header">
+<div class="flex justify-between items-center">
+<h1 class="font-heading font-semibold text-[32px] leading-tight text-text-main transition-all duration-300" id="greeting-text">Hey Alex! 👋</h1>
+<button class="relative rounded-full focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+<img alt="Profile Avatar" class="w-12 h-12 rounded-full object-cover border-2 border-primary shadow-sm" data-alt="Close-up portrait of a smiling young person with curly hair wearing a casual yellow t-shirt against a soft neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDmSN2UT-Rav0ZkqgQ-Y7nWNF-lsQgqv3Z5nKapaqcy3wqzb7UYN3-79kjZZOr0Sp69IWGMGZywdpoG7ozk3xKq8ad2y_3Z4sppk7d5NTMrjc6FxdaBcpcGc7KdU8eO3e3nOBtW-oRIWGuf453gf9gZuAl-WNucpKw6w2Oxj8qRp9IYoUhaBXdN0mZmaTYuVigZ4uATXzBZhrcRYvQbABPvod9CgKKpyigwuubrwGlQiYo3X5WrKpR85YlEaxqPTjUZPQqFabVN3-yl"/>
+<span class="absolute top-0 right-0 w-3.5 h-3.5 bg-accent-orange border-2 border-background rounded-full"></span>
+</button>
+</div>
+</header>
+<!-- Main Content Scrollable Area -->
+<main class="flex-1 overflow-y-auto pb-24 px-6 space-y-8">
+<!-- Urgent Action Cards (Horizontal Scroll) -->
+<section>
+<h2 class="font-heading font-semibold text-xl mb-4 text-text-main">Urgent Updates</h2>
+<div class="flex overflow-x-auto hide-scrollbar -mx-6 px-6 gap-4 pb-4">
+<!-- Action Card 1: Invite -->
+<button class="flex-none w-[280px] bg-accent-orange text-white rounded-md p-5 shadow-soft text-left relative overflow-hidden group transition-transform active:scale-95">
+<div class="absolute -right-4 -top-4 w-24 h-24 bg-white/20 rounded-full blur-2xl group-hover:bg-white/30 transition-colors"></div>
+<div class="flex items-start gap-4 relative z-10">
+<div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white text-2xl">event_available</span>
+</div>
+<div>
+<h3 class="font-heading font-semibold text-[18px] leading-tight mb-1">Meeting Request</h3>
+<p class="font-body font-semibold text-[14px] text-white/90">Sarah requested a check-in!</p>
+<span class="inline-block mt-3 bg-white text-accent-orange font-heading font-semibold text-xs px-3 py-1.5 rounded-pill uppercase tracking-wider">Review</span>
+</div>
+</div>
+</button>
+<!-- Action Card 2: Form -->
+<button class="flex-none w-[280px] bg-accent-purple text-white rounded-md p-5 shadow-soft text-left relative overflow-hidden group transition-transform active:scale-95">
+<div class="absolute -right-4 -bottom-4 w-24 h-24 bg-white/20 rounded-full blur-2xl group-hover:bg-white/30 transition-colors"></div>
+<div class="flex items-start gap-4 relative z-10">
+<div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-white text-2xl">edit_document</span>
+</div>
+<div>
+<h3 class="font-heading font-semibold text-[18px] leading-tight mb-1">Waiver Needed</h3>
+<p class="font-body font-semibold text-[14px] text-white/90">Sign for Friday's Surf Trip.</p>
+<span class="inline-block mt-3 bg-white text-accent-purple font-heading font-semibold text-xs px-3 py-1.5 rounded-pill uppercase tracking-wider">Sign Now</span>
+</div>
+</div>
+</button>
+</div>
+</section>
+<!-- Today's Timeline -->
+<section>
+<div class="flex justify-between items-end mb-5">
+<h2 class="font-heading font-semibold text-xl text-text-main">Today's Timeline</h2>
+<span class="font-body font-semibold text-sm text-muted">Oct 12</span>
+</div>
+<div class="space-y-4 relative before:absolute before:inset-0 before:ml-[35px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-muted/20 before:to-transparent">
+<!-- Timeline Item: Past -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+<!-- Timeline point -->
+<div class="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-muted/20 text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 relative">
+<span class="material-symbols-outlined text-sm">check</span>
+</div>
+<!-- Time -->
+<div class="w-[60px] text-right mr-4 md:w-auto md:mr-0 md:px-4 font-body font-semibold text-sm text-muted shrink-0 z-10 md:group-odd:text-right md:group-even:text-left md:flex-1 md:order-2">
+                        9:00 AM
+                    </div>
+<!-- Card -->
+<div class="w-[calc(100%-4rem-60px)] md:w-1/2 md:group-odd:pr-4 md:group-even:pl-4 md:flex-1 md:order-0">
+<div class="h-[80px] bg-surface rounded-md shadow-soft p-4 flex items-center gap-3 border-l-[8px] border-muted/30 opacity-60">
+<div class="w-10 h-10 rounded-full bg-muted/10 flex items-center justify-center text-xl shrink-0">
+                                🧘
+                            </div>
+<div class="flex-1 min-w-0">
+<h3 class="font-body font-bold text-[16px] text-text-main truncate">Morning Circle</h3>
+<p class="font-body font-medium text-[14px] text-muted truncate">Main Hub</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Item: Active -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+<!-- Timeline point -->
+<div class="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-primary text-text-main shadow-md shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 relative animate-pulse">
+<span class="w-2.5 h-2.5 bg-text-main rounded-full"></span>
+</div>
+<!-- Time -->
+<div class="w-[60px] text-right mr-4 md:w-auto md:mr-0 md:px-4 font-body font-bold text-sm text-text-main shrink-0 z-10 md:group-odd:text-right md:group-even:text-left md:flex-1 md:order-2">
+                        10:30 AM
+                    </div>
+<!-- Card -->
+<div class="w-[calc(100%-4rem-60px)] md:w-1/2 md:group-odd:pr-4 md:group-even:pl-4 md:flex-1 md:order-0">
+<div class="h-[80px] bg-surface rounded-md shadow-float p-4 flex items-center gap-3 border-2 border-primary border-l-[8px]">
+<div class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-xl shrink-0">
+                                💻
+                            </div>
+<div class="flex-1 min-w-0">
+<h3 class="font-body font-bold text-[16px] text-text-main truncate">Deep Work</h3>
+<p class="font-body font-semibold text-[14px] text-primary truncate flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-primary inline-block"></span> Happening Now
+                                </p>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Item: Future -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+<!-- Timeline point -->
+<div class="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-surface text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 relative">
+<span class="w-2 h-2 bg-muted/40 rounded-full"></span>
+</div>
+<!-- Time -->
+<div class="w-[60px] text-right mr-4 md:w-auto md:mr-0 md:px-4 font-body font-semibold text-sm text-muted shrink-0 z-10 md:group-odd:text-right md:group-even:text-left md:flex-1 md:order-2">
+                        1:00 PM
+                    </div>
+<!-- Card -->
+<div class="w-[calc(100%-4rem-60px)] md:w-1/2 md:group-odd:pr-4 md:group-even:pl-4 md:flex-1 md:order-0">
+<div class="h-[80px] bg-surface rounded-md shadow-soft p-4 flex items-center gap-3 border-l-[8px] border-accent-purple">
+<img alt="Sarah" class="w-10 h-10 rounded-full object-cover shrink-0" data-alt="Small circular portrait of a smiling woman with glasses and dark hair against a light background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCbwEyw3h0PbDNzy92pyjYfy3-ALks1u9lg07H2ut5xONCcmidcrnhXOJayodJ0YAjCwDiwSwbRuENjdgoc5p4-N840UR07fVH8sUGnuh0T-n6iPaEv9Ht9pudTCFLGqftgHWr0Fz9yqAHRRGkGkY3whLs9khPDYdao2xpo1Zl2D6hNXiip8qWmDqigf3LnhmLIdq1pJG3hVc7KFuWQpgELmNKscWwFuTzGzxue6Jb8dKnHdl5hnpb2TyayKzdAqinAmRTZx_og_k0_"/>
+<div class="flex-1 min-w-0">
+<h3 class="font-body font-bold text-[16px] text-text-main truncate">1:1 with Sarah</h3>
+<p class="font-body font-medium text-[14px] text-muted truncate">Cozy Corner</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Item: Future Outing -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+<!-- Timeline point -->
+<div class="flex items-center justify-center w-10 h-10 rounded-full border-4 border-background bg-surface text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 relative">
+<span class="w-2 h-2 bg-muted/40 rounded-full"></span>
+</div>
+<!-- Time -->
+<div class="w-[60px] text-right mr-4 md:w-auto md:mr-0 md:px-4 font-body font-semibold text-sm text-muted shrink-0 z-10 md:group-odd:text-right md:group-even:text-left md:flex-1 md:order-2">
+                        3:30 PM
+                    </div>
+<!-- Card -->
+<button class="w-[calc(100%-4rem-60px)] md:w-1/2 md:group-odd:pr-4 md:group-even:pl-4 md:flex-1 md:order-0 text-left transition-transform active:scale-95">
+<div class="h-[80px] bg-surface rounded-md shadow-soft p-4 flex items-center gap-3 border-l-[8px] border-[#4ADE80]">
+<div class="w-10 h-10 rounded-full bg-[#4ADE80]/20 flex items-center justify-center text-xl shrink-0">
+                                🎨
+                            </div>
+<div class="flex-1 min-w-0">
+<h3 class="font-body font-bold text-[16px] text-text-main truncate">Pottery Studio</h3>
+<p class="font-body font-medium text-[14px] text-muted truncate">Off-campus</p>
+</div>
+<span class="material-symbols-outlined text-muted">chevron_right</span>
+</div>
+</button>
+</div>
+</div>
+</section>
+<!-- Upcoming Featured Outings -->
+<section class="pt-4">
+<div class="flex justify-between items-center mb-4">
+<h2 class="font-heading font-semibold text-xl text-text-main">Featured Outings</h2>
+<button class="text-accent-purple font-heading font-semibold text-sm">See all</button>
+</div>
+<button class="w-full bg-surface rounded-lg shadow-soft overflow-hidden text-left transition-transform active:scale-[0.98] group">
+<div class="h-32 w-full relative">
+<img alt="Surf Trip" class="w-full h-full object-cover" data-alt="Wide shot of surfers catching small waves in bright blue ocean water under a sunny clear sky" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA8M9Z6seNBY6LX8OW31bQXz4c5Ftn159R9nQarJqNMhKnhK9AGj1U94UGArB-4ZhoNlEVSo0A3fxlMOBiY3CdfzSMfGaJoJCRgE336GLUOZLHRzt7wW4JxM_q5gHrD3BLp7d9Udvk73SQWoJF960SkBES_MnyF4BhFDlJdN3jh-gLZ_AyFQlVIXPOLRwXcU0fwKZvAyih0jcsskFgndAcL8gdGceVV-LakQnWGJqfTD0lMlcVVkfVsiifHuCa_r6oNXso4haKd2zi-"/>
+<div class="absolute inset-0 bg-gradient-to-t from-text-main/80 to-transparent"></div>
+<div class="absolute bottom-3 left-4 right-4 flex justify-between items-end">
+<h3 class="font-heading font-semibold text-2xl text-white">Surf Trip</h3>
+<span class="bg-primary text-text-main font-heading font-semibold text-xs px-2 py-1 rounded-sm">Tomorrow</span>
+</div>
+</div>
+<div class="p-4 flex justify-between items-center">
+<div class="flex -space-x-2">
+<img class="w-8 h-8 rounded-full border-2 border-surface object-cover" data-alt="Portrait of a young woman smiling" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPL927strO9wM5CXsnopKM-A5FE2pq3kNn5W15aWB8773NgM16lpyfPAQ3cCTdlHevAr8CIO1S5Nn47278TEZ98HkzCwTGTfD8NIzEHt6rm-yBYiP6A33zkm3-CcdasF54lkp6GQhcpmY5-vt0YZiymjXgLlZ3UvfpHiB6xq_XQytQ0legYHouFUbSkazoLgO81DcvE1mr-aaBWjU11xGctHjzv_v0oTkdrsm0m-Inw5s6B8FGOAPObHYVaRXs4t1OANx-GA0LFL-S"/>
+<img class="w-8 h-8 rounded-full border-2 border-surface object-cover" data-alt="Portrait of a young man with short hair" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDMaPuEuNKDtURkrk5pIiUZ6PKXkwbWMkBvhCqQP1qG1NCnSpR50Ah-MKKcP_BWkN8knRIrZ_WgrexlvgmGrEupcrcl1o_Wli52QbzdKB9VHBOS9X4PLhV_6NYzzErU4LWzENWRTS3rgJZXXrFh16jbyGC4SVDMkgzbcdcCzGy137F0zXbLhglI90ubvD7teJj-5wynx9nJ6-bKMDdkIAAN2tG8JVfYnwoXelY0-YW3UkPVZ3MR3uFCyxKgWa8JBW4xdA_FaJjYIJUj"/>
+<div class="w-8 h-8 rounded-full border-2 border-surface bg-muted/20 flex items-center justify-center text-[10px] font-bold text-muted">+12</div>
+</div>
+<span class="font-body font-semibold text-sm text-muted group-hover:text-primary transition-colors">Join Outing →</span>
+</div>
+</button>
+</section>
+</main>
+<!-- Shared BottomNavBar Component (Strict Logic Applied: Destination Screen -> Show Nav) -->
+<div class="fixed bottom-0 left-0 right-0 w-full max-w-md mx-auto bg-surface rounded-t-xl shadow-[0_-4px_24px_rgba(45,27,78,0.06)] z-50 px-6 pb-6 pt-4 flex justify-between items-center">
+<!-- Dashboard (Active) -->
+<a class="flex flex-col items-center gap-1 text-text-main relative" href="#">
+<div class="absolute -top-6 w-12 h-1 bg-primary rounded-b-full"></div>
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-body font-bold text-[12px]">Home</span>
+</a>
+<!-- Calendar -->
+<a class="flex flex-col items-center gap-1 text-muted hover:text-text-main transition-colors" href="#">
+<span class="material-symbols-outlined text-2xl">calendar_month</span>
+<span class="font-body font-semibold text-[12px]">Calendar</span>
+</a>
+<!-- Inbox -->
+<a class="flex flex-col items-center gap-1 text-muted hover:text-text-main transition-colors relative" href="#">
+<div class="relative">
+<span class="material-symbols-outlined text-2xl">chat_bubble</span>
+<span class="absolute -top-1 -right-1 w-3 h-3 bg-accent-orange border-2 border-surface rounded-full"></span>
+</div>
+<span class="font-body font-semibold text-[12px]">Inbox</span>
+</a>
+</div>
+<!-- Script to simulate scroll effect on header -->
+<script>
+        const header = document.getElementById('main-header');
+        const greeting = document.getElementById('greeting-text');
+        const main = document.querySelector('main');
+
+        main.addEventListener('scroll', () => {
+            if (main.scrollTop > 20) {
+                header.classList.replace('pt-12', 'pt-6');
+                header.classList.replace('pb-4', 'pb-3');
+                greeting.classList.replace('text-[32px]', 'text-[24px]');
+                header.classList.add('shadow-sm');
+            } else {
+                header.classList.replace('pt-6', 'pt-12');
+                header.classList.replace('pb-3', 'pb-4');
+                greeting.classList.replace('text-[24px]', 'text-[32px]');
+                header.classList.remove('shadow-sm');
+            }
+        });
+    </script>
+</body></html>

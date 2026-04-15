@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Inbox - Learnlife</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&amp;family=Nunito:wght@500;600;700&amp;family=Spline+Sans:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#c3f349",
+                        "background-light": "#F9FAFC",
+                        "background-dark": "#1d2210",
+                        "surface": "#FFFFFF",
+                        "text-main": "#2D1B4E",
+                        "muted": "#8A7E9E",
+                        "accent-orange": "#FF6B35",
+                        "accent-purple": "#B892FF"
+                    },
+                    fontFamily: {
+                        "display": ["Spline Sans", "sans-serif"],
+                        "heading": ["Fredoka", "sans-serif"],
+                        "body": ["Nunito", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem",
+                        "lg": "1.5rem",
+                        "xl": "2rem",
+                        "full": "9999px"
+                    },
+                    boxShadow: {
+                        'soft': '0 12px 24px rgba(45, 27, 78, 0.08)',
+                        'float': '0 20px 40px rgba(45, 27, 78, 0.12)'
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #F9FAFC;
+            color: #2D1B4E;
+            -webkit-tap-highlight-color: transparent;
+        }
+        h1, h2, h3, .font-heading {
+            font-family: 'Fredoka', sans-serif;
+        }
+        .text-ellipsis-1 {
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal; /* allow wrapping for line clamp, or use single line trick */
+        }
+        .single-line-truncate {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        /* Custom Ripple Effect */
+        .ripple-btn {
+            position: relative;
+            overflow: hidden;
+            transition: background-color 0.2s ease;
+        }
+        .ripple-btn:active {
+            background-color: rgba(45, 27, 78, 0.04);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light min-h-screen flex flex-col overflow-x-hidden pb-[80px]">
+<!-- Header -->
+<header class="sticky top-0 z-10 bg-background-light/90 backdrop-blur-md px-6 pt-12 pb-4 flex items-center justify-between">
+<h1 class="text-[32px] font-heading font-semibold text-text-main tracking-tight">Messages</h1>
+<button class="w-[48px] h-[48px] rounded-full bg-surface shadow-soft flex items-center justify-center text-text-main hover:bg-primary transition-colors active:scale-95">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 0;">add</span>
+</button>
+</header>
+<!-- Pinned / Urgent Section (Optional visual separation for important messages) -->
+<section class="px-4 pt-2 pb-2">
+<p class="px-2 text-[14px] font-bold text-muted uppercase tracking-wider mb-2">Needs Action</p>
+<!-- Chat Row: Unread & Action Needed -->
+<button class="ripple-btn w-full text-left bg-surface rounded-xl p-4 mb-3 shadow-soft flex items-center gap-4 transition-transform active:scale-[0.98]">
+<div class="relative flex-shrink-0">
+<img alt="Profile picture of Guide Sarah smiling" class="w-[56px] h-[56px] rounded-full object-cover ring-2 ring-surface border-2 border-primary" data-alt="Close up portrait of a friendly young woman with curly hair smiling warmly, soft natural lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDdyOH2CI59OnbhHBblq43sDw5oWtDhY5P7-JiPJMtItasgA8_yhCf93FfDvvd06kxQh4psLs0R6nAHffGkH2P8E2Ui02vCtZixlQDaD-i6w4S5al7Wftaf9fAAzBmROGTPxrWPrzRFOSJp2Jj9TuWQVpyaPpC6kEtPdbQ7RDqkxByXt0EbriXCIbor8SHxBCJb44-pnNlnmO-3LcDBOGYBfU6PZKE5HJEl4R6b-mI8HAFSGqQcGNL54vcFnqsqcO19xgaxiI_X57h7"/>
+<div class="absolute -top-1 -right-1 w-4 h-4 bg-accent-orange border-2 border-surface rounded-full z-10"></div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h2 class="text-[18px] font-heading font-semibold text-text-main truncate">Guide Sarah</h2>
+<span class="text-[13px] font-bold text-accent-orange ml-2 whitespace-nowrap">2m</span>
+</div>
+<p class="text-[15px] font-bold text-text-main single-line-truncate">Meeting Proposed: 2:00 PM Tuesday 📅</p>
+</div>
+</button>
+</section>
+<!-- Main Chat List -->
+<section class="px-4 flex-1">
+<p class="px-2 text-[14px] font-bold text-muted uppercase tracking-wider mb-2 mt-4">Recent</p>
+<div class="flex flex-col gap-2">
+<!-- Chat Row: Unread Normal -->
+<button class="ripple-btn w-full text-left bg-transparent rounded-xl p-3 flex items-center gap-4">
+<div class="relative flex-shrink-0">
+<img alt="Profile picture of Alex Rivera" class="w-[56px] h-[56px] rounded-full object-cover ring-2 ring-surface" data-alt="Portrait of a young man with glasses looking relaxed in an urban setting, slightly blurred background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAup0kq3C4Ml8RKlerzbqh1-7cLmTbQQbAIzYC_yUnODWI3VXcY-p10uQWqa4m1gCmghhd1QAoHffzdueQ4PGDgpEpqBbkU6KpgL6mAF2CuF82e5vjmR3apN6sQRlOXJmUuSV4Ef6ISfVPkUQwLGwm8m9yVFoaWlB0JD78FGsx2x6rdDyAjqFZQ_cLuJtQDoB6NT6KvkghVEgJEPLX2PfG-KaaBDZ2bvGdgDpe_dzaFkXn7UUs95Ov06ZKY8y17u9HUKjAOiagGeAW0"/>
+<div class="absolute -top-1 -right-1 w-4 h-4 bg-accent-orange border-2 border-background-light rounded-full z-10"></div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h2 class="text-[18px] font-heading font-semibold text-text-main truncate">Alex Rivera</h2>
+<span class="text-[13px] font-bold text-text-main ml-2 whitespace-nowrap">1h</span>
+</div>
+<p class="text-[15px] font-bold text-text-main single-line-truncate">Are we still on for the surf trip? 🏄‍♂️</p>
+</div>
+</button>
+<!-- Divider -->
+<div class="h-[1px] bg-muted/10 mx-16"></div>
+<!-- Chat Row: Read / Active -->
+<button class="ripple-btn w-full text-left bg-transparent rounded-xl p-3 flex items-center gap-4">
+<div class="relative flex-shrink-0">
+<div class="w-[56px] h-[56px] rounded-full bg-accent-purple/20 flex items-center justify-center text-accent-purple font-heading text-xl">
+                        M
+                    </div>
+<div class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-primary border-2 border-background-light rounded-full z-10"></div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h2 class="text-[18px] font-heading font-medium text-text-main truncate">Mia Chen</h2>
+<span class="text-[13px] font-medium text-muted ml-2 whitespace-nowrap">4h</span>
+</div>
+<p class="text-[15px] font-medium text-muted single-line-truncate">Thanks for the notes! You're a lifesaver.</p>
+</div>
+</button>
+<!-- Divider -->
+<div class="h-[1px] bg-muted/10 mx-16"></div>
+<!-- Chat Row: Read -->
+<button class="ripple-btn w-full text-left bg-transparent rounded-xl p-3 flex items-center gap-4 opacity-80">
+<div class="relative flex-shrink-0">
+<img alt="Profile picture of Guide Tom" class="w-[56px] h-[56px] rounded-full object-cover ring-2 ring-surface" data-alt="Friendly portrait of an older man with a beard outdoors, casual attire" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAclq6PkW0DJ7_i_oezx7lzkkWQBRYyGWQtsEie4s_VWuRiL7LQm9z4qd-8naPSC5n5MvuxRyWl2YboOiVXVToEBQa-oOjdqIrm6qBE9bs53eCFCQfZWEDzwTkqnYveRugZ7pcppO2nFY2acp0Ysgr3BSHNDDGUxNUPV_qj5L9DMRhkO-wv9j3MB7xY7w-15Z4iW9rsVdArB4If93F-TKdK-ZPLrwBMO4Q_jPeQXw1yKPlUA5zIIJHgrbiOMBEuEcmf10uGT02-NsYv"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h2 class="text-[18px] font-heading font-medium text-text-main truncate">Guide Tom</h2>
+<span class="text-[13px] font-medium text-muted ml-2 whitespace-nowrap">Yesterday</span>
+</div>
+<p class="text-[15px] font-medium text-muted single-line-truncate">Great job on the project presentation today.</p>
+</div>
+</button>
+<!-- Divider -->
+<div class="h-[1px] bg-muted/10 mx-16"></div>
+<!-- Chat Row: Read -->
+<button class="ripple-btn w-full text-left bg-transparent rounded-xl p-3 flex items-center gap-4 opacity-80">
+<div class="relative flex-shrink-0">
+<div class="w-[56px] h-[56px] rounded-full bg-primary/20 flex items-center justify-center text-text-main font-heading text-xl">
+                        L
+                    </div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h2 class="text-[18px] font-heading font-medium text-text-main truncate">Leo Martinez</h2>
+<span class="text-[13px] font-medium text-muted ml-2 whitespace-nowrap">Mon</span>
+</div>
+<p class="text-[15px] font-medium text-muted single-line-truncate">Can you send me the link again?</p>
+</div>
+</button>
+</div>
+<!-- Empty State (Hidden by default, shown here as reference if list is empty) -->
+<!--
+        <div class="flex flex-col items-center justify-center pt-20 text-center px-8">
+            <div class="w-32 h-32 bg-surface rounded-full shadow-soft flex items-center justify-center mb-6">
+                <span class="material-symbols-outlined text-[64px] text-accent-purple" style="font-variation-settings: 'FILL' 1;">mark_chat_read</span>
+            </div>
+            <h3 class="text-2xl font-heading text-text-main mb-2">All caught up!</h3>
+            <p class="text-muted">No new messages. Time to relax or start a new chat!</p>
+        </div>
+        -->
+</section>
+<!-- Shared Bottom Navigation Bar (Included based on Relevance Test: It's a top-level destination) -->
+<div class="fixed bottom-0 left-0 right-0 z-50 flex h-auto w-full flex-col bg-surface shadow-[0_-10px_40px_rgba(45,27,78,0.05)] rounded-t-3xl overflow-hidden" style='font-family: "Spline Sans", "Noto Sans", sans-serif;'>
+<div class="flex gap-2 bg-surface px-4 pb-6 pt-3">
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-muted hover:text-text-main transition-colors" href="#">
+<div class="flex h-8 items-center justify-center" data-icon="home" data-size="24px" data-weight="regular">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 0;">home</span>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-muted hover:text-text-main transition-colors" href="#">
+<div class="flex h-8 items-center justify-center" data-icon="calendar_month" data-size="24px" data-weight="regular">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 0;">calendar_month</span>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-text-main relative" href="#">
+<!-- Active Indicator -->
+<div class="absolute -top-3 w-10 h-1 bg-primary rounded-full"></div>
+<div class="flex h-8 items-center justify-center" data-icon="chat_bubble" data-size="24px" data-weight="fill">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">chat_bubble</span>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-muted hover:text-text-main transition-colors" href="#">
+<div class="flex h-8 items-center justify-center" data-icon="person" data-size="24px" data-weight="regular">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 0;">person</span>
+</div>
+</a>
+</div>
+</div>
+</body></html>

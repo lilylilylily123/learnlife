@@ -1,0 +1,20 @@
+{
+  "name": "learnlife",
+  "private": true,
+  "scripts": {
+    "dev:nfc": "pnpm --filter nfc-attender tauri:dev",
+    "dev:calendar": "pnpm --filter ll-calendar start",
+    "build:nfc": "pnpm --filter nfc-attender tauri:build",
+    "build:calendar": "pnpm --filter ll-calendar build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r exec rm -rf node_modules && rm -rf node_modules",
+    "push:nfc": "git subtree push --prefix=apps/nfc-attender nfc-attender main",
+    "push:calendar": "git subtree push --prefix=apps/ll-calendar ll-calendar main",
+    "push:all": "pnpm run push:nfc && pnpm run push:calendar"
+  },
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  }
+}

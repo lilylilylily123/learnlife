@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Luminous Scholar - Learner Login</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&amp;family=Nunito:ital,wght@0,200..1000;1,200..1000&amp;family=Spline+Sans:wght@300..700&amp;family=Public+Sans:wght@300..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-dim": "#F2F4F7",
+              "on-primary-fixed": "#1D2210",
+              "primary-fixed": "#C4F34A",
+              "on-tertiary-fixed-variant": "#2D1B4E",
+              "surface-container-highest": "#DDE1CF",
+              "error": "#BA1A1A",
+              "surface": "#FFFFFF",
+              "surface-bright": "#FFFFFF",
+              "surface-container-lowest": "#FFFFFF",
+              "tertiary-fixed": "#FFDCCF",
+              "surface-variant": "#F3F5F0",
+              "on-secondary-fixed": "#2D1B4E",
+              "primary": "#C4F34A",
+              "on-error-container": "#93000a",
+              "on-error": "#FFFFFF",
+              "tertiary-fixed-dim": "#FF6B35",
+              "on-primary-fixed-variant": "#2D1B4E",
+              "on-background": "#2D1B4E",
+              "on-secondary-fixed-variant": "#1D2210",
+              "surface-container": "#F3F5F0",
+              "surface-container-low": "#F9FAFC",
+              "on-primary": "#2D1B4E",
+              "surface-container-high": "#E8EBDD",
+              "on-primary-container": "#1D2210",
+              "secondary": "#B892FF",
+              "tertiary-container": "#FFDCCF",
+              "primary-container": "#D9FB86",
+              "outline-variant": "#F3F5F0",
+              "on-secondary-container": "#2D1B4E",
+              "secondary-fixed": "#E0D1FF",
+              "on-surface": "#2D1B4E",
+              "on-tertiary": "#FFFFFF",
+              "outline": "#8A7E9E",
+              "on-tertiary-fixed": "#4E1B00",
+              "inverse-surface": "#1d2210",
+              "tertiary": "#FF6B35",
+              "secondary-fixed-dim": "#B892FF",
+              "on-secondary": "#FFFFFF",
+              "on-tertiary-container": "#4E1B00",
+              "surface-tint": "#C4F34A",
+              "primary-fixed-dim": "#A8D62C",
+              "inverse-primary": "#A8D62C",
+              "inverse-on-surface": "#F9FAFC",
+              "background": "#F9FAFC",
+              "secondary-container": "#E0D1FF",
+              "on-surface-variant": "#8A7E9E",
+              "error-container": "#FFDAD6"
+            },
+            fontFamily: {
+              "headline": ["Public Sans", "sans-serif"],
+              "body": ["Nunito", "sans-serif"],
+              "label": ["Spline Sans", "sans-serif"],
+              "fredoka": ["Fredoka", "sans-serif"]
+            },
+            borderRadius: {
+              "DEFAULT": "1rem",
+              "lg": "1.5rem", // 24px as requested for inputs
+              "xl": "3rem",
+              "full": "9999px"
+            },
+            boxShadow: {
+              "soft": "0 12px 24px rgba(45, 27, 78, 0.08)",
+              "float": "0 20px 40px rgba(45, 27, 78, 0.12)"
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #F9FAFC; /* surface-container-low */
+        }
+        /* Tactical Duolingo-style shadow for button */
+        .btn-pushable {
+            position: relative;
+            border: none;
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+            outline-offset: 4px;
+            transition: filter 250ms;
+        }
+        .btn-shadow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 9999px;
+            background: #A8D62C; /* darker primary for shadow */
+            transform: translateY(4px);
+        }
+        .btn-edge {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 9999px;
+            background: #C4F34A; /* Primary Lime */
+        }
+        .btn-front {
+            display: block;
+            position: relative;
+            padding: 12px 42px;
+            border-radius: 9999px;
+            background: #C4F34A;
+            color: #2D1B4E;
+            font-family: 'Fredoka', sans-serif;
+            font-weight: 600;
+            font-size: 1.125rem;
+            transform: translateY(-4px);
+            transition: transform 34ms;
+        }
+        .btn-pushable:active .btn-front {
+            transform: translateY(-1px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="min-h-screen flex flex-col font-body text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shadow-sm flex items-center justify-center w-full px-6 h-16 docked full-width top-0 sticky z-50">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-lime-500 dark:text-lime-400" data-icon="school">school</span>
+<h1 class="font-fredoka font-bold text-2xl text-slate-900 dark:text-slate-50">Luminous Scholar</h1>
+</div>
+</header>
+<main class="flex-grow flex items-center justify-center px-4 sm:px-6 lg:px-8 py-12 relative overflow-hidden">
+<!-- Playful Background Accents -->
+<div class="absolute top-20 left-10 opacity-10 sm:opacity-20 hidden md:block">
+<span class="material-symbols-outlined text-secondary text-8xl" data-icon="star">star</span>
+</div>
+<div class="absolute bottom-20 right-10 opacity-10 sm:opacity-20 hidden md:block">
+<span class="material-symbols-outlined text-tertiary text-8xl" data-icon="auto_awesome">auto_awesome</span>
+</div>
+<div class="absolute top-1/2 left-1/4 -translate-y-1/2 opacity-5 hidden lg:block">
+<span class="material-symbols-outlined text-primary text-[200px]" data-icon="lightbulb">lightbulb</span>
+</div>
+<div class="max-w-md w-full space-y-8 z-10">
+<!-- Branding/Hero Section -->
+<div class="text-center space-y-4">
+<div class="inline-flex items-center justify-center p-4 bg-primary-container rounded-full shadow-soft mb-2">
+<span class="material-symbols-outlined text-6xl text-on-primary-container" data-icon="rocket_launch">rocket_launch</span>
+</div>
+<h2 class="text-4xl font-fredoka font-bold text-on-surface tracking-tight">Welcome Back!</h2>
+<p class="text-on-surface-variant font-medium">Ready for today's learning adventure?</p>
+</div>
+<!-- Login Card -->
+<div class="bg-surface rounded-xl p-8 shadow-soft border-l-4 border-primary">
+<form action="#" class="space-y-6" method="POST">
+<div class="space-y-4">
+<!-- Email Input -->
+<div>
+<label class="block text-sm font-fredoka font-semibold text-on-surface ml-2 mb-1" for="email">Email Address</label>
+<div class="relative group">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant group-focus-within:text-primary transition-colors" data-icon="mail">mail</span>
+</div>
+<input autocomplete="email" class="block w-full pl-12 pr-4 py-4 bg-surface-container-low border-none rounded-lg text-on-surface font-label placeholder:text-outline focus:ring-4 focus:ring-primary/20 shadow-inner transition-all" id="email" name="email" placeholder="yourname@learnlife.com" required="" type="email"/>
+</div>
+</div>
+<!-- Password Input -->
+<div>
+<div class="flex items-center justify-between ml-2 mb-1">
+<label class="block text-sm font-fredoka font-semibold text-on-surface" for="password">Password</label>
+</div>
+<div class="relative group">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant group-focus-within:text-primary transition-colors" data-icon="lock">lock</span>
+</div>
+<input autocomplete="current-password" class="block w-full pl-12 pr-12 py-4 bg-surface-container-low border-none rounded-lg text-on-surface font-label placeholder:text-outline focus:ring-4 focus:ring-primary/20 shadow-inner transition-all" id="password" name="password" placeholder="••••••••" required="" type="password"/>
+<button class="absolute inset-y-0 right-0 pr-4 flex items-center text-on-surface-variant hover:text-on-surface" type="button">
+<span class="material-symbols-outlined" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-center">
+<a class="text-sm font-semibold text-outline hover:text-secondary transition-colors font-fredoka" href="#">
+                            Forgot Password?
+                        </a>
+</div>
+<!-- Sign In Button (Pushable Duolingo Style) -->
+<div class="flex justify-center pt-2">
+<button class="btn-pushable w-full group" type="submit">
+<span class="btn-shadow"></span>
+<span class="btn-edge"></span>
+<span class="btn-front flex items-center justify-center gap-2">
+<span class="material-symbols-outlined" data-icon="login">login</span>
+                                SIGN IN
+                            </span>
+</button>
+</div>
+</form>
+</div>
+<!-- Contextual Illustration/Hint -->
+<div class="bg-surface-container-high/50 rounded-lg p-4 flex items-center gap-4 border-2 border-dashed border-outline-variant">
+<div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-secondary" data-icon="tips_and_updates">tips_and_updates</span>
+</div>
+<p class="text-xs text-on-surface-variant leading-tight">
+                    Log in with the credentials provided by your facilitator during onboarding.
+                </p>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full flex justify-center py-4 fixed bottom-4 w-full bg-transparent">
+<p class="font-nunito text-xs text-center text-slate-400">© 2024 Luminous Scholar. All rights reserved.</p>
+</footer>
+</body></html>

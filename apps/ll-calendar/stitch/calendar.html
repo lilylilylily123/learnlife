@@ -1,0 +1,269 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Learnlife - Calendar</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&amp;family=Nunito:wght@400;500;600;700&amp;family=Spline+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#C4F34A",
+                        "background-light": "#F9FAFC",
+                        "background-dark": "#1d2210",
+                        "surface": "#FFFFFF",
+                        "text-main": "#2D1B4E",
+                        "muted": "#8A7E9E",
+                        "accent-orange": "#FF6B35",
+                        "accent-purple": "#B892FF",
+                    },
+                    fontFamily: {
+                        "display": ["Spline Sans", "sans-serif"],
+                        "heading": ["Fredoka", "sans-serif"],
+                        "body": ["Nunito", "sans-serif"],
+                    },
+                    borderRadius: {
+                        "DEFAULT": "1rem", 
+                        "lg": "1.5rem", 
+                        "xl": "2rem", 
+                        "full": "9999px"
+                    },
+                    boxShadow: {
+                        'soft': '0 12px 24px rgba(45, 27, 78, 0.08)',
+                        'float': '0 20px 40px rgba(45, 27, 78, 0.12)',
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #F9FAFC;
+            color: #2D1B4E;
+            font-family: 'Nunito', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, h4, .font-heading {
+            font-family: 'Fredoka', sans-serif;
+        }
+        
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex flex-col h-screen overflow-hidden bg-background-light selection:bg-primary selection:text-text-main">
+<!-- Fixed Top Calendar Section -->
+<div class="bg-surface rounded-b-xl shadow-soft z-20 flex-shrink-0 pt-12 pb-6 px-4">
+<!-- Month Header -->
+<div class="flex items-center justify-between mb-6 px-2">
+<button class="w-10 h-10 flex items-center justify-center rounded-full bg-background-light text-text-main hover:bg-gray-100 transition-colors" style="">
+<span class="material-symbols-outlined text-2xl" data-icon="chevron_left" style="">chevron_left</span>
+</button>
+<h1 class="text-2xl font-heading font-semibold text-text-main tracking-wide" style="">October 2023</h1>
+<button class="w-10 h-10 flex items-center justify-center rounded-full bg-background-light text-text-main hover:bg-gray-100 transition-colors" style="">
+<span class="material-symbols-outlined text-2xl" data-icon="chevron_right" style="">chevron_right</span>
+</button>
+</div>
+<!-- Days of Week -->
+<div class="grid grid-cols-7 gap-1 mb-2 text-center">
+<div class="text-sm font-body font-bold text-muted" style="">M</div>
+<div class="text-sm font-body font-bold text-muted" style="">T</div>
+<div class="text-sm font-body font-bold text-muted" style="">W</div>
+<div class="text-sm font-body font-bold text-muted" style="">T</div>
+<div class="text-sm font-body font-bold text-muted" style="">F</div>
+<div class="text-sm font-body font-bold text-muted" style="">S</div>
+<div class="text-sm font-body font-bold text-muted" style="">S</div>
+</div>
+<!-- Calendar Grid -->
+<div class="grid grid-cols-7 gap-y-3 gap-x-1 text-center font-body font-semibold text-text-main text-base">
+<!-- Row 1 -->
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">25</div>
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">26</div>
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">27</div>
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">28</div>
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">29</div>
+<div class="relative flex flex-col items-center justify-center h-10 text-muted opacity-50" style="">30</div>
+<div class="relative flex flex-col items-center justify-center h-10">
+<span class="" style="">1</span>
+</div>
+<!-- Row 2 -->
+<div class="relative flex flex-col items-center justify-center h-10">
+<span class="" style="">2</span>
+<div class="absolute bottom-0 flex gap-1">
+<div class="w-1.5 h-1.5 rounded-full bg-accent-purple"></div>
+</div>
+</div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">3</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">4</span></div>
+<div class="relative flex flex-col items-center justify-center h-10">
+<span class="" style="">5</span>
+<div class="absolute bottom-0 flex gap-1">
+<div class="w-1.5 h-1.5 rounded-full bg-accent-orange"></div>
+</div>
+</div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">6</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">7</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">8</span></div>
+<!-- Row 3 -->
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">9</span></div>
+<div class="relative flex flex-col items-center justify-center h-10">
+<span class="" style="">10</span>
+<div class="absolute bottom-0 flex gap-1">
+<div class="w-1.5 h-1.5 rounded-full bg-accent-purple"></div>
+<div class="w-1.5 h-1.5 rounded-full bg-accent-orange"></div>
+</div>
+</div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">11</span></div>
+<!-- Selected Date -->
+<div class="relative flex flex-col items-center justify-center h-10">
+<div class="absolute inset-0 m-auto w-10 h-10 bg-primary rounded-full z-0 transform scale-100 transition-transform duration-300"></div>
+<span class="relative z-10 text-text-main" style="">12</span>
+<div class="absolute bottom-0 flex gap-1 z-10">
+<div class="w-1.5 h-1.5 rounded-full bg-accent-orange"></div>
+</div>
+</div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">13</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">14</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">15</span></div>
+<!-- Row 4 -->
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">16</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">17</span></div>
+<div class="relative flex flex-col items-center justify-center h-10">
+<span class="" style="">18</span>
+<div class="absolute bottom-0 flex gap-1">
+<div class="w-1.5 h-1.5 rounded-full bg-accent-purple"></div>
+</div>
+</div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">19</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">20</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">21</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">22</span></div>
+<!-- Row 5 -->
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">23</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">24</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">25</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">26</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">27</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">28</span></div>
+<div class="relative flex flex-col items-center justify-center h-10"><span class="" style="">29</span></div>
+</div>
+</div>
+<!-- Scrollable Event List -->
+<div class="flex-1 overflow-y-auto no-scrollbar relative z-10 pb-24">
+<!-- Sticky Date Header -->
+<div class="sticky top-0 bg-background-light/95 backdrop-blur-sm z-20 px-6 py-4 border-b border-muted/10">
+<h2 class="text-xl font-heading font-semibold text-text-main" style="">Thursday, Oct 12</h2>
+</div>
+<!-- Events Container -->
+<div class="px-4 py-4 space-y-4">
+<!-- Event Item 1 (Outing) -->
+<div class="bg-surface rounded-xl p-4 shadow-sm flex items-center gap-4 relative overflow-hidden group">
+<!-- Left Accent Border -->
+<div class="absolute left-0 top-0 bottom-0 w-2 bg-accent-orange rounded-l-xl"></div>
+<div class="w-12 h-12 rounded-full bg-orange-50 flex items-center justify-center text-2xl flex-shrink-0 ml-2" style="">
+                    🏄‍♂️
+                </div>
+<div class="flex-1 min-w-0">
+<h3 class="font-heading font-semibold text-text-main text-lg truncate" style="">Morning Surf Session</h3>
+<div class="flex items-center text-sm font-body text-muted mt-0.5">
+<span class="material-symbols-outlined text-[16px] mr-1" data-icon="schedule" style="">schedule</span>
+<span class="" style="">08:00 AM - 11:00 AM</span>
+</div>
+</div>
+</div>
+<!-- Event Item 2 (Meeting) -->
+<div class="bg-surface rounded-xl p-4 shadow-sm flex items-center gap-4 relative overflow-hidden">
+<!-- Left Accent Border -->
+<div class="absolute left-0 top-0 bottom-0 w-2 bg-accent-purple rounded-l-xl"></div>
+<div class="w-12 h-12 rounded-full bg-purple-50 flex items-center justify-center flex-shrink-0 ml-2 overflow-hidden border-2 border-surface shadow-sm">
+<img alt="Avatar of Guide Sarah" class="w-full h-full object-cover" data-alt="close-up portrait of smiling young woman with curly hair and glasses against plain pastel background, bright even lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxWRuyXOVIFtp0xMqyPSt2KVoFFtJTcXBzt83OQMtV4W9zEf62p6KbFb-cygseZIuaPFLQH16xYyeCcyBosLM-AvN6-c_sQioFA5Iv7XJ8qr5_5aDlPEx9TSUmya4DqokYLJ7hy4aYFiqW_8pbteFoWUFdaYphWE8uuxkSfNskyyPNaOXprCfy-Uk8Hv3dDqQinQ0CmZE0hbYnue8YPqAvksL422zmIFkLvOCooJFyQj-krAvaxSx8CcjScTuHbKACGoaOHxAaMh6u" style="">
+</div>
+<div class="flex-1 min-w-0">
+<h3 class="font-heading font-semibold text-text-main text-lg truncate" style="">Check-in with Sarah</h3>
+<div class="flex items-center text-sm font-body text-muted mt-0.5">
+<span class="material-symbols-outlined text-[16px] mr-1" data-icon="schedule" style="">schedule</span>
+<span class="" style="">01:30 PM - 02:00 PM</span>
+</div>
+</div>
+</div>
+<!-- Event Item 3 (Activity) -->
+<div class="bg-surface rounded-xl p-4 shadow-sm flex items-center gap-4 relative overflow-hidden">
+<!-- Left Accent Border -->
+<div class="absolute left-0 top-0 bottom-0 w-2 bg-primary rounded-l-xl"></div>
+<div class="w-12 h-12 rounded-full bg-lime-50 flex items-center justify-center text-2xl flex-shrink-0 ml-2" style="">
+                    🎨
+                </div>
+<div class="flex-1 min-w-0">
+<h3 class="font-heading font-semibold text-text-main text-lg truncate" style="">Open Studio Hub</h3>
+<div class="flex items-center text-sm font-body text-muted mt-0.5">
+<span class="material-symbols-outlined text-[16px] mr-1" data-icon="schedule" style="">schedule</span>
+<span class="" style="">03:00 PM - 05:00 PM</span>
+</div>
+</div>
+</div>
+</div>
+<!-- End of day state -->
+<div class="px-6 py-8 text-center opacity-60">
+<span class="text-4xl mb-3 block" style="">🌙</span>
+<p class="font-body text-muted font-medium" style="">That's all for today!</p>
+</div>
+</div>
+<!-- Floating Action Button (Filter) -->
+<button class="fixed bottom-24 right-6 w-14 h-14 bg-text-main text-surface rounded-full shadow-float flex items-center justify-center z-30 active:scale-95 transition-transform duration-200" style="">
+<span class="material-symbols-outlined text-[28px]" data-icon="tune" style="">tune</span>
+</button>
+<!-- Shared Bottom Nav Bar -->
+<div class="fixed bottom-0 left-0 w-full z-40">
+<div class="relative flex h-auto w-full flex-col bg-white group/design-root overflow-x-hidden" style="font-family: &quot;Spline Sans&quot;, &quot;Noto Sans&quot;, sans-serif;">
+<div class="flex gap-2 border-t border-[#f3f5f0] bg-white px-4 pb-3 pt-2">
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-[#7e8a60]" href="#" style="">
+<div class="text-[#7e8a60] flex h-8 items-center justify-center" data-icon="House" data-size="24px" data-weight="regular">
+<svg fill="currentColor" height="24px" viewBox="0 0 256 256" width="24px" xmlns="http://www.w3.org/2000/svg">
+<path d="M218.83,103.77l-80-75.48a1.14,1.14,0,0,1-.11-.11,16,16,0,0,0-21.53,0l-.11.11L37.17,103.77A16,16,0,0,0,32,115.55V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V160h32v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V115.55A16,16,0,0,0,218.83,103.77ZM208,208H160V160a16,16,0,0,0-16-16H112a16,16,0,0,0-16,16v48H48V115.55l.11-.1L128,40l79.9,75.43.11.1Z"></path>
+</svg>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 rounded-full text-[#161811] bg-primary/10" href="#" style="">
+<div class="text-[#161811] flex h-8 items-center justify-center" data-icon="CalendarBlank" data-size="24px" data-weight="fill">
+<svg fill="currentColor" height="24px" viewBox="0 0 256 256" width="24px" xmlns="http://www.w3.org/2000/svg">
+<path d="M208,32H184V24a8,8,0,0,0-16,0v8H88V24a8,8,0,0,0-16,0v8H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32Zm0,48H48V48H72v8a8,8,0,0,0,16,0V48h80v8a8,8,0,0,0,16,0V48h24Z"></path>
+</svg>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-[#7e8a60]" href="#" style="">
+<div class="text-[#7e8a60] flex h-8 items-center justify-center" data-icon="ChatCircle" data-size="24px" data-weight="regular">
+<svg fill="currentColor" height="24px" viewBox="0 0 256 256" width="24px" xmlns="http://www.w3.org/2000/svg">
+<path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24Zm0,192a87.87,87.87,0,0,1-44.06-11.81,8,8,0,0,0-6.54-.67L40,216,52.47,178.6a8,8,0,0,0-.66-6.54A88,88,0,1,1,128,216Z"></path>
+</svg>
+</div>
+</a>
+<a class="just flex flex-1 flex-col items-center justify-end gap-1 text-[#7e8a60]" href="#" style="">
+<div class="text-[#7e8a60] flex h-8 items-center justify-center" data-icon="User" data-size="24px" data-weight="regular">
+<svg fill="currentColor" height="24px" viewBox="0 0 256 256" width="24px" xmlns="http://www.w3.org/2000/svg">
+<path d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8c18.84-32.56,52.14-52,89.07-52s70.23,19.44,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z"></path>
+</svg>
+</div>
+</a>
+</div>
+<div class="h-5 bg-white"></div>
+</div>
+</div>
+</body></html>
