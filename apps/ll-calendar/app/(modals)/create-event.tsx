@@ -30,6 +30,12 @@ const COLORS = [
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+const PROGRAMS = [
+  { code: "chmk", label: "Changemakers", short: "CHMK" },
+  { code: "cre", label: "Creators", short: "CRE" },
+  { code: "exp", label: "Explorers", short: "EXP" },
+] as const;
+
 const EMOJIS = [
   "📅","📚","🎨","🎸","⚽","🏊","🧘","🍳","🌿","🎭",
   "🖥️","📐","🔬","🎺","🏋️","🎯","✏️","🎤","🌍","🧩",
@@ -112,12 +118,29 @@ export default function CreateEventModal() {
   // Picker visibility (Android needs explicit show/hide)
   const [activePicker, setActivePicker] = useState<PickerMode>(null);
 
+  // Guide: program selector + recurrence
+  const [selectedPrograms, setSelectedPrograms] = useState<string[]>([]);
+  const [guideRecurrence, setGuideRecurrence] = useState<"none" | "weekly">("none");
+  const [guideDays, setGuideDays] = useState<number[]>([0]);
+
+  function toggleProgram(code: string) {
+    setSelectedPrograms((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  }
+
   // Learner
   const [recurrence, setRecurrence] = useState<"none" | "weekly">("weekly");
   const [selectedDays, setSelectedDays] = useState<number[]>([0]);
 
   function toggleDay(index: number) {
     setSelectedDays((prev) =>
+      prev.includes(index) ? prev.filter((d) => d !== index) : [...prev, index]
+    );
+  }
+
+  function toggleGuideDay(index: number) {
+    setGuideDays((prev) =>
       prev.includes(index) ? prev.filter((d) => d !== index) : [...prev, index]
     );
   }
@@ -143,6 +166,11 @@ export default function CreateEventModal() {
       return;
     }
 
+    if (isGuide && guideRecurrence === "weekly" && guideDays.length === 0) {
+      Alert.alert("No days selected", "Pick at least one day for weekly events.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       if (isGuide) {
@@ -153,10 +181,11 @@ export default function CreateEventModal() {
           color,
           emoji,
           type: "event",
-          recurrence: "none",
-          recurrence_days: [],
+          recurrence: guideRecurrence,
+          recurrence_days: guideRecurrence === "weekly" ? guideDays : [],
           recurrence_end: "",
           created_by: user.id,
+          programs: selectedPrograms.length > 0 ? selectedPrograms : undefined,
         });
       } else {
         const anchorDate = eventDate;
@@ -270,6 +299,106 @@ export default function CreateEventModal() {
           {/* ── Guide fields ── */}
           {isGuide && (
             <>
+              {/* Program selector (multi-select) */}
+              <View style={s.field}>
+                <Text style={s.label}>Who can see this?</Text>
+                <Text style={s.sublabel}>
+                  {selectedPrograms.length === 0
+                    ? "Just you (tap programs to share)"
+                    : selectedPrograms.length === 3
+                    ? "Everyone"
+                    : `${selectedPrograms.map(c => PROGRAMS.find(p => p.code === c)?.short).join(" + ")}`}
+                </Text>
+                <View style={s.programRow}>
+                  {PROGRAMS.map((p) => (
+                    <Pressable
+                      key={p.code}
+                      style={[
+                        s.programBtn,
+                        selectedPrograms.includes(p.code) && s.programBtnActive,
+                      ]}
+                      onPress={() => toggleProgram(p.code)}
+                    >
+                      <Text
+                        style={[
+                          s.programText,
+                          selectedPrograms.includes(p.code) && s.programTextActive,
+                        ]}
+                      >
+                        {p.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Schedule type */}
+              <View style={s.field}>
+                <Text style={s.label}>Schedule</Text>
+                <View style={s.toggleRow}>
+                  <Pressable
+                    style={[
+                      s.toggleBtn,
+                      guideRecurrence === "none" && s.toggleBtnActive,
+                    ]}
+                    onPress={() => setGuideRecurrence("none")}
+                  >
+                    <Text
+                      style={[
+                        s.toggleText,
+                        guideRecurrence === "none" && s.toggleTextActive,
+                      ]}
+                    >
+                      One-off
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      s.toggleBtn,
+                      guideRecurrence === "weekly" && s.toggleBtnActive,
+                    ]}
+                    onPress={() => setGuideRecurrence("weekly")}
+                  >
+                    <Text
+                      style={[
+                        s.toggleText,
+                        guideRecurrence === "weekly" && s.toggleTextActive,
+                      ]}
+                    >
+                      Weekly
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Weekly days selector for guides */}
+              {guideRecurrence === "weekly" && (
+                <View style={s.field}>
+                  <Text style={s.label}>Days</Text>
+                  <View style={s.daysRow}>
+                    {WEEKDAYS.map((day, i) => (
+                      <Pressable
+                        key={day}
+                        style={[
+                          s.dayBtn,
+                          guideDays.includes(i) && s.dayBtnActive,
+                        ]}
+                        onPress={() => toggleGuideDay(i)}
+                      >
+                        <Text
+                          style={[
+                            s.dayText,
+                            guideDays.includes(i) && s.dayTextActive,
+                          ]}
+                        >
+                          {day}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+
               <View style={s.field}>
                 <Text style={s.label}>Date</Text>
                 <Pressable
@@ -519,6 +648,7 @@ const s = StyleSheet.create({
   },
   field: { gap: 8 },
   label: { fontSize: 13, fontWeight: "700", color: "#2D1B4E" },
+  sublabel: { fontSize: 12, fontWeight: "600", color: "#8A7E9E", marginBottom: 4 },
   input: {
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -620,6 +750,21 @@ const s = StyleSheet.create({
   toggleBtnActive: { backgroundColor: "#C4F34A" },
   toggleText: { fontSize: 15, fontWeight: "600", color: "#8A7E9E" },
   toggleTextActive: { color: "#2D1B4E", fontWeight: "700" },
+  programRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  programBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#2D1B4E",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+  programBtnActive: { backgroundColor: "#B892FF" },
+  programText: { fontSize: 14, fontWeight: "600", color: "#8A7E9E" },
+  programTextActive: { color: "#FFFFFF", fontWeight: "700" },
   daysRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   dayBtn: {
     paddingHorizontal: 14,

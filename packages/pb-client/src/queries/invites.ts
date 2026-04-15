@@ -52,7 +52,15 @@ export async function lookupInvite(
       { expand: "learner" },
     );
     return record as unknown as Invite;
-  } catch {
+  } catch (e: any) {
+    console.error("[lookupInvite] Query failed:", e?.response?.data || e?.message);
+    // Also try a looser query to diagnose
+    try {
+      const anyMatch = await pb.collection("invites").getFirstListItem(`code = "${code.toUpperCase()}"`);
+      console.warn("[lookupInvite] Code exists but failed filter - used:", anyMatch.used, "expires_at:", anyMatch.expires_at);
+    } catch {
+      console.warn("[lookupInvite] Code not found at all");
+    }
     return null;
   }
 }

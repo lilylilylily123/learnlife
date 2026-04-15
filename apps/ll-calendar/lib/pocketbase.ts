@@ -82,12 +82,8 @@ export async function redeemInvite(code: string, password: string) {
 }
 
 // Calendar — bound to singleton
-export async function fetchCalendarEvents(
-  userId: string,
-  _monthStart: Date,
-  _monthEnd: Date,
-) {
-  return calendarQ.fetchCalendarEvents(pb, userId);
+export async function fetchCalendarEvents() {
+  return calendarQ.fetchCalendarEvents(pb);
 }
 
 export async function createCalendarEntry(

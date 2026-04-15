@@ -70,6 +70,7 @@ export interface CalRecord {
   recurrence_days: number[]; // 0=Mon ... 6=Sun
   recurrence_end: string;
   created_by: string; // FK to users
+  programs?: string[]; // ["chmk", "cre", "exp"] — if set, visible to learners in any of these programs
 }
 
 export interface CalEvent {
@@ -92,6 +93,7 @@ export interface CreateCalEntryPayload {
   recurrence_days: number[];
   recurrence_end: string;
   created_by: string;
+  programs?: string[]; // ["chmk", "cre", "exp"] — if set, visible to learners in any of these programs
 }
 
 export interface Conversation {

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getLearnerByNfc, checkLearnerIn } from "../utils/utils";
+import { getLearnerByNfc, checkLearnerIn, type CheckInResult } from "../utils/utils";
 
 interface NfcHookOptions {
   testTime?: Date | null;
@@ -18,6 +18,7 @@ export function useNfcLearner(options?: NfcHookOptions) {
   const [learner, setLearner] = useState<any>(null);
   const [exists, setExists] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [lastAction, setLastAction] = useState<CheckInResult | null>(null);
 
   // Queue instead of drop-lock: scans are queued and processed sequentially
   const queueRef = useRef<ScanJob[]>([]);
@@ -70,11 +71,12 @@ export function useNfcLearner(options?: NfcHookOptions) {
 
         if (data) {
           console.log(`[useNfcLearner] Calling checkLearnerIn for ${data.name}`);
-          await checkLearnerIn(data.NFC_ID, {
+          const result = await checkLearnerIn(data.NFC_ID, {
             testTime: currentOptions?.testTime,
             testDate: currentOptions?.testDate,
             learnerData: data,
           });
+          if (result) setLastAction(result);
         }
       } catch (err) {
         console.error("[useNfcLearner] NFC handling error:", err);
@@ -107,5 +109,5 @@ export function useNfcLearner(options?: NfcHookOptions) {
     };
   }, [processQueue]);
 
-  return { uid, learner, exists, isLoading };
+  return { uid, learner, exists, isLoading, lastAction };
 }

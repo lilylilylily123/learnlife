@@ -16,6 +16,7 @@ import { LearnerCard } from "./components/LearnerCard";
 import * as pbClient from "@/lib/pb-client";
 import type { LunchEvent } from "@learnlife/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
+import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
 
 // Note: useNfcLearner is called below after testTime state is defined
 
@@ -67,7 +68,11 @@ export default function AttendancePage() {
 
   // NFC hook - pass test options so NFC scans respect test mode
   const nfcOptions = testMode ? { testTime, testDate } : undefined;
-  const { uid, learner, exists, isLoading } = useNfcLearner(nfcOptions);
+  const { uid, learner, exists, isLoading, lastAction } = useNfcLearner(nfcOptions);
+
+  // Activity feed state
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
 
   // initialize to false to keep server/client markup consistent during hydration
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -202,6 +207,23 @@ export default function AttendancePage() {
       return () => clearTimeout(timer);
     }
   }, [isLoading, learner, fetchAttendance, isLoggedIn]);
+
+  // Push NFC scan results into the activity feed
+  useEffect(() => {
+    if (lastAction && lastAction.type !== "no_action") {
+      setActivityEvents((prev) => [
+        ...prev.slice(-49),
+        {
+          id: `${Date.now()}-${lastAction.learnerName}`,
+          learnerName: lastAction.learnerName,
+          program: lastAction.program,
+          actionType: lastAction.type,
+          timestamp: new Date(),
+          status: lastAction.status,
+        },
+      ]);
+    }
+  }, [lastAction]);
 
   // Subscribe to real-time changes via PocketBase - only when logged in
   // Debounce refetches so rapid changes (morning rush) batch into single calls
@@ -366,6 +388,23 @@ export default function AttendancePage() {
     [viewDate, attendanceMap],
   );
 
+  // Push a manual action into the activity feed
+  const pushActivityEvent = useCallback((learnerId: string, action: string, status?: string) => {
+    const student = students.find((s) => s.id === learnerId);
+    if (!student) return;
+    setActivityEvents((prev) => [
+      ...prev.slice(-49),
+      {
+        id: `${Date.now()}-${student.name}`,
+        learnerName: student.name,
+        program: (student.program as string) || "",
+        actionType: action,
+        timestamp: new Date(),
+        status,
+      },
+    ]);
+  }, [students]);
+
   const handleCheckAction = useCallback(
     async (id: string, action: string) => {
       console.log(`[handleCheckAction] Called with id=${id}, action=${action}`);
@@ -436,6 +475,7 @@ export default function AttendancePage() {
             `[handleCheckAction] Check-in at ${now.toLocaleTimeString()}, lateTime: ${lateTime.toLocaleTimeString()}, isLate: ${isLate}, status: ${status}`,
           );
           await handleSetStatus(id, status, "status", false);
+          pushActivityEvent(id, "morning-in", status);
         } else if (action === "lunch-out" || action === "lunch-in") {
           if (!time_in) {
             console.log("[handleCheckAction] lunch action: must check in first");
@@ -485,8 +525,10 @@ export default function AttendancePage() {
               const lunchStatus = now >= lunchLateTime ? "late" : "present";
               await handleSetStatus(id, lunchStatus, "lunch_status", false);
               console.log(`[handleCheckAction] Lunch return at ${now.toLocaleTimeString()}, status: ${lunchStatus}`);
+              pushActivityEvent(id, "lunch-in", lunchStatus);
             } else {
               console.log(`[handleCheckAction] Lunch out at ${now.toLocaleTimeString()}`);
+              pushActivityEvent(id, "lunch-out");
             }
             
             // Refresh to get updated data
@@ -526,6 +568,7 @@ export default function AttendancePage() {
             await updateAttendance(id, "time_out", {
               timestamp: timestamp,
             });
+            pushActivityEvent(id, "day-out");
           } catch (err) {
             // Revert on failure
             setAttendanceMap((prev) => ({
@@ -542,7 +585,7 @@ export default function AttendancePage() {
         console.error("check action failed", err);
       }
     },
-    [attendanceMap, updateAttendance, handleSetStatus, testMode, testTime, viewDate, fetchAttendance],
+    [attendanceMap, updateAttendance, handleSetStatus, testMode, testTime, viewDate, fetchAttendance, pushActivityEvent],
   );
 
   // Reset a learner's daily attendance (for testing)
@@ -691,6 +734,16 @@ export default function AttendancePage() {
               className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
             >
               + Learner
+            </button>
+            <button
+              onClick={() => setShowActivityFeed((v) => !v)}
+              className={`cursor-pointer px-3 py-2 rounded-xl text-sm font-medium shadow ${
+                showActivityFeed
+                  ? "bg-green-500 text-white hover:bg-green-600"
+                  : "bg-green-100 text-green-700 hover:bg-green-200"
+              }`}
+            >
+              📡 Live{activityEvents.length > 0 ? ` (${activityEvents.length})` : ""}
             </button>
             <button
               onClick={() => router.push("/history")}
@@ -1438,6 +1491,14 @@ export default function AttendancePage() {
           </div>
         </div>
       </div>
+      {/* Activity feed panel */}
+      {showActivityFeed && (
+        <ActivityFeed
+          events={activityEvents}
+          onClose={() => setShowActivityFeed(false)}
+        />
+      )}
+
       {/* Modal for creating learner */}
       <CreateLearnerModal
         open={showModal}

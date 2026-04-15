@@ -53,11 +53,11 @@ export default function CalendarScreen() {
       (async () => {
         setLoading(true);
         try {
-          const monthStart = new Date(displayYear, displayMonth, 1);
-          const monthEnd = new Date(displayYear, displayMonth + 1, 0, 23, 59, 59);
-          const records = await fetchCalendarEvents(user.id, monthStart, monthEnd);
+          const records = await fetchCalendarEvents();
+          console.log("[calendar] fetched", records.length, "records", JSON.stringify(records.map(r => ({ id: r.id, title: r.title, programs: r.programs }))));
           if (!cancelled) {
             const expanded = expandEvents(records, displayYear, displayMonth);
+            console.log("[calendar] expanded keys:", Object.keys(expanded), "for", displayYear, displayMonth);
             setEvents(expanded);
           }
         } catch (e: any) {

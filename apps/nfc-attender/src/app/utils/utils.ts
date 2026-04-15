@@ -54,13 +54,20 @@ interface CheckInOptions {
   learnerData?: any; // Pre-fetched learner record to avoid redundant DB query
 }
 
-export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions) {
+export interface CheckInResult {
+  type: "check_in" | "lunch_event" | "late_lunch_return" | "check_out" | "no_action";
+  learnerName: string;
+  program: string;
+  status?: string; // e.g. "present", "late" for check_in
+}
+
+export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): Promise<CheckInResult | null> {
   // Use pre-fetched learner if available, otherwise look up
   const learner = options?.learnerData || await getLearnerByNfc(NFC_ID);
 
   if (!learner) {
     console.log("Learner not found");
-    return;
+    return null;
   }
 
   const now = options?.testTime || new Date();
@@ -81,7 +88,7 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions) {
 
   if (action.type === "no_action") {
     console.log(`[checkLearnerIn] ${learner.name} ${action.reason}`);
-    return;
+    return { type: "no_action", learnerName: learner.name, program: learner.program || "" };
   }
 
   try {
@@ -104,7 +111,15 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions) {
         console.log(`[checkLearnerIn] ${learner.name} checked out for the day`);
         break;
     }
+
+    return {
+      type: action.type,
+      learnerName: learner.name,
+      program: learner.program || "",
+      status: action.fields.status,
+    };
   } catch (err) {
     console.error(`[checkLearnerIn] Failed to update ${learner.name}:`, err);
+    return null;
   }
 }

@@ -42,7 +42,9 @@ export default function RegisterScreen() {
   async function handleVerifyCode() {
     setIsLoading(true);
     try {
+      console.log("[register] Looking up code:", code.trim());
       const invite = await lookupInvite(code.trim());
+      console.log("[register] Lookup result:", invite);
       if (!invite) {
         Alert.alert("Invalid Code", "This invite code is invalid or has expired. Please check with your facilitator.");
         return;
@@ -50,7 +52,9 @@ export default function RegisterScreen() {
       setLearnerName(invite.expand?.learner?.name ?? invite.email);
       setStep("password");
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Something went wrong.");
+      console.error("[register] Verify error:", error);
+      const msg = error?.response?.data || error?.message || "Something went wrong. The invites collection may not exist yet.";
+      Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
     } finally {
       setIsLoading(false);
     }

@@ -189,7 +189,7 @@ export default function HomeScreen() {
 }
 
 function DashboardMainScreen() {
-  const { user, role } = useAuth();
+  const { user, role, program } = useAuth();
   const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
 
@@ -207,7 +207,7 @@ function DashboardMainScreen() {
         try {
           const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
           const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-          const records = await fetchCalendarEvents(user.id, monthStart, monthEnd);
+          const records = await fetchCalendarEvents(user.id, monthStart, monthEnd, program ?? undefined);
           const expanded = expandEvents(records, now.getFullYear(), now.getMonth());
           const key = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
           if (!cancelled) setTodayEvents(expanded[key] ?? []);
@@ -218,7 +218,7 @@ function DashboardMainScreen() {
         }
       })();
       return () => { cancelled = true; };
-    }, [user?.id])
+    }, [user?.id, program])
   );
 
   function handleLogout() {
