@@ -7,7 +7,40 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint
+        run: pnpm lint
+        working-directory: apps/nfc-attender
+
+      - name: Test
+        run: pnpm --filter nfc-attender test
+
   release:
+    name: Release (${{ matrix.platform }})
+    needs: test
     permissions:
       contents: write
     strategy:
@@ -49,7 +82,7 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build the app
+      - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
