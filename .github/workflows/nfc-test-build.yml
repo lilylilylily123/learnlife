@@ -18,27 +18,58 @@ on:
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test-tauri:
+  test-and-lint:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint
+        run: pnpm --filter nfc-attender lint
+
+      - name: Test
+        run: pnpm --filter nfc-attender test
+
+  build:
+    name: Build (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: "macos-latest"
             args: "--target aarch64-apple-darwin"
-          - platform: "ubuntu-22.04"
+          - platform: "windows-latest"
             args: ""
 
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libpcsc-lite-dev
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -55,7 +86,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
