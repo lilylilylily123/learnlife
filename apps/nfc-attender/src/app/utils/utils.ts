@@ -152,7 +152,7 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
       learnerName: learner.name,
       program: learner.program || "",
       // `status` is only present on check_in actions; other action types won't have it.
-      status: action.fields.status,
+      ...(action.type === "check_in" && { status: action.fields.status }),
     };
   } catch (err) {
     console.error(`[checkLearnerIn] Failed to update ${learner.name}:`, err);
