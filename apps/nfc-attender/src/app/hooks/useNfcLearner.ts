@@ -129,5 +129,12 @@ export function useNfcLearner(options?: NfcHookOptions) {
     };
   }, [processQueue]);
 
-  return { uid, learner, exists, isLoading, lastAction };
+  /** Simulate an NFC scan without a physical reader (for test mode). */
+  const simulateScan = useCallback((nfcUid: string) => {
+    console.log(`[useNfcLearner] Simulating scan: ${nfcUid}`);
+    queueRef.current.push({ uid: nfcUid, timestamp: Date.now() });
+    processQueue();
+  }, [processQueue]);
+
+  return { uid, learner, exists, isLoading, lastAction, simulateScan };
 }

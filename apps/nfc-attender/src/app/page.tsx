@@ -68,7 +68,7 @@ export default function AttendancePage() {
 
   // NFC hook - pass test options so NFC scans respect test mode
   const nfcOptions = testMode ? { testTime, testDate } : undefined;
-  const { uid, learner, exists, isLoading, lastAction } = useNfcLearner(nfcOptions);
+  const { uid, learner, exists, isLoading, lastAction, simulateScan } = useNfcLearner(nfcOptions);
 
   // Activity feed state
   const [showActivityFeed, setShowActivityFeed] = useState(false);
@@ -125,10 +125,11 @@ export default function AttendancePage() {
   async function handleCreateLearner(
     name: string,
     email: string,
+    program: string,
     dob: string,
     uid: string,
   ) {
-    await createLearner(name, email, "Explorer", dob, uid);
+    await createLearner(name, email, program, dob, uid);
   }
 
   // Update logged-in state on the client after mount to avoid hydration mismatch
@@ -898,6 +899,41 @@ export default function AttendancePage() {
                 {testTime &&
                   ` @ ${testTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
               </div>
+            </div>
+            {/* Simulate NFC scan */}
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-orange-200">
+              <span className="text-sm font-medium text-orange-800">
+                Simulate Scan:
+              </span>
+              <select
+                id="sim-learner"
+                className="px-3 py-1.5 rounded-lg bg-white text-gray-900 text-sm border border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-400 flex-1 max-w-xs"
+                defaultValue=""
+              >
+                <option value="" disabled>Pick a learner...</option>
+                {students
+                  .filter((s) => s.NFC_ID)
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((s) => (
+                    <option key={s.id} value={s.NFC_ID}>
+                      {s.name} ({s.NFC_ID})
+                    </option>
+                  ))}
+              </select>
+              <button
+                onClick={() => {
+                  const select = document.getElementById("sim-learner") as HTMLSelectElement;
+                  if (select?.value) simulateScan(select.value);
+                }}
+                disabled={isLoading}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium ${
+                  isLoading
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-orange-500 text-white hover:bg-orange-600 cursor-pointer"
+                }`}
+              >
+                {isLoading ? "Scanning..." : "Scan"}
+              </button>
             </div>
             <p className="text-xs text-orange-600 mt-2">
               Test mode lets you simulate check-ins for different dates and

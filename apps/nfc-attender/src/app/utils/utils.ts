@@ -24,13 +24,6 @@ export async function getLearnerByNfc(uid: string) {
 
 /**
  * Create a new learner record.
- *
- * ⚠️  Bug: the `pb.collection("learners").create(...)` call is not awaited,
- * so errors are silently swallowed and the function returns before the record
- * is actually created. Add `await` to fix.
- *
- * Also note: the `program` parameter is ignored — "chmk" is always used as
- * the fallback when the program key is not found in PROGRAM_CODES.
  */
 export async function createLearner(
   name: string,
@@ -41,15 +34,14 @@ export async function createLearner(
 ) {
   const pr = PROGRAM_CODES[program as keyof typeof PROGRAM_CODES] || "chmk";
 
-  // TODO: add `await` here so errors surface and the caller can react.
-  pb.collection("learners").create({
+  await pb.collection("learners").create({
     name,
     email,
     program: pr,
     dob,
     NFC_ID,
   });
-  console.log("Learner Creating");
+  console.log("Learner created");
 }
 
 /**

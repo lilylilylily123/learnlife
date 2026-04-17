@@ -141,11 +141,15 @@ export function computeCheckInAction(
     }
   }
 
-  // ── Step 4: End-of-day checkout (4:59 PM+) ────────────────────────────────
+  // ── Step 4: End-of-day checkout ────────────────────────────────────────────
+  // Fridays use an earlier checkout time (2 PM) than other days (4:59 PM).
   // Only fire if time_out has not been recorded yet to prevent double-checkouts.
+  const isFriday = now.getDay() === 5;
+  const checkoutHour = isFriday ? TIME_THRESHOLDS.FRIDAY_CHECKOUT_HOUR : TIME_THRESHOLDS.CHECKOUT_HOUR;
+  const checkoutMinute = isFriday ? TIME_THRESHOLDS.FRIDAY_CHECKOUT_MINUTE : TIME_THRESHOLDS.CHECKOUT_MINUTE;
   if (
-    (hour > TIME_THRESHOLDS.CHECKOUT_HOUR ||
-      (hour === TIME_THRESHOLDS.CHECKOUT_HOUR && minute >= TIME_THRESHOLDS.CHECKOUT_MINUTE)) &&
+    (hour > checkoutHour ||
+      (hour === checkoutHour && minute >= checkoutMinute)) &&
     !state.time_out
   ) {
     return {
