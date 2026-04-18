@@ -14,9 +14,10 @@ import { computeCheckInAction } from "@learnlife/shared";
  */
 export async function getLearnerByNfc(uid: string) {
   try {
+    const sanitized = uid.replace(/'/g, "\\'");
     return await pb
       .collection("learners")
-      .getFirstListItem(`NFC_ID = '${uid}'`);
+      .getFirstListItem(`NFC_ID = '${sanitized}'`);
   } catch {
     return null;
   }

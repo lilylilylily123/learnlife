@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { pb } from "./pb";
 import { RecordModel } from "pocketbase";
@@ -226,38 +226,60 @@ export default function AttendancePage() {
     }
   }, [lastAction]);
 
-  // Subscribe to real-time changes via PocketBase - only when logged in
-  // Debounce refetches so rapid changes (morning rush) batch into single calls
+  // Keep refs to the latest fetch functions so the subscription callbacks
+  // (registered once) always call the current version without re-subscribing.
+  const fetchLearnersRef = useRef(fetchLearners);
+  const fetchAttendanceRef = useRef(fetchAttendance);
+  useEffect(() => { fetchLearnersRef.current = fetchLearners; }, [fetchLearners]);
+  useEffect(() => { fetchAttendanceRef.current = fetchAttendance; }, [fetchAttendance]);
+
+  // Subscribe to real-time changes via PocketBase - only when logged in.
+  // Subscriptions are created once (not re-created on filter/search changes)
+  // and use refs to always call the latest fetch functions.
   useEffect(() => {
     if (!isLoggedIn) return;
 
     let learnersTimer: ReturnType<typeof setTimeout> | null = null;
     let attendanceTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
 
-    let unsubscribeLearners: (() => void) | undefined;
-    let unsubscribeAttendance: (() => void) | undefined;
-    (async () => {
-      unsubscribeLearners = await pb
+    const setup = async () => {
+      const unsubLearners = await pb
         .collection("learners")
         .subscribe("*", () => {
           if (learnersTimer) clearTimeout(learnersTimer);
-          learnersTimer = setTimeout(fetchLearners, 1000);
+          learnersTimer = setTimeout(() => fetchLearnersRef.current(), 1000);
         });
-      unsubscribeAttendance = await pb
+      const unsubAttendance = await pb
         .collection("attendance")
         .subscribe("*", () => {
           if (attendanceTimer) clearTimeout(attendanceTimer);
-          attendanceTimer = setTimeout(fetchAttendance, 1000);
+          attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
         });
-    })();
+
+      // If cleanup ran while we were awaiting, unsubscribe immediately.
+      if (cancelled) {
+        unsubLearners();
+        unsubAttendance();
+        return;
+      }
+
+      cleanup.unsub = () => {
+        unsubLearners();
+        unsubAttendance();
+      };
+    };
+
+    const cleanup: { unsub?: () => void } = {};
+    setup();
 
     return () => {
+      cancelled = true;
       if (learnersTimer) clearTimeout(learnersTimer);
       if (attendanceTimer) clearTimeout(attendanceTimer);
-      if (unsubscribeLearners) unsubscribeLearners();
-      if (unsubscribeAttendance) unsubscribeAttendance();
+      cleanup.unsub?.();
     };
-  }, [fetchLearners, fetchAttendance, isLoggedIn]);
+  }, [isLoggedIn]);
 
   // Merge learners with their attendance data for the current date
   const studentsWithAttendance = useMemo(() => {
