@@ -5,25 +5,6 @@ import { withRetry, PROGRAM_CODES } from "@learnlife/pb-client";
 import { computeCheckInAction } from "@learnlife/shared";
 
 /**
- * Look up a learner by their NFC card UID.
- * Returns null if no learner is registered for this card.
- *
- * NOTE: This is a local duplicate of `pbClient.getLearnerByNfc`. The two
- * exist because this module was written before the shared query was extracted.
- * Prefer using `pbClient.getLearnerByNfc` in new code.
- */
-export async function getLearnerByNfc(uid: string) {
-  try {
-    const sanitized = uid.replace(/'/g, "\\'");
-    return await pb
-      .collection("learners")
-      .getFirstListItem(`NFC_ID = '${sanitized}'`);
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Create a new learner record.
  */
 export async function createLearner(
@@ -88,7 +69,7 @@ export interface CheckInResult {
  */
 export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): Promise<CheckInResult | null> {
   // Use pre-fetched learner data if available (avoids a second DB round-trip).
-  const learner = options?.learnerData || await getLearnerByNfc(NFC_ID);
+  const learner = options?.learnerData || await pbClient.getLearnerByNfc(NFC_ID);
 
   if (!learner) {
     console.log("Learner not found");

@@ -16,8 +16,11 @@ const mockGetLearnerByNfc = vi.fn();
 const mockCheckLearnerIn = vi.fn();
 
 vi.mock("../app/utils/utils", () => ({
-  getLearnerByNfc: (...args: unknown[]) => mockGetLearnerByNfc(...args),
   checkLearnerIn: (...args: unknown[]) => mockCheckLearnerIn(...args),
+}));
+
+vi.mock("@/lib/pb-client", () => ({
+  getLearnerByNfc: (...args: unknown[]) => mockGetLearnerByNfc(...args),
 }));
 
 // Must import after mocks are set up
