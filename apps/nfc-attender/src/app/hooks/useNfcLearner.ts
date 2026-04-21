@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getLearnerByNfc, checkLearnerIn, type CheckInResult } from "../utils/utils";
+import { checkLearnerIn, type CheckInResult } from "../utils/utils";
+import { getLearnerByNfc } from "@/lib/pb-client";
 
 interface NfcHookOptions {
   testTime?: Date | null;   // Simulated time (overrides real clock for check-in logic)

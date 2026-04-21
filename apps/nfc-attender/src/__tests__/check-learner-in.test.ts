@@ -23,13 +23,15 @@ vi.mock("pocketbase", () => {
 // Mock pb-client module
 const mockUpdateAttendance = vi.fn();
 const mockGetAttendance = vi.fn();
+const mockGetLearnerByNfc = vi.fn();
 
 vi.mock("@/lib/pb-client", () => ({
   updateAttendance: (...args: unknown[]) => mockUpdateAttendance(...args),
   getAttendance: (...args: unknown[]) => mockGetAttendance(...args),
+  getLearnerByNfc: (...args: unknown[]) => mockGetLearnerByNfc(...args),
 }));
 
-import { checkLearnerIn, getLearnerByNfc } from "@/app/utils/utils";
+import { checkLearnerIn } from "@/app/utils/utils";
 
 const fakeLearner = {
   id: "learner1",
@@ -47,25 +49,11 @@ const fakeLearner = {
 beforeEach(() => {
   vi.clearAllMocks();
   // Default: learner exists
-  mockGetFirstListItem.mockResolvedValue(fakeLearner);
+  mockGetLearnerByNfc.mockResolvedValue(fakeLearner);
   // Default: no existing attendance
   mockGetAttendance.mockResolvedValue({ attendance: null, exists: false });
   // Default: update succeeds
   mockUpdateAttendance.mockResolvedValue({ status: "updated" });
-});
-
-describe("getLearnerByNfc", () => {
-  it("returns learner when found", async () => {
-    const result = await getLearnerByNfc("ABCD1234");
-    expect(result).toEqual(fakeLearner);
-    expect(mockGetFirstListItem).toHaveBeenCalledWith("NFC_ID = 'ABCD1234'");
-  });
-
-  it("returns null when not found", async () => {
-    mockGetFirstListItem.mockRejectedValueOnce(new Error("Not found"));
-    const result = await getLearnerByNfc("UNKNOWN");
-    expect(result).toBeNull();
-  });
 });
 
 describe("checkLearnerIn", () => {
@@ -209,7 +197,7 @@ describe("checkLearnerIn", () => {
   });
 
   it("does nothing for unknown NFC UID", async () => {
-    mockGetFirstListItem.mockRejectedValueOnce(new Error("Not found"));
+    mockGetLearnerByNfc.mockResolvedValueOnce(null);
 
     await checkLearnerIn("UNKNOWN_UID", {
       testTime: new Date("2026-04-08T09:00:00"),
