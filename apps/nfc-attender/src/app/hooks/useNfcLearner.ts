@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getLearnerByNfc, checkLearnerIn, type CheckInResult } from "../utils/utils";
+import type { Learner } from "@learnlife/pb-client";
 
 interface NfcHookOptions {
   testTime?: Date | null;   // Simulated time (overrides real clock for check-in logic)
@@ -26,7 +27,7 @@ interface ScanJob {
  */
 export function useNfcLearner(options?: NfcHookOptions) {
   const [uid, setUid] = useState("");
-  const [learner, setLearner] = useState<any>(null); // TODO: type as Learner from pb-client
+  const [learner, setLearner] = useState<Learner | null>(null);
   const [exists, setExists] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [lastAction, setLastAction] = useState<CheckInResult | null>(null);
