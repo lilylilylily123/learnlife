@@ -29,6 +29,7 @@
       "^@/(.*)$": "<rootDir>/$1",
       "^@learnlife/pb-client$": "<rootDir>/../../packages/pb-client/src/index.ts",
       "^@learnlife/shared$": "<rootDir>/../../packages/shared/src/index.ts",
+      "^@learnlife/design-tokens$": "<rootDir>/../../packages/design-tokens/src/index.ts",
       "^pocketbase$": "<rootDir>/__mocks__/pocketbase.ts"
     },
     "rootDir": "."
@@ -40,6 +41,7 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@learnlife/design-tokens": "workspace:*",
     "@learnlife/pb-client": "workspace:*",
     "@learnlife/shared": "workspace:*",
     "event-source-polyfill": "^1.0.31",

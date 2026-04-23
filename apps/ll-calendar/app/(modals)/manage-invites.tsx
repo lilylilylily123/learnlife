@@ -115,7 +115,7 @@ export default function ManageInvitesScreen() {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <Pressable style={s.backBtn} onPress={resetCreate}>
-            <MaterialIcons name="close" size={24} color="#2D1B4E" />
+            <MaterialIcons name="close" size={24} color="#1F1B16" />
           </Pressable>
           <Text style={s.title}>Invite Created</Text>
           <View style={s.backBtn} />
@@ -145,7 +145,7 @@ export default function ManageInvitesScreen() {
       <SafeAreaView style={s.safe}>
         <View style={s.header}>
           <Pressable style={s.backBtn} onPress={() => setScreen("list")}>
-            <MaterialIcons name="arrow-back" size={24} color="#2D1B4E" />
+            <MaterialIcons name="arrow-back" size={24} color="#1F1B16" />
           </Pressable>
           <Text style={s.title}>New Invite</Text>
           <View style={s.backBtn} />
@@ -154,20 +154,20 @@ export default function ManageInvitesScreen() {
         <View style={s.searchSection}>
           <Text style={s.label}>Search Learner</Text>
           <View style={s.searchWrap}>
-            <MaterialIcons name="search" size={20} color="#8A7E9E" />
+            <MaterialIcons name="search" size={20} color="#807663" />
             <TextInput
               autoFocus
               autoCapitalize="none"
               autoCorrect={false}
               onChangeText={handleSearch}
               placeholder="Name or email..."
-              placeholderTextColor="#8A7E9E"
+              placeholderTextColor="#807663"
               style={s.searchInput}
               value={search}
             />
             {search.length > 0 && (
               <Pressable onPress={() => handleSearch("")}>
-                <MaterialIcons name="close" size={18} color="#8A7E9E" />
+                <MaterialIcons name="close" size={18} color="#807663" />
               </Pressable>
             )}
           </View>
@@ -175,7 +175,7 @@ export default function ManageInvitesScreen() {
 
         {searchLoading ? (
           <View style={s.loadingWrap}>
-            <ActivityIndicator size="small" color="#C4F34A" />
+            <ActivityIndicator size="small" color="#C4D98B" />
           </View>
         ) : search.trim().length < 2 ? (
           <View style={s.hintWrap}>
@@ -230,11 +230,11 @@ export default function ManageInvitesScreen() {
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
         <Pressable style={s.backBtn} onPress={() => router.back()}>
-          <MaterialIcons name="arrow-back" size={24} color="#2D1B4E" />
+          <MaterialIcons name="arrow-back" size={24} color="#1F1B16" />
         </Pressable>
         <Text style={s.title}>Invites</Text>
         <Pressable style={s.backBtn} onPress={() => setScreen("create")}>
-          <MaterialIcons name="add" size={24} color="#2D1B4E" />
+          <MaterialIcons name="add" size={24} color="#1F1B16" />
         </Pressable>
       </View>
 
@@ -245,14 +245,14 @@ export default function ManageInvitesScreen() {
         <MaterialIcons
           name={showUsed ? "check-box" : "check-box-outline-blank"}
           size={20}
-          color="#8A7E9E"
+          color="#807663"
         />
         <Text style={s.filterText}>Show used / expired</Text>
       </Pressable>
 
       {loading ? (
         <View style={s.loadingWrap}>
-          <ActivityIndicator size="small" color="#C4F34A" />
+          <ActivityIndicator size="small" color="#C4D98B" />
         </View>
       ) : invites.length === 0 ? (
         <View style={s.center}>
@@ -281,7 +281,7 @@ export default function ManageInvitesScreen() {
                 ? "#4ADE80"
                 : status === "Expired"
                 ? "#F97316"
-                : "#8A7E9E";
+                : "#807663";
 
             return (
               <View style={s.inviteCard}>
@@ -311,7 +311,7 @@ export default function ManageInvitesScreen() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: "#F3EEE5" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -327,13 +327,13 @@ const s = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
     elevation: 2,
   },
-  title: { fontSize: 22, fontWeight: "700", color: "#2D1B4E" },
+  title: { fontSize: 22, fontWeight: "700", color: "#1F1B16" },
   filterToggle: {
     flexDirection: "row",
     alignItems: "center",
@@ -341,17 +341,17 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 8,
   },
-  filterText: { fontSize: 14, color: "#8A7E9E", fontWeight: "600" },
+  filterText: { fontSize: 14, color: "#807663", fontWeight: "600" },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center" },
   center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, padding: 24 },
   emptyEmoji: { fontSize: 42 },
-  emptyText: { fontSize: 16, color: "#8A7E9E", fontWeight: "600" },
+  emptyText: { fontSize: 16, color: "#807663", fontWeight: "600" },
   listContent: { paddingHorizontal: 16, paddingBottom: 40, gap: 10 },
   inviteCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
     padding: 16,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 12,
@@ -366,7 +366,7 @@ const s = StyleSheet.create({
   inviteCode: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#2D1B4E",
+    color: "#1F1B16",
     letterSpacing: 3,
   },
   statusPill: {
@@ -379,11 +379,11 @@ const s = StyleSheet.create({
   },
   statusDot: { width: 8, height: 8, borderRadius: 999 },
   statusText: { fontSize: 12, fontWeight: "700" },
-  inviteName: { fontSize: 16, fontWeight: "700", color: "#2D1B4E" },
-  inviteMeta: { fontSize: 13, color: "#8A7E9E", fontWeight: "500", marginTop: 2 },
+  inviteName: { fontSize: 16, fontWeight: "700", color: "#1F1B16" },
+  inviteMeta: { fontSize: 13, color: "#807663", fontWeight: "500", marginTop: 2 },
   // Create screen
   searchSection: { paddingHorizontal: 20, marginBottom: 8 },
-  label: { color: "#2D1B4E", fontSize: 14, fontWeight: "700", marginBottom: 8 },
+  label: { color: "#1F1B16", fontSize: 14, fontWeight: "700", marginBottom: 8 },
   searchWrap: {
     alignItems: "center",
     backgroundColor: "#FFFFFF",
@@ -392,15 +392,15 @@ const s = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: Platform.select({ ios: 14, default: 10 }),
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 12,
     elevation: 2,
   },
-  searchInput: { color: "#2D1B4E", flex: 1, fontSize: 16 },
+  searchInput: { color: "#1F1B16", flex: 1, fontSize: 16 },
   hintWrap: { alignItems: "center", paddingTop: 40 },
-  hintText: { fontSize: 15, color: "#8A7E9E", fontWeight: "600" },
+  hintText: { fontSize: 15, color: "#807663", fontWeight: "600" },
   learnerRow: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
@@ -408,7 +408,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     gap: 12,
     padding: 14,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -418,42 +418,42 @@ const s = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 999,
-    backgroundColor: "#B892FF",
+    backgroundColor: "#4F6B4A",
     alignItems: "center",
     justifyContent: "center",
   },
   learnerInitial: { fontSize: 18, fontWeight: "700", color: "#FFFFFF" },
   learnerInfo: { flex: 1 },
-  learnerName: { fontSize: 16, fontWeight: "700", color: "#2D1B4E" },
-  learnerEmail: { fontSize: 13, color: "#8A7E9E", fontWeight: "500" },
+  learnerName: { fontSize: 16, fontWeight: "700", color: "#1F1B16" },
+  learnerEmail: { fontSize: 13, color: "#807663", fontWeight: "500" },
   programBadge: {
-    backgroundColor: "#C4F34A22",
+    backgroundColor: "#C4D98B22",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  programText: { fontSize: 11, fontWeight: "700", color: "#2D1B4E" },
+  programText: { fontSize: 11, fontWeight: "700", color: "#1F1B16" },
   // Code confirmation
   codeHero: { alignItems: "center", gap: 12, marginBottom: 24 },
-  codeLabel: { fontSize: 14, fontWeight: "700", color: "#8A7E9E" },
+  codeLabel: { fontSize: 14, fontWeight: "700", color: "#807663" },
   codeValue: {
     fontSize: 40,
     fontWeight: "800",
-    color: "#2D1B4E",
+    color: "#1F1B16",
     letterSpacing: 8,
   },
   codeHint: {
     fontSize: 14,
-    color: "#8A7E9E",
+    color: "#807663",
     fontWeight: "600",
     textAlign: "center",
     paddingHorizontal: 32,
   },
   primaryBtn: {
-    backgroundColor: "#C4F34A",
+    backgroundColor: "#C4D98B",
     borderRadius: 999,
     paddingHorizontal: 28,
     paddingVertical: 14,
   },
-  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#2D1B4E" },
+  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#1F1B16" },
 });

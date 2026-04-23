@@ -3,7 +3,9 @@ import type { AttendanceRecord } from "../types";
 
 /** Parameters accepted by listAttendance. All are optional — defaults to today's records. */
 export interface ListAttendanceParams {
-  date?: string;       // YYYY-MM-DD — defaults to today
+  date?: string;       // YYYY-MM-DD — single-day filter. Ignored when dateFrom/dateTo is set.
+  dateFrom?: string;   // YYYY-MM-DD — inclusive range start
+  dateTo?: string;     // YYYY-MM-DD — inclusive range end
   learnerId?: string;  // Filter to a single learner
   page?: number;
   perPage?: number;
@@ -13,7 +15,7 @@ export interface ListAttendanceResult {
   items: AttendanceRecord[];
   totalItems: number;
   totalPages: number;
-  date: string; // The resolved date that was queried (useful when caller omitted it)
+  date: string; // The resolved date (single-day queries) or a "from..to" label for ranges.
 }
 
 /** Returns today as a YYYY-MM-DD string in the local timezone. */
@@ -22,18 +24,36 @@ function todayStr(): string {
 }
 
 /**
- * Paginated list of attendance records, optionally filtered by date and learner.
- * Always expands the `learner` relation so UI can display names without a second query.
+ * Build the PocketBase filter clause for a single-day or date-range query.
+ * Ranges use `>=` / `<=` against the date column with explicit time bounds so
+ * PB's timestamp comparison matches the full day on both ends.
+ */
+function buildDateFilter(params: ListAttendanceParams): { clause: string; label: string } {
+  if (params.dateFrom || params.dateTo) {
+    const from = params.dateFrom || params.dateTo!;
+    const to = params.dateTo || params.dateFrom!;
+    return {
+      clause: `date >= "${from} 00:00:00" && date <= "${to} 23:59:59"`,
+      label: from === to ? from : `${from}..${to}`,
+    };
+  }
+  const date = params.date || todayStr();
+  return { clause: `date ~ "${date}"`, label: date };
+}
+
+/**
+ * Paginated list of attendance records, optionally filtered by date (or date
+ * range) and learner. Always expands the `learner` relation so UI can display
+ * names without a second query.
  */
 export async function listAttendance(
   pb: PocketBase,
   params: ListAttendanceParams = {},
 ): Promise<ListAttendanceResult> {
   const { learnerId, page = 1, perPage = 50 } = params;
-  const date = params.date || todayStr();
+  const { clause, label } = buildDateFilter(params);
 
-  // Build filter: always filter by date; optionally narrow to a specific learner.
-  const filterParts: string[] = [`date ~ "${date}"`];
+  const filterParts: string[] = [clause];
   if (learnerId) {
     filterParts.push(`learner = "${learnerId}"`);
   }
@@ -41,15 +61,34 @@ export async function listAttendance(
   const response = await pb.collection("attendance").getList(page, perPage, {
     filter: filterParts.join(" && "),
     expand: "learner",
-    sort: "-created",
+    sort: "-date,-created",
   });
 
   return {
     items: response.items as unknown as AttendanceRecord[],
     totalItems: response.totalItems,
     totalPages: response.totalPages,
-    date,
+    date: label,
   };
+}
+
+/**
+ * Fetch every attendance record matching the given filters, paging through
+ * results until exhausted. For multi-week ranges this can return thousands of
+ * records — callers should prefer `listAttendance` with a page when possible.
+ */
+export async function listAllAttendance(
+  pb: PocketBase,
+  params: ListAttendanceParams = {},
+): Promise<AttendanceRecord[]> {
+  const perPage = params.perPage ?? 200;
+  const first = await listAttendance(pb, { ...params, page: 1, perPage });
+  const all: AttendanceRecord[] = [...first.items];
+  for (let p = 2; p <= first.totalPages; p++) {
+    const next = await listAttendance(pb, { ...params, page: p, perPage });
+    all.push(...next.items);
+  }
+  return all;
 }
 
 /**

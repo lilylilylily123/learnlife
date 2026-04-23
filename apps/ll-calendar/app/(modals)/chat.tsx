@@ -134,7 +134,7 @@ export default function ChatModal() {
       {/* Header */}
       <View style={s.header}>
         <Pressable style={s.backBtn} onPress={() => router.back()}>
-          <MaterialIcons name="arrow-back" size={22} color="#2D1B4E" />
+          <MaterialIcons name="arrow-back" size={22} color="#1F1B16" />
         </Pressable>
         <Text style={s.headerTitle} numberOfLines={1}>
           {participantName}
@@ -173,7 +173,7 @@ export default function ChatModal() {
           <TextInput
             style={s.input}
             placeholder="Type a message..."
-            placeholderTextColor="#8A7E9E"
+            placeholderTextColor="#807663"
             value={inputText}
             onChangeText={setInputText}
             multiline
@@ -187,7 +187,7 @@ export default function ChatModal() {
             onPress={handleSend}
             disabled={!inputText.trim() || sending}
           >
-            <MaterialIcons name="send" size={20} color="#2D1B4E" />
+            <MaterialIcons name="send" size={20} color="#1F1B16" />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -196,7 +196,7 @@ export default function ChatModal() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: "#F3EEE5" },
 
   // Header
   header: {
@@ -207,20 +207,20 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(138,126,158,0.1)",
+    borderBottomColor: "rgba(128,118,99,0.1)",
   },
   backBtn: {
     width: 36,
     height: 36,
     borderRadius: 999,
-    backgroundColor: "#F3F5F0",
+    backgroundColor: "#EAE3D3",
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#2D1B4E",
+    color: "#1F1B16",
     flex: 1,
     textAlign: "center",
     marginHorizontal: 12,
@@ -249,7 +249,7 @@ const s = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 999,
-    backgroundColor: "#E8E5ED",
+    backgroundColor: "#EAE3D3",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
@@ -258,7 +258,7 @@ const s = StyleSheet.create({
   avatarText: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#2D1B4E",
+    color: "#1F1B16",
   },
 
   // Bubbles
@@ -269,9 +269,9 @@ const s = StyleSheet.create({
     maxWidth: "100%",
   },
   bubbleOwn: {
-    backgroundColor: "#C4F34A",
+    backgroundColor: "#C4D98B",
     borderBottomRightRadius: 4,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
@@ -280,7 +280,7 @@ const s = StyleSheet.create({
   bubbleOther: {
     backgroundColor: "#FFFFFF",
     borderBottomLeftRadius: 4,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
@@ -288,7 +288,7 @@ const s = StyleSheet.create({
   },
   bubbleText: {
     fontSize: 15,
-    color: "#2D1B4E",
+    color: "#1F1B16",
     lineHeight: 21,
   },
   timestamp: {
@@ -300,7 +300,7 @@ const s = StyleSheet.create({
     textAlign: "right",
   },
   timestampOther: {
-    color: "#8A7E9E",
+    color: "#807663",
     textAlign: "left",
   },
 
@@ -314,12 +314,12 @@ const s = StyleSheet.create({
   emptyText: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#2D1B4E",
+    color: "#1F1B16",
     marginBottom: 6,
   },
   emptySubtext: {
     fontSize: 14,
-    color: "#8A7E9E",
+    color: "#807663",
   },
 
   // Input bar
@@ -330,27 +330,27 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: "#FFFFFF",
     borderTopWidth: 1,
-    borderTopColor: "rgba(138,126,158,0.1)",
+    borderTopColor: "rgba(128,118,99,0.1)",
     gap: 10,
   },
   input: {
     flex: 1,
-    backgroundColor: "#F3F5F0",
+    backgroundColor: "#EAE3D3",
     borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: Platform.OS === "ios" ? 10 : 8,
     fontSize: 15,
-    color: "#2D1B4E",
+    color: "#1F1B16",
     maxHeight: 100,
   },
   sendBtn: {
     width: 40,
     height: 40,
     borderRadius: 999,
-    backgroundColor: "#C4F34A",
+    backgroundColor: "#C4D98B",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,

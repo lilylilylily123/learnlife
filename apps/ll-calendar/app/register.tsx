@@ -90,12 +90,12 @@ export default function RegisterScreen() {
         >
           {/* Back button */}
           <Pressable style={s.backBtn} onPress={() => router.back()}>
-            <MaterialIcons name="arrow-back" size={24} color="#2D1B4E" />
+            <MaterialIcons name="arrow-back" size={24} color="#1F1B16" />
           </Pressable>
 
           <View style={s.hero}>
             <View style={s.heroIcon}>
-              <MaterialIcons name="mail" size={42} color="#2D1B4E" />
+              <MaterialIcons name="mail" size={42} color="#1F1B16" />
             </View>
             <Text style={s.heroTitle}>
               {step === "code" ? "Enter Invite Code" : `Welcome, ${learnerName}!`}
@@ -113,14 +113,14 @@ export default function RegisterScreen() {
                 <View style={s.fieldGroup}>
                   <Text style={s.label}>Invite Code</Text>
                   <View style={s.inputWrap}>
-                    <MaterialIcons name="vpn-key" size={20} color="#8A7E9E" />
+                    <MaterialIcons name="vpn-key" size={20} color="#807663" />
                     <TextInput
                       autoCapitalize="characters"
                       autoCorrect={false}
                       maxLength={6}
                       onChangeText={(t) => setCode(t.toUpperCase())}
                       placeholder="ABC123"
-                      placeholderTextColor="#8A7E9E"
+                      placeholderTextColor="#807663"
                       style={[s.input, s.codeInput]}
                       value={code}
                     />
@@ -138,7 +138,7 @@ export default function RegisterScreen() {
                 >
                   <View style={s.btnShadow} />
                   <View style={s.btnFace}>
-                    <MaterialIcons name="search" size={20} color="#2D1B4E" />
+                    <MaterialIcons name="search" size={20} color="#1F1B16" />
                     <Text style={s.btnLabel}>
                       {isLoading ? "CHECKING..." : "VERIFY CODE"}
                     </Text>
@@ -150,12 +150,12 @@ export default function RegisterScreen() {
                 <View style={s.fieldGroup}>
                   <Text style={s.label}>Password</Text>
                   <View style={s.inputWrap}>
-                    <MaterialIcons name="lock" size={20} color="#8A7E9E" />
+                    <MaterialIcons name="lock" size={20} color="#807663" />
                     <TextInput
                       autoComplete="new-password"
                       onChangeText={setPassword}
                       placeholder="At least 8 characters"
-                      placeholderTextColor="#8A7E9E"
+                      placeholderTextColor="#807663"
                       secureTextEntry={!showPassword}
                       style={s.input}
                       value={password}
@@ -164,7 +164,7 @@ export default function RegisterScreen() {
                       <MaterialIcons
                         name={showPassword ? "visibility-off" : "visibility"}
                         size={20}
-                        color="#8A7E9E"
+                        color="#807663"
                       />
                     </Pressable>
                   </View>
@@ -173,12 +173,12 @@ export default function RegisterScreen() {
                 <View style={s.fieldGroup}>
                   <Text style={s.label}>Confirm Password</Text>
                   <View style={s.inputWrap}>
-                    <MaterialIcons name="lock-outline" size={20} color="#8A7E9E" />
+                    <MaterialIcons name="lock-outline" size={20} color="#807663" />
                     <TextInput
                       autoComplete="new-password"
                       onChangeText={setPasswordConfirm}
                       placeholder="Re-enter password"
-                      placeholderTextColor="#8A7E9E"
+                      placeholderTextColor="#807663"
                       secureTextEntry={!showPassword}
                       style={s.input}
                       value={passwordConfirm}
@@ -200,7 +200,7 @@ export default function RegisterScreen() {
                 >
                   <View style={s.btnShadow} />
                   <View style={s.btnFace}>
-                    <MaterialIcons name="how-to-reg" size={20} color="#2D1B4E" />
+                    <MaterialIcons name="how-to-reg" size={20} color="#1F1B16" />
                     <Text style={s.btnLabel}>
                       {isLoading ? "CREATING ACCOUNT..." : "CREATE ACCOUNT"}
                     </Text>
@@ -216,7 +216,7 @@ export default function RegisterScreen() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: "#F3EEE5" },
   flex: { flex: 1 },
   scroll: {
     paddingHorizontal: 20,
@@ -231,7 +231,7 @@ const s = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
@@ -240,16 +240,16 @@ const s = StyleSheet.create({
   hero: { alignItems: "center", gap: 6 },
   heroIcon: {
     alignItems: "center",
-    backgroundColor: "#D9FB86",
+    backgroundColor: "#4F6B4A",
     borderRadius: 999,
     height: 84,
     justifyContent: "center",
     marginBottom: 6,
     width: 84,
   },
-  heroTitle: { color: "#2D1B4E", fontSize: 30, fontWeight: "800", textAlign: "center" },
+  heroTitle: { color: "#1F1B16", fontSize: 30, fontWeight: "800", textAlign: "center" },
   heroSubtitle: {
-    color: "#6B7280",
+    color: "#3A342A",
     fontSize: 15,
     fontWeight: "600",
     textAlign: "center",
@@ -257,35 +257,35 @@ const s = StyleSheet.create({
   },
   card: {
     backgroundColor: "#FFFFFF",
-    borderLeftColor: "#B892FF",
+    borderLeftColor: "#4F6B4A",
     borderLeftWidth: 4,
     borderRadius: 24,
     elevation: 3,
     gap: 16,
     padding: 20,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.08,
     shadowRadius: 20,
   },
   fieldGroup: { gap: 8 },
-  label: { color: "#2D1B4E", fontSize: 14, fontWeight: "700", paddingLeft: 2 },
+  label: { color: "#1F1B16", fontSize: 14, fontWeight: "700", paddingLeft: 2 },
   inputWrap: {
     alignItems: "center",
-    backgroundColor: "#F3F5F0",
+    backgroundColor: "#EAE3D3",
     borderRadius: 16,
     flexDirection: "row",
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: Platform.select({ ios: 14, default: 10 }),
   },
-  input: { color: "#2D1B4E", flex: 1, fontSize: 16 },
+  input: { color: "#1F1B16", flex: 1, fontSize: 16 },
   codeInput: { letterSpacing: 6, fontWeight: "700", fontSize: 20, textAlign: "center" },
-  errorHint: { color: "#FF6B35", fontSize: 13, fontWeight: "600", paddingLeft: 2 },
+  errorHint: { color: "#C26B3C", fontSize: 13, fontWeight: "600", paddingLeft: 2 },
   btn: { marginTop: 2, minHeight: 58, position: "relative" as const },
   btnPressed: { transform: [{ translateY: 3 }] },
   btnShadow: {
-    backgroundColor: "#A8D62C",
+    backgroundColor: "#A8BE6E",
     borderRadius: 999,
     bottom: 0,
     left: 0,
@@ -295,7 +295,7 @@ const s = StyleSheet.create({
   },
   btnFace: {
     alignItems: "center",
-    backgroundColor: "#C4F34A",
+    backgroundColor: "#C4D98B",
     borderRadius: 999,
     flexDirection: "row",
     gap: 8,
@@ -304,5 +304,5 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
   },
   btnDisabled: { opacity: 0.55 },
-  btnLabel: { color: "#2D1B4E", fontSize: 18, fontWeight: "800", letterSpacing: 0.5 },
+  btnLabel: { color: "#1F1B16", fontSize: 18, fontWeight: "800", letterSpacing: 0.5 },
 });

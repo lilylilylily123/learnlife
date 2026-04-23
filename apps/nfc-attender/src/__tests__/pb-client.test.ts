@@ -208,8 +208,30 @@ describe("listAttendance", () => {
     expect(mockGetList).toHaveBeenCalledWith(1, 100, {
       filter: 'date ~ "2026-04-08"',
       expand: "learner",
-      sort: "-created",
+      sort: "-date,-created",
     });
     expect(result.items).toHaveLength(1);
+  });
+
+  it("builds a range filter when dateFrom/dateTo are provided", async () => {
+    mockGetList.mockResolvedValueOnce({
+      items: [fakeAttendance],
+      totalItems: 1,
+      totalPages: 1,
+      page: 1,
+    });
+
+    const result = await listAttendance({
+      dateFrom: "2026-04-01",
+      dateTo: "2026-04-08",
+      perPage: 200,
+    });
+
+    expect(mockGetList).toHaveBeenCalledWith(1, 200, {
+      filter: 'date >= "2026-04-01 00:00:00" && date <= "2026-04-08 23:59:59"',
+      expand: "learner",
+      sort: "-date,-created",
+    });
+    expect(result.date).toBe("2026-04-01..2026-04-08");
   });
 });

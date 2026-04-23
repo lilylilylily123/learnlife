@@ -45,6 +45,10 @@ export function listAttendance(params: attendanceQ.ListAttendanceParams = {}) {
   return attendanceQ.listAttendance(pb, params);
 }
 
+export function listAllAttendance(params: attendanceQ.ListAttendanceParams = {}) {
+  return attendanceQ.listAllAttendance(pb, params);
+}
+
 export function getAttendance(learnerId: string, date?: string) {
   return attendanceQ.getAttendance(pb, learnerId, date);
 }

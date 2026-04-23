@@ -3,7 +3,15 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
-import type { AttendanceRecord, Learner, LunchEvent } from "@learnlife/pb-client";
+import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
+
+const STATUS_CLASSES: Record<string, string> = {
+  present: "bg-green-100 text-green-800",
+  late: "bg-yellow-100 text-yellow-800",
+  absent: "bg-red-100 text-red-800",
+  jLate: "bg-blue-100 text-blue-700",
+  jAbsent: "bg-blue-100 text-blue-700",
+};
 
 export default function HistoryPage() {
   const router = useRouter();
@@ -14,16 +22,14 @@ export default function HistoryPage() {
   const [learners, setLearners] = useState<Learner[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // Check auth state
+
   useEffect(() => {
     setIsLoggedIn(pb.authStore.isValid);
     if (!pb.authStore.isValid) {
       router.push("/");
     }
   }, [router]);
-  
-  // Editing state
+
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editForm, setEditForm] = useState({
     time_in: "",
@@ -34,7 +40,6 @@ export default function HistoryPage() {
     lunch_status: "",
   });
 
-  // Fetch learners
   const fetchLearners = useCallback(async () => {
     try {
       const result = await pbClient.listLearners({ perPage: 100 });
@@ -43,8 +48,7 @@ export default function HistoryPage() {
       console.error("Failed to fetch learners:", err);
     }
   }, []);
-  
-  // Fetch attendance
+
   const fetchAttendance = useCallback(async () => {
     setLoading(true);
     try {
@@ -61,21 +65,15 @@ export default function HistoryPage() {
       setLoading(false);
     }
   }, [selectedDate, selectedLearnerId]);
-  
-  // Initial fetch - only when logged in
+
   useEffect(() => {
-    if (isLoggedIn) {
-      fetchLearners();
-    }
+    if (isLoggedIn) fetchLearners();
   }, [fetchLearners, isLoggedIn]);
-  
+
   useEffect(() => {
-    if (isLoggedIn) {
-      fetchAttendance();
-    }
+    if (isLoggedIn) fetchAttendance();
   }, [fetchAttendance, isLoggedIn]);
 
-  // Filter records by search query
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
       if (!searchQuery.trim()) return true;
@@ -101,7 +99,7 @@ export default function HistoryPage() {
   // Derive lunch out/in from lunch_events (new format) or fall back to legacy fields
   const getLunchOut = (record: AttendanceRecord): string | null => {
     if (record.lunch_events && record.lunch_events.length > 0) {
-      const firstOut = record.lunch_events.find(e => e.type === 'out');
+      const firstOut = record.lunch_events.find((e) => e.type === "out");
       return firstOut?.time || null;
     }
     return record.lunch_out;
@@ -110,9 +108,8 @@ export default function HistoryPage() {
   const getLunchIn = (record: AttendanceRecord): string | null => {
     if (record.lunch_events && record.lunch_events.length > 0) {
       const events = record.lunch_events;
-      // Get the last 'in' event
       for (let i = events.length - 1; i >= 0; i--) {
-        if (events[i].type === 'in') return events[i].time;
+        if (events[i].type === "in") return events[i].time;
       }
       return null;
     }
@@ -120,16 +117,10 @@ export default function HistoryPage() {
   };
 
   const statusBadge = (status: string | null) => {
-    if (!status) return <span className="text-gray-400">—</span>;
-    const colors: Record<string, string> = {
-      present: "bg-green-100 text-green-800",
-      late: "bg-yellow-100 text-yellow-800",
-      absent: "bg-red-100 text-red-800",
-      jLate: "bg-blue-100 text-blue-800",
-      jAbsent: "bg-purple-100 text-purple-800",
-    };
+    if (!status) return <span className="text-gray-400 text-xs">—</span>;
+    const cls = STATUS_CLASSES[status] || "bg-gray-100 text-gray-600";
     return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] || "bg-gray-100"}`}>
+      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
         {status}
       </span>
     );
@@ -161,13 +152,11 @@ export default function HistoryPage() {
 
   const saveEditing = async () => {
     if (!editingRecord) return;
-    
+
     try {
-      // Convert time inputs to ISO timestamps
       const dateBase = selectedDate;
       const updates: Array<{ field: string; value?: string; timestamp?: string }> = [];
-      
-      // Time fields
+
       const timeFields = ["time_in", "time_out"] as const;
       for (const field of timeFields) {
         const timeVal = editForm[field];
@@ -179,33 +168,26 @@ export default function HistoryPage() {
         }
       }
 
-      // Build lunch_events from lunch_out/lunch_in form values
-      const lunchEvents: Array<{ type: 'out' | 'in'; time: string }> = [];
+      const lunchEvents: Array<{ type: "out" | "in"; time: string }> = [];
       if (editForm.lunch_out) {
         const [h, m] = editForm.lunch_out.split(":").map(Number);
         const dt = new Date(dateBase);
         dt.setHours(h, m, 0, 0);
-        lunchEvents.push({ type: 'out', time: dt.toISOString() });
+        lunchEvents.push({ type: "out", time: dt.toISOString() });
       }
       if (editForm.lunch_in) {
         const [h, m] = editForm.lunch_in.split(":").map(Number);
         const dt = new Date(dateBase);
         dt.setHours(h, m, 0, 0);
-        lunchEvents.push({ type: 'in', time: dt.toISOString() });
+        lunchEvents.push({ type: "in", time: dt.toISOString() });
       }
       if (lunchEvents.length > 0) {
         updates.push({ field: "lunch_events", value: JSON.stringify(lunchEvents) });
       }
-      
-      // Status fields
-      if (editForm.status) {
-        updates.push({ field: "status", value: editForm.status });
-      }
-      if (editForm.lunch_status) {
-        updates.push({ field: "lunch_status", value: editForm.lunch_status });
-      }
-      
-      // Batch all field updates into a single PocketBase call
+
+      if (editForm.status) updates.push({ field: "status", value: editForm.status });
+      if (editForm.lunch_status) updates.push({ field: "lunch_status", value: editForm.lunch_status });
+
       const fields: Record<string, string> = {};
       for (const update of updates) {
         fields[update.field] = update.timestamp || update.value || "";
@@ -215,8 +197,7 @@ export default function HistoryPage() {
         date: selectedDate,
         fields,
       });
-      
-      // Refresh and close editor
+
       await fetchAttendance();
       cancelEditing();
     } catch (err) {
@@ -227,7 +208,7 @@ export default function HistoryPage() {
 
   const resetRecord = async (record: AttendanceRecord) => {
     if (!confirm(`Reset attendance for ${record.expand?.learner?.name || "this learner"}?`)) return;
-    
+
     try {
       await pbClient.resetAttendance(record.learner, selectedDate);
       await fetchAttendance();
@@ -238,40 +219,48 @@ export default function HistoryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
+      <div className="w-full max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Attendance History</h1>
-          <button
-            onClick={() => router.push("/")}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 cursor-pointer"
-          >
-            ← Back to Dashboard
-          </button>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            Attendance history
+          </h1>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push("/history/admin")}
+              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
+            >
+              📈 Reports
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
+            >
+              ← Dashboard
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Date picker */}
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-600">Date:</label>
+              <label className="text-sm font-medium text-gray-700">Date:</label>
               <input
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
               />
             </div>
 
-            {/* Learner dropdown */}
             <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-600">Learner:</label>
+              <label className="text-sm font-medium text-gray-700">Learner:</label>
               <select
                 value={selectedLearnerId}
                 onChange={(e) => setSelectedLearnerId(e.target.value)}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm min-w-[200px]"
+                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer min-w-[200px]"
               >
                 <option value="">All Learners</option>
                 {learners.map((l) => (
@@ -282,21 +271,20 @@ export default function HistoryPage() {
               </select>
             </div>
 
-            {/* Search */}
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <label className="text-sm font-medium text-gray-600">Search:</label>
+            <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
+              <label className="text-sm font-medium text-gray-700">Search:</label>
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by name or email..."
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm flex-1"
+                className="flex-1 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
               />
             </div>
 
             <button
               onClick={() => fetchAttendance()}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 cursor-pointer"
+              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
             >
               Refresh
             </button>
@@ -304,7 +292,7 @@ export default function HistoryPage() {
         </div>
 
         {/* Records table */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
           {loading ? (
             <div className="text-center py-12 text-gray-500">Loading...</div>
           ) : filteredRecords.length === 0 ? (
@@ -315,41 +303,41 @@ export default function HistoryPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-gray-50">
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Learner</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Check In</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch Out</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch In</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Lunch Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Check Out</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-600">Actions</th>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Learner</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Check In</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch Out</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch In</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch Status</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Check Out</th>
+                    <th className="text-left py-3 px-4 font-medium text-gray-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRecords.map((record) => (
-                    <tr key={record.id} className="border-b hover:bg-gray-50">
+                    <tr key={record.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4">
-                        <div className="font-medium">{record.expand?.learner?.name || "Unknown"}</div>
+                        <div className="font-medium text-gray-900">{record.expand?.learner?.name || "Unknown"}</div>
                         <div className="text-xs text-gray-500">{record.expand?.learner?.email}</div>
                       </td>
                       <td className="py-3 px-4">{statusBadge(record.status)}</td>
-                      <td className="py-3 px-4">{formatTime(record.time_in)}</td>
-                      <td className="py-3 px-4">{formatTime(getLunchOut(record))}</td>
-                      <td className="py-3 px-4">{formatTime(getLunchIn(record))}</td>
+                      <td className="py-3 px-4 text-gray-700">{formatTime(record.time_in)}</td>
+                      <td className="py-3 px-4 text-gray-700">{formatTime(getLunchOut(record))}</td>
+                      <td className="py-3 px-4 text-gray-700">{formatTime(getLunchIn(record))}</td>
                       <td className="py-3 px-4">{statusBadge(record.lunch_status)}</td>
-                      <td className="py-3 px-4">{formatTime(record.time_out)}</td>
+                      <td className="py-3 px-4 text-gray-700">{formatTime(record.time_out)}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => startEditing(record)}
-                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 cursor-pointer"
+                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded cursor-pointer hover:bg-blue-200"
                           >
                             Edit
                           </button>
                           <button
                             onClick={() => resetRecord(record)}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                            className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded cursor-pointer hover:bg-gray-200"
                           >
                             Reset
                           </button>
@@ -365,44 +353,44 @@ export default function HistoryPage() {
 
         {/* Summary stats */}
         {!loading && filteredRecords.length > 0 && (
-          <div className="mt-4 bg-white rounded-xl shadow-sm p-4 flex gap-8 text-sm">
+          <div className="mt-4 bg-white rounded-2xl shadow-sm p-4 flex flex-wrap gap-6 text-sm">
             <div>
-              <span className="text-gray-600">Total:</span>{" "}
-              <span className="font-semibold">{filteredRecords.length}</span>
+              <span className="text-gray-500">Total:</span>{" "}
+              <span className="font-semibold text-gray-900">{filteredRecords.length}</span>
             </div>
             <div>
-              <span className="text-gray-600">Present:</span>{" "}
-              <span className="font-semibold text-green-600">
+              <span className="text-gray-500">Present:</span>{" "}
+              <span className="font-semibold text-green-700">
                 {filteredRecords.filter((r) => r.status === "present").length}
               </span>
             </div>
             <div>
-              <span className="text-gray-600">Late:</span>{" "}
-              <span className="font-semibold text-yellow-600">
+              <span className="text-gray-500">Late:</span>{" "}
+              <span className="font-semibold text-yellow-700">
                 {filteredRecords.filter((r) => r.status === "late").length}
               </span>
             </div>
             <div>
-              <span className="text-gray-600">Absent:</span>{" "}
-              <span className="font-semibold text-red-600">
+              <span className="text-gray-500">Absent:</span>{" "}
+              <span className="font-semibold text-red-700">
                 {filteredRecords.filter((r) => r.status === "absent").length}
               </span>
             </div>
             <div>
-              <span className="text-gray-600">Justified Late:</span>{" "}
-              <span className="font-semibold text-blue-600">
+              <span className="text-gray-500">Justified Late:</span>{" "}
+              <span className="font-semibold text-blue-700">
                 {filteredRecords.filter((r) => r.status === "jLate").length}
               </span>
             </div>
             <div>
-              <span className="text-gray-600">Justified Absent:</span>{" "}
-              <span className="font-semibold text-purple-600">
+              <span className="text-gray-500">Justified Absent:</span>{" "}
+              <span className="font-semibold text-blue-700">
                 {filteredRecords.filter((r) => r.status === "jAbsent").length}
               </span>
             </div>
             <div>
-              <span className="text-gray-600">No Status:</span>{" "}
-              <span className="font-semibold text-gray-600">
+              <span className="text-gray-500">No Status:</span>{" "}
+              <span className="font-semibold text-gray-700">
                 {filteredRecords.filter((r) => !r.status).length}
               </span>
             </div>
@@ -412,28 +400,28 @@ export default function HistoryPage() {
         {/* Edit Modal */}
         {editingRecord && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full">
-              <h3 className="text-lg font-bold mb-4">
+            <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">
                 Edit Attendance: {editingRecord.expand?.learner?.name}
               </h3>
-              
+
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Check In</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Check In</label>
                     <input
                       type="time"
                       value={editForm.time_in}
                       onChange={(e) => setEditForm({ ...editForm, time_in: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Status</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                     <select
                       value={editForm.status}
                       onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     >
                       <option value="">— None —</option>
                       <option value="present">Present</option>
@@ -447,32 +435,32 @@ export default function HistoryPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch Out</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch Out</label>
                     <input
                       type="time"
                       value={editForm.lunch_out}
                       onChange={(e) => setEditForm({ ...editForm, lunch_out: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch In</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch In</label>
                     <input
                       type="time"
                       value={editForm.lunch_in}
                       onChange={(e) => setEditForm({ ...editForm, lunch_in: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Lunch Status</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch Status</label>
                     <select
                       value={editForm.lunch_status}
                       onChange={(e) => setEditForm({ ...editForm, lunch_status: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     >
                       <option value="">— None —</option>
                       <option value="present">Present</option>
@@ -483,27 +471,27 @@ export default function HistoryPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Check Out</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Check Out</label>
                     <input
                       type="time"
                       value={editForm.time_out}
                       onChange={(e) => setEditForm({ ...editForm, time_out: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 mt-6">
+              <div className="flex justify-end gap-2 mt-6">
                 <button
                   onClick={cancelEditing}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer"
+                  className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={saveEditing}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 cursor-pointer"
+                  className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
                 >
                   Save Changes
                 </button>

@@ -1,5 +1,6 @@
 import { TIME_THRESHOLDS } from "@learnlife/pb-client";
-import type { LunchEvent, AttendanceStatus } from "@learnlife/pb-client";
+import type { AttendanceRecord, LunchEvent, AttendanceStatus } from "@learnlife/pb-client";
+import { parsePBDate } from "./date-utils";
 
 /**
  * Snapshot of a learner's attendance record passed into the state machine.
@@ -160,4 +161,167 @@ export function computeCheckInAction(
 
   // ── Fallback: nothing left to record ─────────────────────────────────────
   return { type: "no_action", reason: "All check-ins complete for today" };
+}
+
+// ── Summary / aggregation helpers ────────────────────────────────────────────
+// Pure functions used by reporting views to roll up many attendance records
+// into per-learner or per-cohort counters. No side effects, no network calls —
+// callers load records however they like and pass them in.
+
+/**
+ * Rolled-up counters for a single learner (or cohort) over a set of records.
+ * All time values are "minutes past midnight" so they can be averaged and
+ * rendered consistently regardless of the day a record falls on.
+ */
+export interface AttendanceSummary {
+  daysTracked: number;        // records considered
+  present: number;
+  late: number;
+  absent: number;
+  jLate: number;
+  jAbsent: number;
+  avgCheckInMinutes: number | null;  // null if no records had time_in
+  avgCheckOutMinutes: number | null; // null if no records had time_out
+  totalLunchMinutes: number;         // summed duration across lunch_events pairs
+  lateLunches: number;               // lunch_status === "late"
+  missingCheckouts: number;          // time_in present but time_out missing
+  attendancePct: number;             // (present + late) / daysTracked * 100; 0 when no days
+}
+
+/** Minutes past local midnight for an ISO timestamp, or null if unparseable. */
+function minutesOfDay(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const d = parsePBDate(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
+ * Sum paired out/in lunch events into total minutes spent at lunch.
+ * Unpaired trailing "out" events (learner never returned) are ignored to avoid
+ * inflating the total with an open-ended duration. Legacy `lunch_out`/`lunch_in`
+ * fields are consulted when `lunch_events` is empty.
+ */
+function lunchMinutes(record: AttendanceRecord): number {
+  const events = record.lunch_events;
+  if (events && events.length > 0) {
+    let total = 0;
+    let openOut: LunchEvent | null = null;
+    for (const ev of events) {
+      if (ev.type === "out") {
+        openOut = ev;
+      } else if (ev.type === "in" && openOut) {
+        const start = parsePBDate(openOut.time).getTime();
+        const end = parsePBDate(ev.time).getTime();
+        if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+          total += Math.round((end - start) / 60000);
+        }
+        openOut = null;
+      }
+    }
+    return total;
+  }
+  if (record.lunch_out && record.lunch_in) {
+    const start = parsePBDate(record.lunch_out).getTime();
+    const end = parsePBDate(record.lunch_in).getTime();
+    if (!Number.isNaN(start) && !Number.isNaN(end) && end > start) {
+      return Math.round((end - start) / 60000);
+    }
+  }
+  return 0;
+}
+
+/**
+ * Aggregate a set of attendance records into summary counters.
+ * Does not assume the records share a learner — caller can pass per-learner
+ * slices via `summarizeByLearner` or a pre-filtered cohort slice directly.
+ */
+export function summarizeAttendance(records: AttendanceRecord[]): AttendanceSummary {
+  let present = 0, late = 0, absent = 0, jLate = 0, jAbsent = 0;
+  let checkInSum = 0, checkInCount = 0;
+  let checkOutSum = 0, checkOutCount = 0;
+  let totalLunch = 0;
+  let lateLunches = 0;
+  let missingCheckouts = 0;
+
+  for (const r of records) {
+    switch (r.status) {
+      case "present": present++; break;
+      case "late": late++; break;
+      case "absent": absent++; break;
+      case "jLate": jLate++; break;
+      case "jAbsent": jAbsent++; break;
+    }
+    const inMin = minutesOfDay(r.time_in);
+    if (inMin !== null) { checkInSum += inMin; checkInCount++; }
+    const outMin = minutesOfDay(r.time_out);
+    if (outMin !== null) { checkOutSum += outMin; checkOutCount++; }
+
+    totalLunch += lunchMinutes(r);
+    if (r.lunch_status === "late") lateLunches++;
+    if (r.time_in && !r.time_out) missingCheckouts++;
+  }
+
+  const daysTracked = records.length;
+  // Attendance rate = showed-up days (present or late, incl. justified variants) ÷ total tracked.
+  const attendancePct = daysTracked === 0
+    ? 0
+    : Math.round(((present + late + jLate) / daysTracked) * 100);
+
+  return {
+    daysTracked,
+    present, late, absent, jLate, jAbsent,
+    avgCheckInMinutes: checkInCount === 0 ? null : Math.round(checkInSum / checkInCount),
+    avgCheckOutMinutes: checkOutCount === 0 ? null : Math.round(checkOutSum / checkOutCount),
+    totalLunchMinutes: totalLunch,
+    lateLunches,
+    missingCheckouts,
+    attendancePct,
+  };
+}
+
+/**
+ * Group records by `learner` FK and summarize each group.
+ * Returns a Map keyed by learner id; callers that have a learner list can
+ * iterate it and look up (or default to an empty summary for learners with
+ * zero records in the range).
+ */
+export function summarizeByLearner(
+  records: AttendanceRecord[],
+): Map<string, AttendanceSummary> {
+  const buckets = new Map<string, AttendanceRecord[]>();
+  for (const r of records) {
+    const arr = buckets.get(r.learner);
+    if (arr) arr.push(r);
+    else buckets.set(r.learner, [r]);
+  }
+  const out = new Map<string, AttendanceSummary>();
+  for (const [learnerId, group] of buckets) {
+    out.set(learnerId, summarizeAttendance(group));
+  }
+  return out;
+}
+
+/** Empty summary used when a learner has zero records in the selected range. */
+export function emptySummary(): AttendanceSummary {
+  return {
+    daysTracked: 0,
+    present: 0, late: 0, absent: 0, jLate: 0, jAbsent: 0,
+    avgCheckInMinutes: null,
+    avgCheckOutMinutes: null,
+    totalLunchMinutes: 0,
+    lateLunches: 0,
+    missingCheckouts: 0,
+    attendancePct: 0,
+  };
+}
+
+/** Format minutes-past-midnight as "HH:MM AM/PM"; returns "—" for null. */
+export function formatMinutesOfDay(min: number | null): string {
+  if (min === null) return "—";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
 }

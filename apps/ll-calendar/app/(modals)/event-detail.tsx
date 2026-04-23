@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { deleteCalendarEntry } from "@/lib/pocketbase";
+import { Colors, Fonts } from "@/constants/theme";
 
 export default function EventDetailModal() {
   const params = useLocalSearchParams<{
@@ -25,7 +26,7 @@ export default function EventDetailModal() {
   const title = params.title ?? "Event";
   const time = params.time ?? "";
   const emoji = params.emoji || "📅";
-  const color = params.color || "#B892FF";
+  const color = params.color || "#4F6B4A";
   const recordId = params.recordId ?? "";
 
   function handleDelete() {
@@ -51,27 +52,32 @@ export default function EventDetailModal() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <View style={s.header}>
+      <View style={[s.hero, { backgroundColor: color }]}>
         <Pressable style={s.closeBtn} onPress={() => router.back()}>
-          <MaterialIcons name="close" size={22} color="#2D1B4E" />
+          <MaterialIcons name="close" size={20} color={Colors.textPrimary} />
         </Pressable>
-        <Text style={s.headerTitle}>Event Details</Text>
-        <View style={{ width: 36 }} />
       </View>
 
       <View style={s.body}>
-        <View style={[s.emojiCircle, { backgroundColor: color + "22" }]}>
-          <Text style={s.emoji}>{emoji}</Text>
+        <View style={s.pillRow}>
+          <View style={s.limePill}>
+            <Text style={s.limePillText}>EVENT</Text>
+          </View>
+          <View style={s.outlinePill}>
+            <Text style={s.outlinePillText}>DETAILS</Text>
+          </View>
         </View>
 
-        <Text style={s.title}>{title}</Text>
+        <Text style={s.title}>{emoji} {title}</Text>
+
+        <Text style={s.timeText}>{time}</Text>
+
+        <View style={s.divider} />
 
         <View style={s.infoRow}>
-          <MaterialIcons name="schedule" size={20} color="#8A7E9E" />
-          <Text style={s.infoText}>{time}</Text>
+          <MaterialIcons name="schedule" size={18} color={Colors.muted} />
+          <Text style={s.infoText}>{time || "No time set"}</Text>
         </View>
-
-        <View style={[s.colorStrip, { backgroundColor: color }]} />
       </View>
 
       <View style={s.actions}>
@@ -91,92 +97,111 @@ export default function EventDetailModal() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    backgroundColor: "#FFFFFF",
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(138,126,158,0.1)",
+  safe: { flex: 1, backgroundColor: Colors.background },
+  hero: {
+    height: 180,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.textPrimary,
+    padding: 14,
+    alignItems: "flex-start",
   },
   closeBtn: {
     width: 36,
     height: 36,
     borderRadius: 999,
-    backgroundColor: "#F3F5F0",
+    backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.textPrimary,
     alignItems: "center",
     justifyContent: "center",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#2D1B4E",
   },
   body: {
-    alignItems: "center",
     paddingHorizontal: 24,
-    paddingTop: 40,
-    gap: 16,
+    paddingTop: 20,
+    gap: 10,
   },
-  emojiCircle: {
-    width: 80,
-    height: 80,
+  pillRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 2,
+  },
+  limePill: {
+    backgroundColor: Colors.lime,
     borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  emoji: { fontSize: 36 },
+  limePillText: {
+    color: Colors.textPrimary,
+    fontSize: 10,
+    fontWeight: "800",
+    fontFamily: Fonts.mono,
+    letterSpacing: 0.8,
+  },
+  outlinePill: {
+    borderWidth: 1.5,
+    borderColor: Colors.textPrimary,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  outlinePillText: {
+    color: Colors.textPrimary,
+    fontSize: 10,
+    fontWeight: "800",
+    fontFamily: Fonts.mono,
+    letterSpacing: 0.8,
+  },
   title: {
-    fontSize: 26,
+    fontSize: 30,
+    fontFamily: Fonts.display,
     fontWeight: "700",
-    color: "#2D1B4E",
-    textAlign: "center",
+    color: Colors.textPrimary,
+    letterSpacing: -0.5,
+    lineHeight: 34,
+    marginTop: 4,
+  },
+  timeText: {
+    fontSize: 12,
+    color: Colors.muted,
+    fontFamily: Fonts.mono,
+    fontWeight: "600",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.divider,
+    marginVertical: 14,
   },
   infoRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 1,
+    gap: 10,
   },
   infoText: {
-    fontSize: 16,
+    fontSize: 14.5,
     fontWeight: "600",
-    color: "#2D1B4E",
-  },
-  colorStrip: {
-    height: 6,
-    width: 64,
-    borderRadius: 999,
-    marginTop: 8,
+    color: Colors.textPrimary,
   },
   actions: {
     paddingHorizontal: 24,
-    paddingTop: 40,
+    paddingTop: "auto" as any,
+    paddingBottom: 24,
+    marginTop: "auto" as any,
   },
   deleteBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#FF6B35",
+    backgroundColor: Colors.orange,
     borderRadius: 999,
     paddingVertical: 14,
   },
   deleteBtnDisabled: { opacity: 0.5 },
   deleteBtnText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     color: "#FFFFFF",
+    fontFamily: Fonts.display,
   },
 });

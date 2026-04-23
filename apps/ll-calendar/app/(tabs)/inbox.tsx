@@ -8,6 +8,7 @@ import {
   fetchConversations,
   type Conversation,
 } from "@/lib/pocketbase";
+import { Colors, Fonts } from "@/constants/theme";
 import {
   ActivityIndicator,
   Pressable,
@@ -18,7 +19,7 @@ import {
   View,
 } from "react-native";
 
-const INITIALS_COLORS = ["#B892FF", "#FF6B35", "#C4F34A", "#4ADE80", "#60A5FA"];
+const INITIALS_COLORS = ["#4F6B4A", "#C26B3C", "#C4D98B", "#4ADE80", "#60A5FA"];
 
 function getInitialsColor(name: string) {
   let hash = 0;
@@ -165,29 +166,37 @@ export default function InboxScreen() {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.header}>
-        <Text style={s.title}>Messages</Text>
+        <View>
+          <Text style={s.kicker}>Inbox</Text>
+          <Text style={s.title}>Messages</Text>
+        </View>
         {(role === "lg" || role === "admin") && (
           <Pressable style={s.addBtn}>
-            <MaterialIcons name="add" size={28} color="#2D1B4E" />
+            <MaterialIcons name="add" size={22} color={Colors.textPrimary} />
           </Pressable>
         )}
       </View>
 
       {loading ? (
         <View style={s.loadingWrap}>
-          <ActivityIndicator size="small" color="#C4F34A" />
+          <ActivityIndicator size="small" color={Colors.lavender} />
         </View>
       ) : conversations.length === 0 ? (
         <View style={s.emptyState}>
-          <Text style={s.emptyEmoji}>💬</Text>
-          <Text style={s.emptyTitle}>All caught up!</Text>
-          <Text style={s.emptySubtext}>No conversations yet</Text>
+          <Text style={s.emptyTitle}>All caught up</Text>
+          <Text style={s.emptySubtext}>No conversations yet.</Text>
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll} style={s.scrollView}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={s.scroll}
+          style={s.scrollView}
+        >
           {unread.length > 0 && (
             <>
-              <Text style={s.sectionLabel}>NEEDS ACTION</Text>
+              <Text style={s.sectionLabel}>
+                Needs reply · {unread.length}
+              </Text>
               {unread.map((row) => (
                 <ConversationRow key={row.id} row={row} card />
               ))}
@@ -196,8 +205,10 @@ export default function InboxScreen() {
 
           {read.length > 0 && (
             <>
-              <Text style={[s.sectionLabel, unread.length > 0 && { marginTop: 24 }]}>
-                RECENT
+              <Text
+                style={[s.sectionLabel, unread.length > 0 && { marginTop: 24 }]}
+              >
+                Recent
               </Text>
               <View style={s.recentList}>
                 {read.map((row, i) => (
@@ -218,50 +229,72 @@ export default function InboxScreen() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: Colors.background },
   scrollView: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center" },
-  emptyState: { flex: 1, justifyContent: "center", alignItems: "center", gap: 6 },
-  emptyEmoji: { fontSize: 42 },
-  emptyTitle: { fontSize: 20, fontWeight: "700", color: "#2D1B4E" },
-  emptySubtext: { fontSize: 15, fontWeight: "500", color: "#8A7E9E" },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 26,
+    fontWeight: "700",
+    fontFamily: Fonts.display,
+    color: Colors.textPrimary,
+    letterSpacing: -0.5,
+  },
+  emptySubtext: { fontSize: 14, fontWeight: "500", color: Colors.muted },
   header: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "space-between",
     paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  kicker: {
+    color: Colors.muted,
+    fontSize: 10,
+    fontFamily: Fonts.mono,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    marginBottom: 2,
   },
   title: {
-    fontSize: 32,
+    fontSize: 34,
+    fontFamily: Fonts.display,
     fontWeight: "700",
-    color: "#2D1B4E",
+    color: Colors.textPrimary,
+    letterSpacing: -0.7,
+    lineHeight: 36,
   },
   addBtn: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     borderRadius: 999,
-    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: Colors.textPrimary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
   },
   scroll: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
+    paddingHorizontal: 0,
+    paddingBottom: 110,
   },
   sectionLabel: {
-    fontSize: 12,
+    fontSize: 10,
+    fontFamily: Fonts.mono,
     fontWeight: "700",
-    color: "#8A7E9E",
-    letterSpacing: 1,
-    paddingHorizontal: 8,
-    marginBottom: 10,
+    color: Colors.muted,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+    paddingHorizontal: 24,
+    marginBottom: 6,
+    marginTop: 4,
   },
   recentList: {
     gap: 0,
@@ -269,50 +302,46 @@ const s = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    borderRadius: 16,
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
   rowCard: {
-    backgroundColor: "#FFFFFF",
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 3,
-    marginBottom: 4,
+    backgroundColor: Colors.surface,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.orange,
   },
   avatarWrap: {
     position: "relative",
     flexShrink: 0,
   },
   avatar: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
     borderRadius: 999,
   },
   avatarInitials: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
   initialsText: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "700",
+    fontFamily: Fonts.display,
   },
   statusDot: {
     position: "absolute",
-    width: 14,
-    height: 14,
+    width: 11,
+    height: 11,
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: "#F9FAFC",
+    borderColor: Colors.background,
   },
-  dotOrange: { backgroundColor: "#FF6B35" },
-  dotLime: { backgroundColor: "#C4F34A" },
+  dotOrange: { backgroundColor: Colors.orange },
+  dotLime: { backgroundColor: Colors.lime },
   dotTopRight: { top: -1, right: -1 },
   dotBottomRight: { bottom: 0, right: 0 },
   rowBody: { flex: 1, minWidth: 0 },
@@ -320,48 +349,49 @@ const s = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "baseline",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   senderBold: {
-    fontSize: 17,
+    fontSize: 14.5,
     fontWeight: "700",
-    color: "#2D1B4E",
+    color: Colors.textPrimary,
     flex: 1,
     marginRight: 8,
   },
   senderNormal: {
-    fontSize: 17,
-    fontWeight: "500",
-    color: "#2D1B4E",
+    fontSize: 14.5,
+    fontWeight: "600",
+    color: Colors.textPrimary,
     flex: 1,
     marginRight: 8,
   },
   time: {
-    fontSize: 13,
+    fontSize: 11,
+    fontFamily: Fonts.mono,
     flexShrink: 0,
   },
   timeUnread: {
     fontWeight: "700",
-    color: "#FF6B35",
+    color: Colors.orange,
   },
   timeMuted: {
     fontWeight: "500",
-    color: "#8A7E9E",
+    color: Colors.muted,
   },
   previewBold: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#2D1B4E",
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.textPrimary,
   },
   previewMuted: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "500",
-    color: "#8A7E9E",
+    color: Colors.muted,
   },
   divider: {
     height: 1,
-    backgroundColor: "rgba(138,126,158,0.1)",
-    marginLeft: 84,
-    marginRight: 12,
+    backgroundColor: Colors.divider,
+    marginLeft: 80,
+    marginRight: 24,
   },
 });

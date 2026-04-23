@@ -17,6 +17,7 @@ import {
   expandEvents,
   fetchCalendarEvents,
 } from "@/lib/pocketbase";
+import { Colors, Fonts } from "@/constants/theme";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -124,11 +125,14 @@ export default function CalendarScreen() {
       <View style={s.calHeader}>
         <View style={s.monthNav}>
           <Pressable style={s.navBtn} onPress={prevMonth}>
-            <MaterialIcons name="chevron-left" size={26} color="#2D1B4E" />
+            <MaterialIcons name="chevron-left" size={24} color={Colors.textPrimary} />
           </Pressable>
-          <Text style={s.monthTitle}>{MONTHS[displayMonth]} {displayYear}</Text>
+          <View style={{ alignItems: "center" }}>
+            <Text style={s.kicker}>{displayYear}</Text>
+            <Text style={s.monthTitle}>{MONTHS[displayMonth]}</Text>
+          </View>
           <Pressable style={s.navBtn} onPress={nextMonth}>
-            <MaterialIcons name="chevron-right" size={26} color="#2D1B4E" />
+            <MaterialIcons name="chevron-right" size={24} color={Colors.textPrimary} />
           </Pressable>
         </View>
 
@@ -191,7 +195,7 @@ export default function CalendarScreen() {
 
         {loading ? (
           <View style={s.loadingWrap}>
-            <ActivityIndicator size="small" color="#C4F34A" />
+            <ActivityIndicator size="small" color={Colors.lavender} />
           </View>
         ) : selectedEvents.length === 0 ? (
           <View style={s.emptyState}>
@@ -220,17 +224,11 @@ export default function CalendarScreen() {
               }
             >
               <View style={[s.eventAccent, { backgroundColor: ev.color }]} />
-              <View style={[s.eventIconCircle, { backgroundColor: ev.color + "22" }]}>
-                <Text style={s.eventEmoji}>{ev.emoji || "📅"}</Text>
-              </View>
               <View style={s.eventBody}>
                 <Text style={s.eventTitle}>{ev.title}</Text>
-                <View style={s.eventTimeRow}>
-                  <MaterialIcons name="schedule" size={14} color="#8A7E9E" />
-                  <Text style={s.eventTime}>{ev.time}</Text>
-                </View>
+                <Text style={s.eventTime}>{ev.time}</Text>
               </View>
-              <MaterialIcons name="chevron-right" size={22} color="#8A7E9E" />
+              <MaterialIcons name="chevron-right" size={22} color={Colors.muted} />
             </Pressable>
           ))
         )}
@@ -238,7 +236,7 @@ export default function CalendarScreen() {
 
       {/* FAB */}
       <Pressable style={s.fab} onPress={openCreateForm}>
-        <MaterialIcons name="add" size={28} color="#2D1B4E" />
+        <MaterialIcons name="add" size={26} color={Colors.background} />
       </Pressable>
 
       <BottomNav active="calendar" />
@@ -247,122 +245,141 @@ export default function CalendarScreen() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: Colors.background },
   calHeader: {
-    backgroundColor: "#FFFFFF",
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    paddingTop: 8,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1.5,
+    borderBottomColor: Colors.textPrimary,
+    paddingTop: 10,
     paddingBottom: 16,
-    paddingHorizontal: 16,
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.07,
-    shadowRadius: 20,
-    elevation: 5,
+    paddingHorizontal: 20,
     zIndex: 10,
   },
   monthNav: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
-    paddingHorizontal: 4,
+    marginBottom: 14,
   },
   navBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: 999,
-    backgroundColor: "#F9FAFC",
+    borderWidth: 1,
+    borderColor: Colors.divider,
     alignItems: "center",
     justifyContent: "center",
   },
-  monthTitle: { fontSize: 22, fontWeight: "700", color: "#2D1B4E" },
-  weekRow: { flexDirection: "row", marginBottom: 8 },
+  kicker: {
+    color: Colors.muted,
+    fontSize: 10,
+    fontFamily: Fonts.mono,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  monthTitle: {
+    fontSize: 26,
+    fontWeight: "700",
+    fontFamily: Fonts.display,
+    color: Colors.textPrimary,
+    letterSpacing: -0.5,
+    lineHeight: 30,
+  },
+  weekRow: { flexDirection: "row", marginBottom: 6 },
   weekDay: {
     flex: 1,
     textAlign: "center",
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: "700",
-    color: "#8A7E9E",
+    color: Colors.muted,
+    fontFamily: Fonts.mono,
+    letterSpacing: 1,
   },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   dayCell: {
     width: `${100 / 7}%`,
     alignItems: "center",
     paddingVertical: 3,
-    minHeight: 52,
+    minHeight: 50,
   },
   dayCircle: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
-  dayCircleSelected: { backgroundColor: "#C4F34A" },
-  dayCircleToday: { borderWidth: 2, borderColor: "#C4F34A" },
-  dayText: { fontSize: 15, fontWeight: "600", color: "#2D1B4E" },
-  dayTextFaded: { color: "#8A7E9E", opacity: 0.45 },
-  dayTextSelected: { fontWeight: "800" },
-  dotsRow: { flexDirection: "row", gap: 2, marginTop: 2, alignItems: "center" },
-  dot: { width: 5, height: 5, borderRadius: 999 },
+  dayCircleSelected: { backgroundColor: Colors.textPrimary },
+  dayCircleToday: { borderWidth: 1.5, borderColor: Colors.textPrimary, borderStyle: "dashed" },
+  dayText: { fontSize: 14, fontWeight: "500", color: Colors.textPrimary },
+  dayTextFaded: { color: Colors.muted, opacity: 0.45 },
+  dayTextSelected: { color: Colors.background, fontWeight: "700" },
+  dotsRow: { flexDirection: "row", gap: 2, marginTop: 3, alignItems: "center" },
+  dot: { width: 4, height: 4, borderRadius: 999 },
   eventScroll: { flex: 1 },
   eventContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 120,
-    gap: 12,
+    gap: 0,
   },
-  dayLabel: { fontSize: 18, fontWeight: "700", color: "#2D1B4E", marginBottom: 4 },
+  dayLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    fontFamily: Fonts.display,
+    color: Colors.textPrimary,
+    marginBottom: 10,
+    letterSpacing: -0.2,
+  },
   loadingWrap: { paddingTop: 32, alignItems: "center" },
-  emptyState: { alignItems: "center", paddingTop: 40, opacity: 0.7 },
-  emptyEmoji: { fontSize: 42, marginBottom: 8 },
-  emptyText: { fontSize: 16, color: "#8A7E9E", fontWeight: "600", marginBottom: 16 },
+  emptyState: { alignItems: "center", paddingTop: 40, gap: 10 },
+  emptyEmoji: { fontSize: 32, marginBottom: 4 },
+  emptyText: { fontSize: 14, color: Colors.muted, fontWeight: "500" },
   emptyAddBtn: {
-    backgroundColor: "#C4F34A",
+    backgroundColor: Colors.textPrimary,
     borderRadius: 999,
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  emptyAddText: { fontSize: 15, fontWeight: "700", color: "#2D1B4E" },
+  emptyAddText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: Colors.background,
+    fontFamily: Fonts.display,
+  },
   eventCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    backgroundColor: Colors.surface,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    padding: 14,
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
+    paddingVertical: 12,
+    paddingLeft: 18,
+    paddingRight: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.divider,
     overflow: "hidden",
   },
   eventAccent: {
     position: "absolute",
     left: 0,
-    top: 0,
-    bottom: 0,
-    width: 6,
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
+    top: 12,
+    bottom: 12,
+    width: 3,
   },
-  eventIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 8,
-    flexShrink: 0,
-  },
-  eventEmoji: { fontSize: 22 },
   eventBody: { flex: 1 },
-  eventTitle: { fontSize: 16, fontWeight: "700", color: "#2D1B4E" },
-  eventTimeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
-  eventTime: { fontSize: 13, color: "#8A7E9E", fontWeight: "600" },
+  eventTitle: {
+    fontSize: 14.5,
+    fontWeight: "700",
+    color: Colors.textPrimary,
+  },
+  eventTime: {
+    fontSize: 11,
+    color: Colors.muted,
+    fontWeight: "600",
+    fontFamily: Fonts.mono,
+    marginTop: 2,
+  },
   fab: {
     position: "absolute",
     bottom: 90,
@@ -370,10 +387,10 @@ const s = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 999,
-    backgroundColor: "#C4F34A",
+    backgroundColor: Colors.textPrimary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2D1B4E",
+    shadowColor: Colors.textPrimary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
     shadowRadius: 16,

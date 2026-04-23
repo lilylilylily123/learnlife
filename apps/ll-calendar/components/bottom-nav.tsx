@@ -1,6 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Colors, Fonts } from "@/constants/theme";
 
 export type ActiveTab = "home" | "calendar" | "inbox";
 
@@ -12,8 +13,19 @@ const TABS: {
   notifDot?: boolean;
 }[] = [
   { id: "home", icon: "home", label: "Home", route: "/(tabs)/" },
-  { id: "calendar", icon: "calendar-month", label: "Calendar", route: "/(tabs)/calendar" },
-  { id: "inbox", icon: "chat-bubble", label: "Inbox", route: "/(tabs)/inbox", notifDot: true },
+  {
+    id: "calendar",
+    icon: "calendar-month",
+    label: "Calendar",
+    route: "/(tabs)/calendar",
+  },
+  {
+    id: "inbox",
+    icon: "chat-bubble-outline",
+    label: "Inbox",
+    route: "/(tabs)/inbox",
+    notifDot: true,
+  },
 ];
 
 export function BottomNav({ active }: { active: ActiveTab }) {
@@ -33,12 +45,14 @@ export function BottomNav({ active }: { active: ActiveTab }) {
             <View style={s.iconWrap}>
               <MaterialIcons
                 name={tab.icon}
-                size={24}
-                color={isActive ? "#2D1B4E" : "#8A7E9E"}
+                size={22}
+                color={isActive ? Colors.textPrimary : Colors.muted}
               />
               {tab.notifDot && !isActive && <View style={s.notifDot} />}
             </View>
-            <Text style={isActive ? s.labelActive : s.label}>{tab.label}</Text>
+            <Text style={isActive ? s.labelActive : s.label}>
+              {tab.label.toUpperCase()}
+            </Text>
           </Pressable>
         );
       })}
@@ -49,11 +63,10 @@ export function BottomNav({ active }: { active: ActiveTab }) {
 const s = StyleSheet.create({
   bar: {
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1.5,
+    borderTopColor: Colors.textPrimary,
     bottom: 0,
-    elevation: 5,
     flexDirection: "row",
     justifyContent: "space-around",
     left: 0,
@@ -61,48 +74,47 @@ const s = StyleSheet.create({
     paddingTop: 10,
     position: "absolute",
     right: 0,
-    shadowColor: "#2D1B4E",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 24,
   },
   item: {
     alignItems: "center",
     flex: 1,
-    gap: 2,
+    gap: 4,
     position: "relative",
+    paddingVertical: 2,
   },
   indicator: {
-    backgroundColor: "#C4F34A",
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    height: 4,
+    backgroundColor: Colors.textPrimary,
+    height: 2,
     position: "absolute",
-    top: -14,
-    width: 44,
+    top: -10,
+    width: 30,
   },
   iconWrap: {
     position: "relative",
   },
   notifDot: {
-    backgroundColor: "#FF6B35",
-    borderColor: "#FFFFFF",
+    backgroundColor: Colors.orange,
+    borderColor: Colors.surface,
     borderRadius: 5,
     borderWidth: 2,
     height: 10,
     position: "absolute",
-    right: -2,
-    top: -2,
+    right: -3,
+    top: -3,
     width: 10,
   },
   labelActive: {
-    color: "#2D1B4E",
-    fontSize: 12,
+    color: Colors.textPrimary,
+    fontSize: 9.5,
     fontWeight: "700",
+    fontFamily: Fonts.mono,
+    letterSpacing: 0.8,
   },
   label: {
-    color: "#8A7E9E",
-    fontSize: 12,
+    color: Colors.muted,
+    fontSize: 9.5,
     fontWeight: "600",
+    fontFamily: Fonts.mono,
+    letterSpacing: 0.8,
   },
 });

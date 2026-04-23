@@ -20,9 +20,9 @@ import { useAuth } from "@/context/AuthContext";
 import { createCalendarEntry } from "@/lib/pocketbase";
 
 const COLORS = [
-  "#B892FF",
-  "#FF6B35",
-  "#C4F34A",
+  "#4F6B4A",
+  "#C26B3C",
+  "#C4D98B",
   "#4ADE80",
   "#60A5FA",
   "#F97316",
@@ -218,7 +218,7 @@ export default function CreateEventModal() {
       {/* Header */}
       <View style={s.header}>
         <Pressable style={s.closeBtn} onPress={() => router.back()}>
-          <MaterialIcons name="close" size={22} color="#2D1B4E" />
+          <MaterialIcons name="close" size={22} color="#1F1B16" />
         </Pressable>
         <Text style={s.headerTitle}>{title}</Text>
         <Pressable
@@ -244,7 +244,7 @@ export default function CreateEventModal() {
             <TextInput
               style={s.input}
               placeholder={isGuide ? "e.g. Morning Surf Session" : "e.g. Math Class"}
-              placeholderTextColor="#8A7E9E"
+              placeholderTextColor="#807663"
               value={name}
               onChangeText={setName}
             />
@@ -258,7 +258,7 @@ export default function CreateEventModal() {
               onPress={() => setShowEmojiPicker((v) => !v)}
             >
               <Text style={s.emojiDisplay}>{emoji}</Text>
-              <MaterialIcons name="expand-more" size={20} color="#8A7E9E" />
+              <MaterialIcons name="expand-more" size={20} color="#807663" />
             </Pressable>
             {showEmojiPicker && (
               <View style={s.emojiGrid}>
@@ -405,7 +405,7 @@ export default function CreateEventModal() {
                   style={s.pickerBtn}
                   onPress={() => setActivePicker("date")}
                 >
-                  <MaterialIcons name="calendar-today" size={18} color="#8A7E9E" />
+                  <MaterialIcons name="calendar-today" size={18} color="#807663" />
                   <Text style={s.pickerBtnText}>{formatDate(eventDate)}</Text>
                 </Pressable>
               </View>
@@ -417,7 +417,7 @@ export default function CreateEventModal() {
                     style={s.pickerBtn}
                     onPress={() => setActivePicker("time-start")}
                   >
-                    <MaterialIcons name="schedule" size={18} color="#8A7E9E" />
+                    <MaterialIcons name="schedule" size={18} color="#807663" />
                     <Text style={s.pickerBtnText}>{formatTime(startTime)}</Text>
                   </Pressable>
                 </View>
@@ -427,7 +427,7 @@ export default function CreateEventModal() {
                     style={s.pickerBtn}
                     onPress={() => setActivePicker("time-end")}
                   >
-                    <MaterialIcons name="schedule" size={18} color="#8A7E9E" />
+                    <MaterialIcons name="schedule" size={18} color="#807663" />
                     <Text style={s.pickerBtnText}>{formatTime(endTime)}</Text>
                   </Pressable>
                 </View>
@@ -534,7 +534,7 @@ export default function CreateEventModal() {
                     style={s.pickerBtn}
                     onPress={() => setActivePicker("date")}
                   >
-                    <MaterialIcons name="calendar-today" size={18} color="#8A7E9E" />
+                    <MaterialIcons name="calendar-today" size={18} color="#807663" />
                     <Text style={s.pickerBtnText}>{formatDate(eventDate)}</Text>
                   </Pressable>
                   {Platform.OS === "ios" && showingDate && (
@@ -558,7 +558,7 @@ export default function CreateEventModal() {
                     style={s.pickerBtn}
                     onPress={() => setActivePicker("time-start")}
                   >
-                    <MaterialIcons name="schedule" size={18} color="#8A7E9E" />
+                    <MaterialIcons name="schedule" size={18} color="#807663" />
                     <Text style={s.pickerBtnText}>{formatTime(startTime)}</Text>
                   </Pressable>
                 </View>
@@ -568,7 +568,7 @@ export default function CreateEventModal() {
                     style={s.pickerBtn}
                     onPress={() => setActivePicker("time-end")}
                   >
-                    <MaterialIcons name="schedule" size={18} color="#8A7E9E" />
+                    <MaterialIcons name="schedule" size={18} color="#807663" />
                     <Text style={s.pickerBtnText}>{formatTime(endTime)}</Text>
                   </Pressable>
                 </View>
@@ -610,7 +610,7 @@ export default function CreateEventModal() {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F9FAFC" },
+  safe: { flex: 1, backgroundColor: "#F3EEE5" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -619,44 +619,44 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(138,126,158,0.1)",
+    borderBottomColor: "rgba(128,118,99,0.1)",
   },
   closeBtn: {
     width: 36,
     height: 36,
     borderRadius: 999,
-    backgroundColor: "#F3F5F0",
+    backgroundColor: "#EAE3D3",
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#2D1B4E",
+    color: "#1F1B16",
   },
   saveBtn: {
-    backgroundColor: "#C4F34A",
+    backgroundColor: "#C4D98B",
     borderRadius: 999,
     paddingHorizontal: 18,
     paddingVertical: 8,
   },
   saveBtnDisabled: { opacity: 0.5 },
-  saveBtnText: { fontSize: 15, fontWeight: "700", color: "#2D1B4E" },
+  saveBtnText: { fontSize: 15, fontWeight: "700", color: "#1F1B16" },
   scroll: {
     padding: 20,
     gap: 20,
   },
   field: { gap: 8 },
-  label: { fontSize: 13, fontWeight: "700", color: "#2D1B4E" },
-  sublabel: { fontSize: 12, fontWeight: "600", color: "#8A7E9E", marginBottom: 4 },
+  label: { fontSize: 13, fontWeight: "700", color: "#1F1B16" },
+  sublabel: { fontSize: 12, fontWeight: "600", color: "#807663", marginBottom: 4 },
   input: {
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === "ios" ? 14 : 10,
     fontSize: 16,
-    color: "#2D1B4E",
-    shadowColor: "#2D1B4E",
+    color: "#1F1B16",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -671,7 +671,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -685,7 +685,7 @@ const s = StyleSheet.create({
     borderRadius: 14,
     padding: 10,
     gap: 4,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -698,7 +698,7 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  emojiCellActive: { backgroundColor: "#C4F34A" },
+  emojiCellActive: { backgroundColor: "#C4D98B" },
   emojiCellText: { fontSize: 22 },
   // Color
   swatchRow: { flexDirection: "row", gap: 12 },
@@ -709,7 +709,7 @@ const s = StyleSheet.create({
   },
   swatchActive: {
     borderWidth: 3,
-    borderColor: "#2D1B4E",
+    borderColor: "#1F1B16",
   },
   // Picker button
   pickerBtn: {
@@ -720,13 +720,13 @@ const s = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
   },
-  pickerBtnText: { fontSize: 16, color: "#2D1B4E", fontWeight: "500" },
+  pickerBtnText: { fontSize: 16, color: "#1F1B16", fontWeight: "500" },
   inlinePicker: {
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -741,29 +741,29 @@ const s = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#FFFFFF",
     alignItems: "center",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
   },
-  toggleBtnActive: { backgroundColor: "#C4F34A" },
-  toggleText: { fontSize: 15, fontWeight: "600", color: "#8A7E9E" },
-  toggleTextActive: { color: "#2D1B4E", fontWeight: "700" },
+  toggleBtnActive: { backgroundColor: "#C4D98B" },
+  toggleText: { fontSize: 15, fontWeight: "600", color: "#807663" },
+  toggleTextActive: { color: "#1F1B16", fontWeight: "700" },
   programRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   programBtn: {
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 999,
     backgroundColor: "#FFFFFF",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
   },
-  programBtnActive: { backgroundColor: "#B892FF" },
-  programText: { fontSize: 14, fontWeight: "600", color: "#8A7E9E" },
+  programBtnActive: { backgroundColor: "#4F6B4A" },
+  programText: { fontSize: 14, fontWeight: "600", color: "#807663" },
   programTextActive: { color: "#FFFFFF", fontWeight: "700" },
   daysRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   dayBtn: {
@@ -771,13 +771,13 @@ const s = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 999,
     backgroundColor: "#FFFFFF",
-    shadowColor: "#2D1B4E",
+    shadowColor: "#1F1B16",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 1,
   },
-  dayBtnActive: { backgroundColor: "#C4F34A" },
-  dayText: { fontSize: 14, fontWeight: "600", color: "#8A7E9E" },
-  dayTextActive: { color: "#2D1B4E", fontWeight: "700" },
+  dayBtnActive: { backgroundColor: "#C4D98B" },
+  dayText: { fontSize: 14, fontWeight: "600", color: "#807663" },
+  dayTextActive: { color: "#1F1B16", fontWeight: "700" },
 });
