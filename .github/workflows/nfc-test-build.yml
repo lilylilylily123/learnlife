@@ -100,6 +100,8 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build the app (without signing)
-        run: pnpm tauri build ${{ matrix.args }}
+      - name: Build the app (compile only, no bundle/signing)
+        # --no-bundle skips DMG/MSI packaging and the updater-artifact signing
+        # step (which requires TAURI_SIGNING_PRIVATE_KEY, set only in release).
+        run: pnpm tauri build --no-bundle ${{ matrix.args }}
         working-directory: apps/nfc-attender
