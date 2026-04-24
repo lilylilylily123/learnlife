@@ -436,7 +436,7 @@ export default function Account() {
                   </div>
                   {confirmPassword && confirmPassword !== password && (
                     <p className="mt-2 text-xs text-red-500">
-                      Passwords don't match
+                      Passwords don&apos;t match
                     </p>
                   )}
                   {confirmPassword &&
@@ -469,7 +469,7 @@ export default function Account() {
             <p className="mt-6 text-center text-xs text-gray-400">
               {activeTab === "signin" ? (
                 <>
-                  Don't have an account?{" "}
+                  Don&apos;t have an account?{" "}
                   <button
                     onClick={() => handleTabChange("signup")}
                     className="text-purple-500 font-medium hover:text-purple-600 transition-colors"

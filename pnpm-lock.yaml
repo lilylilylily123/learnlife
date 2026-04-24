@@ -131,9 +131,6 @@ importers:
 
   apps/nfc-attender:
     dependencies:
-      '@learnlife/design-tokens':
-        specifier: workspace:*
-        version: link:../../packages/design-tokens
       '@learnlife/pb-client':
         specifier: workspace:*
         version: link:../../packages/pb-client

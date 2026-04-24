@@ -81,6 +81,7 @@ describe("useNfcLearner", () => {
     expect(mockCheckLearnerIn).toHaveBeenCalledWith("ABCD1234", {
       testTime: undefined,
       testDate: undefined,
+      learnerData: fakeLearner,
     });
   });
 

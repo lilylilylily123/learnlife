@@ -1,6 +1,7 @@
 {
   "name": "learnlife",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev:nfc": "pnpm --filter nfc-attender tauri:dev",
     "dev:calendar": "pnpm --filter ll_calendar start",
@@ -14,7 +15,7 @@
     "push:all": "pnpm run push:nfc && pnpm run push:calendar"
   },
   "engines": {
-    "node": ">=18",
-    "pnpm": ">=9"
+    "node": ">=20",
+    "pnpm": ">=10"
   }
 }
