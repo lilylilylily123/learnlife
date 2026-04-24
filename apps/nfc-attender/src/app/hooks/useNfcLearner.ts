@@ -92,7 +92,7 @@ export function useNfcLearner(options?: NfcHookOptions) {
 
         if (data) {
           console.log(`[useNfcLearner] Calling checkLearnerIn for ${data.name}`);
-          const result = await checkLearnerIn(data.NFC_ID, {
+          const result = await checkLearnerIn(scannedUid, {
             testTime: currentOptions?.testTime,
             testDate: currentOptions?.testDate,
             learnerData: data, // pass the already-fetched record to save a round-trip
