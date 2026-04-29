@@ -1,6 +1,8 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # apps/nfc-attender-fw is a PlatformIO/C++ firmware project, not a pnpm package
+  - "!apps/nfc-attender-fw"
 
 onlyBuiltDependencies:
   - sharp
