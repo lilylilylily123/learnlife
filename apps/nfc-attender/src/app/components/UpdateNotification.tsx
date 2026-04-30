@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { HEADING, KICKER, Kicker } from './ll-ui';
+import { debug } from '@/lib/debug';
 
 type Phase =
   | { status: 'idle' }
@@ -25,7 +27,7 @@ export function UpdateNotification() {
       })
       .catch((err) => {
         if (!cancelled) {
-          console.error('Update check failed:', err);
+          debug.error('Update check failed:', err);
         }
       });
 
@@ -77,104 +79,200 @@ export function UpdateNotification() {
   if (phase.status === 'idle') return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6">
-      <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-8">
-        <div className="flex flex-col items-center text-center">
-          <div className="mb-4 rounded-full bg-blue-100 dark:bg-blue-900/40 p-4">
-            <svg
-              className="w-10 h-10 text-blue-600 dark:text-blue-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{
+        background: 'rgba(31, 27, 22, 0.55)',
+        backdropFilter: 'blur(2px)',
+        padding: 24,
+      }}
+    >
+      <div
+        className="w-full"
+        style={{
+          maxWidth: 480,
+          background: 'var(--ll-surface)',
+          border: '1.5px solid var(--ll-ink)',
+          padding: 28,
+          color: 'var(--ll-ink)',
+        }}
+      >
+        {phase.status === 'available' && (
+          <>
+            <Kicker>Update required</Kicker>
+            <div style={{ ...HEADING, fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>
+              Version {phase.update.version} is available
+            </div>
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 14,
+                lineHeight: 1.55,
+                color: 'var(--ll-ink-2)',
+              }}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-              />
-            </svg>
-          </div>
-
-          {phase.status === 'available' && (
-            <>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Update Required
-              </h2>
-              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
-                Version {phase.update.version} must be installed before you can
-                continue using Attender.
-              </p>
-              {phase.update.body && (
-                <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 whitespace-pre-line">
-                  {phase.update.body}
-                </p>
-              )}
-              <button
-                onClick={handleUpdate}
-                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              Install before continuing. The reader stays paused while the new
+              build downloads.
+            </p>
+            {phase.update.body && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: 12,
+                  background: 'var(--ll-bg)',
+                  border: '1px solid var(--ll-divider)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: 'var(--ll-ink-2)',
+                  whiteSpace: 'pre-line',
+                  maxHeight: 160,
+                  overflowY: 'auto',
+                }}
               >
-                Install Update
-              </button>
-            </>
-          )}
-
-          {phase.status === 'downloading' && (
-            <>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Downloading Update…
-              </h2>
-              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
-                Please don&apos;t close the app.
-              </p>
-              <div className="mt-6 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
-                <div
-                  className="bg-blue-500 h-3 rounded-full transition-all duration-300"
-                  style={{ width: `${phase.progress}%` }}
-                />
+                {phase.update.body}
               </div>
-              {phase.progress > 0 && (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  {phase.progress}%
-                </p>
-              )}
-            </>
-          )}
+            )}
+            <button
+              onClick={handleUpdate}
+              className="cursor-pointer w-full"
+              style={{
+                marginTop: 22,
+                background: 'var(--ll-ink)',
+                color: 'var(--ll-bg)',
+                border: '1.5px solid var(--ll-ink)',
+                padding: '11px 16px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Install update →
+            </button>
+          </>
+        )}
 
-          {phase.status === 'ready' && (
-            <>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Update Ready
-              </h2>
-              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
-                Restart now to finish installing.
-              </p>
-              <button
-                onClick={() => relaunch()}
-                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
-              >
-                Restart Now
-              </button>
-            </>
-          )}
+        {phase.status === 'downloading' && (
+          <>
+            <Kicker>Downloading</Kicker>
+            <div style={{ ...HEADING, fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>
+              Fetching new build…
+            </div>
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 14,
+                color: 'var(--ll-ink-2)',
+              }}
+            >
+              Don&apos;t close the app.
+            </p>
+            <div
+              style={{
+                marginTop: 18,
+                height: 6,
+                background: 'var(--ll-surface-2)',
+                border: '1px solid var(--ll-divider)',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width: `${phase.progress}%`,
+                  background: 'var(--ll-accent)',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <div
+              style={{
+                ...KICKER,
+                marginTop: 8,
+                color: 'var(--ll-muted)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {phase.progress}%
+            </div>
+          </>
+        )}
 
-          {phase.status === 'error' && (
-            <>
-              <h2 className="text-2xl font-bold text-red-600 dark:text-red-400">
-                Update Failed
-              </h2>
-              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
-                {phase.message}
-              </p>
-              <button
-                onClick={() => setPhase({ status: 'idle' })}
-                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
-              >
-                Continue Without Updating
-              </button>
-            </>
-          )}
-        </div>
+        {phase.status === 'ready' && (
+          <>
+            <Kicker>Ready</Kicker>
+            <div style={{ ...HEADING, fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>
+              Restart to finish
+            </div>
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 14,
+                color: 'var(--ll-ink-2)',
+              }}
+            >
+              The new build is downloaded. Relaunch to apply.
+            </p>
+            <button
+              onClick={() => relaunch()}
+              className="cursor-pointer w-full"
+              style={{
+                marginTop: 22,
+                background: 'var(--ll-accent)',
+                color: 'var(--ll-accent-ink)',
+                border: '1.5px solid var(--ll-ink)',
+                padding: '11px 16px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Restart now ↻
+            </button>
+          </>
+        )}
+
+        {phase.status === 'error' && (
+          <>
+            <Kicker style={{ color: 'var(--ll-warm)' }}>Update failed</Kicker>
+            <div style={{ ...HEADING, fontSize: 26, lineHeight: 1.1, marginTop: 4 }}>
+              Couldn&apos;t install
+            </div>
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 14,
+                color: 'var(--ll-ink-2)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {phase.message}
+            </p>
+            <button
+              onClick={() => setPhase({ status: 'idle' })}
+              className="cursor-pointer w-full"
+              style={{
+                marginTop: 22,
+                background: 'transparent',
+                color: 'var(--ll-ink)',
+                border: '1.5px solid var(--ll-ink)',
+                padding: '11px 16px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Continue without updating
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
