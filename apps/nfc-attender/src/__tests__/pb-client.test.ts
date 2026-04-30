@@ -26,6 +26,15 @@ vi.mock("pocketbase", () => {
     this.collection = mockCollection;
     this.autoCancellation = vi.fn();
     this.authStore = { isValid: true, onChange: vi.fn() };
+    // Mirror PB's pb.filter() interpolation closely enough for the
+    // assertions below — quotes string params and substitutes {:key}
+    // placeholders. Real pb.filter also escapes embedded quotes, but
+    // the queries pre-validate inputs so these test cases never hit that.
+    this.filter = (template: string, params: Record<string, unknown> = {}) =>
+      template.replace(/\{:(\w+)\}/g, (_, key) => {
+        const v = params[key];
+        return typeof v === "string" ? `"${v}"` : String(v);
+      });
   });
   return { default: PocketBase };
 });
