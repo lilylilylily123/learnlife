@@ -5,17 +5,23 @@ import type { Invite } from "../types";
  * Generate a 6-character uppercase alphanumeric invite code.
  *
  * Characters 0/O/1/I are excluded to avoid visual ambiguity when the code
- * is read aloud or transcribed by hand.
- *
- * NOTE: Uses Math.random() which is not cryptographically secure. For the
- * low-stakes use-case of school invite links this is acceptable, but if
- * security requirements increase consider crypto.getRandomValues() instead.
+ * is read aloud or transcribed by hand. The 32-character alphabet is a power
+ * of two so rejection-sampling isn't needed — each random byte mod 32 is
+ * uniformly distributed across the alphabet.
  */
+// Available in modern browsers, React Native (Hermes), and Node 18+.
+// Lib config doesn't include `dom`, so reach for the global explicitly.
+const webCrypto = (globalThis as { crypto?: { getRandomValues(arr: Uint8Array): Uint8Array } }).crypto;
+
 export function generateInviteCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I to avoid confusion
+  if (!webCrypto) {
+    throw new Error("crypto.getRandomValues is not available in this runtime");
+  }
+  const bytes = webCrypto.getRandomValues(new Uint8Array(6));
   let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < bytes.length; i++) {
+    code += chars[bytes[i] % chars.length];
   }
   return code;
 }
@@ -73,87 +79,68 @@ export async function lookupInvite(
   code: string,
 ): Promise<Invite | null> {
   try {
-    const record = await pb.collection("invites").getFirstListItem(
-      `code = "${code.toUpperCase()}" && used = false && expires_at > @now`,
-      { expand: "learner" },
-    );
+    const record = await pb
+      .collection("invites")
+      .getFirstListItem(
+        pb.filter(
+          "code = {:code} && used = false && expires_at > @now",
+          { code: code.toUpperCase() },
+        ),
+        { expand: "learner" },
+      );
     return record as unknown as Invite;
-  } catch (e: any) {
-    console.error("[lookupInvite] Query failed:", e?.response?.data || e?.message);
-    // Diagnostic fallback: check whether the code exists at all, to distinguish
-    // "code not found" from "code found but expired/used".
-    // TODO: remove this fallback before going to production.
-    try {
-      const anyMatch = await pb.collection("invites").getFirstListItem(`code = "${code.toUpperCase()}"`);
-      console.warn("[lookupInvite] Code exists but failed filter - used:", anyMatch.used, "expires_at:", anyMatch.expires_at);
-    } catch {
-      console.warn("[lookupInvite] Code not found at all");
-    }
+  } catch {
     return null;
   }
 }
 
 /**
- * Redeem an invite code: creates a user account, links it to the learner,
- * marks the invite as used, then logs the new user in.
+ * Redeem an invite code via the atomic server-side hook
+ * (POST /api/redeem-invite — see pb_hooks/invites.pb.js).
  *
- * ⚠️  Race condition note: the `learners.user` back-reference update (step 3)
- * reads `pb.authStore.record?.id` but at that point the user has not yet been
- * authenticated (authWithPassword runs at the end). The update uses whatever
- * auth token is currently in the store, which is likely a guide/admin session
- * or empty. This field is non-critical (the forward `users.learner` FK is the
- * source of truth) but should be fixed if the back-reference is ever queried.
+ * The hook runs the invite lookup, user creation, learner back-reference
+ * update, and invite-mark-used inside a single PocketBase transaction, then
+ * mints an auth token. We save that token into pb.authStore so the AuthContext
+ * picks it up like any other login.
+ *
+ * Requires the invites.pb.js hook to be deployed to PocketBase. If the hook
+ * is missing, the request returns 404 and we surface a generic error.
  */
 export async function redeemInvite(
   pb: PocketBase,
   data: { code: string; password: string },
 ): Promise<{ success: true } | { success: false; error: string }> {
-  const invite = await lookupInvite(pb, data.code);
-  if (!invite) {
-    return { success: false, error: "Invalid or expired invite code." };
-  }
-
-  // Use the learner's name for the user account; fall back to email.
-  const learnerName = invite.expand?.learner?.name ?? invite.email;
-
-  // Step 1: Create the user account.
+  type AuthResponse = { token: string; record: { [k: string]: unknown; id: string } };
   try {
-    await pb.collection("users").create({
-      email: invite.email,
-      password: data.password,
-      passwordConfirm: data.password,
-      name: learnerName,
-      role: "learner",
-      learner: invite.learner,
+    const response = await pb.send<AuthResponse>("/api/redeem-invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: data.code.toUpperCase(),
+        password: data.password,
+      }),
     });
-  } catch (e: any) {
-    const msg = e?.response?.data?.email?.message;
-    if (msg?.includes("already exists")) {
-      return { success: false, error: "An account already exists for this learner." };
+    if (!response?.token || !response?.record) {
+      return { success: false, error: "Unexpected server response." };
     }
-    return { success: false, error: e?.message || "Failed to create account." };
+    // Cast through unknown — AsyncAuthStore types AuthRecord as the PB record
+    // type, which we don't import here; the shape from the server matches.
+    pb.authStore.save(response.token, response.record as unknown as Parameters<typeof pb.authStore.save>[1]);
+    return { success: true };
+  } catch (e: unknown) {
+    const err = e as { status?: number; data?: { message?: string }; message?: string };
+    if (err.status === 400) {
+      // The hook returns specific 400 messages for known cases (invalid code,
+      // weak password). Pass them through — they're already user-safe.
+      const msg = err.data?.message || "Invalid or expired code.";
+      return { success: false, error: msg };
+    }
+    if (err.status === 404) {
+      return {
+        success: false,
+        error: "Registration is temporarily unavailable. Please try again later.",
+      };
+    }
+    return { success: false, error: "Couldn't redeem invite. Please try again." };
   }
-
-  // Step 2: Update the learner's back-reference to point to the new user.
-  // Non-critical — the forward relation on users is the source of truth.
-  try {
-    await pb.collection("learners").update(invite.learner, { user: pb.authStore.record?.id });
-  } catch {
-    // Silently ignore: the account was created successfully.
-  }
-
-  // Step 3: Mark the invite as used so it cannot be redeemed again.
-  try {
-    await pb.collection("invites").update(invite.id, {
-      used: true,
-      used_at: new Date().toISOString(),
-    });
-  } catch {
-    // Silently ignore: non-critical — the invite will expire naturally.
-  }
-
-  // Step 4: Authenticate the newly created user.
-  await pb.collection("users").authWithPassword(invite.email, data.password);
-
-  return { success: true };
 }

@@ -81,6 +81,9 @@ fn start_nfc_listener(window: WebviewWindow) -> Result<(), String> {
                                 if let Some(uid) = get_uid(&card) {
                                     if uid != last_uid {
                                         last_uid = uid.clone();
+                                        // UIDs are credentials — don't log them
+                                        // outside of debug builds.
+                                        #[cfg(debug_assertions)]
                                         println!("Scanned UID: {}", uid);
                                         let _ = window.emit("nfc-scanned", uid.clone());
                                     }

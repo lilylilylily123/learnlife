@@ -6,7 +6,10 @@
     "main"
   ],
   "permissions": [
-    "core:default",
+    "core:app:allow-version",
+    "core:event:default",
+    "core:webview:default",
+    "core:window:default",
     "process:allow-restart",
     "updater:default"
   ]

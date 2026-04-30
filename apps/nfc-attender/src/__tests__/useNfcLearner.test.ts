@@ -23,6 +23,23 @@ vi.mock("@/lib/pb-client", () => ({
   getLearnerByNfc: (...args: unknown[]) => mockGetLearnerByNfc(...args),
 }));
 
+// The hook now consults pb.authStore to gate scans on admin/lg role and
+// subscribes to auth-store changes to clear the queue. Provide a privileged
+// fake so scans aren't dropped, plus a no-op onChange.
+vi.mock("@/app/pb", () => ({
+  pb: {
+    authStore: {
+      isValid: true,
+      record: { role: "admin" },
+      onChange: vi.fn(() => () => {}),
+    },
+  },
+}));
+
+vi.mock("@/lib/debug", () => ({
+  debug: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
 // Must import after mocks are set up
 import { useNfcLearner } from "@/app/hooks/useNfcLearner";
 

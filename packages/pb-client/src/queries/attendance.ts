@@ -23,22 +23,39 @@ function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function assertDate(value: string, label: string): string {
+  if (!DATE_RE.test(value)) {
+    throw new Error(`${label} must be YYYY-MM-DD`);
+  }
+  return value;
+}
+
 /**
  * Build the PocketBase filter clause for a single-day or date-range query.
  * Ranges use `>=` / `<=` against the date column with explicit time bounds so
  * PB's timestamp comparison matches the full day on both ends.
+ *
+ * Date inputs are validated against YYYY-MM-DD before interpolation so the
+ * resulting filter cannot include user-controlled quote characters.
  */
-function buildDateFilter(params: ListAttendanceParams): { clause: string; label: string } {
+function buildDateFilter(
+  pb: PocketBase,
+  params: ListAttendanceParams,
+): { clause: string; label: string } {
   if (params.dateFrom || params.dateTo) {
-    const from = params.dateFrom || params.dateTo!;
-    const to = params.dateTo || params.dateFrom!;
+    const from = assertDate(params.dateFrom || params.dateTo!, "dateFrom");
+    const to = assertDate(params.dateTo || params.dateFrom!, "dateTo");
     return {
-      clause: `date >= "${from} 00:00:00" && date <= "${to} 23:59:59"`,
+      clause: pb.filter("date >= {:from} && date <= {:to}", {
+        from: `${from} 00:00:00`,
+        to: `${to} 23:59:59`,
+      }),
       label: from === to ? from : `${from}..${to}`,
     };
   }
-  const date = params.date || todayStr();
-  return { clause: `date ~ "${date}"`, label: date };
+  const date = assertDate(params.date || todayStr(), "date");
+  return { clause: pb.filter("date ~ {:date}", { date }), label: date };
 }
 
 /**
@@ -51,11 +68,11 @@ export async function listAttendance(
   params: ListAttendanceParams = {},
 ): Promise<ListAttendanceResult> {
   const { learnerId, page = 1, perPage = 50 } = params;
-  const { clause, label } = buildDateFilter(params);
+  const { clause, label } = buildDateFilter(pb, params);
 
   const filterParts: string[] = [clause];
   if (learnerId) {
-    filterParts.push(`learner = "${learnerId}"`);
+    filterParts.push(pb.filter("learner = {:learnerId}", { learnerId }));
   }
 
   const response = await pb.collection("attendance").getList(page, perPage, {
@@ -101,13 +118,17 @@ export async function getAttendance(
   learnerId: string,
   date?: string,
 ): Promise<{ attendance: AttendanceRecord | null; exists: boolean }> {
-  const targetDate = date || todayStr();
+  const targetDate = assertDate(date || todayStr(), "date");
   try {
     const record = await pb
       .collection("attendance")
-      .getFirstListItem(`learner = "${learnerId}" && date ~ "${targetDate}"`, {
-        expand: "learner",
-      });
+      .getFirstListItem(
+        pb.filter("learner = {:learnerId} && date ~ {:date}", {
+          learnerId,
+          date: targetDate,
+        }),
+        { expand: "learner" },
+      );
     return { attendance: record as unknown as AttendanceRecord, exists: true };
   } catch {
     // PocketBase throws when no record is found — treat that as "does not exist".
@@ -130,7 +151,7 @@ export async function batchUpdateAttendance(
   params: { learnerId: string; date?: string; fields?: Record<string, string> },
 ): Promise<{ attendance: AttendanceRecord; existing: AttendanceRecord; created: boolean }> {
   const { learnerId, fields } = params;
-  const date = params.date || todayStr();
+  const date = assertDate(params.date || todayStr(), "date");
 
   let attendance: AttendanceRecord;
   let created = false;
@@ -138,7 +159,12 @@ export async function batchUpdateAttendance(
     // Try to find an existing record for this learner/date.
     const existing = await pb
       .collection("attendance")
-      .getFirstListItem(`learner = "${learnerId}" && date ~ "${date}"`);
+      .getFirstListItem(
+        pb.filter("learner = {:learnerId} && date ~ {:date}", {
+          learnerId,
+          date,
+        }),
+      );
     attendance = existing as unknown as AttendanceRecord;
   } catch {
     // No record yet — create a blank one so subsequent field updates have an ID to target.
@@ -167,11 +193,16 @@ export async function resetAttendance(
   learnerId: string,
   date?: string,
 ): Promise<{ status: "reset" | "no_record"; attendance?: AttendanceRecord }> {
-  const targetDate = date || todayStr();
+  const targetDate = assertDate(date || todayStr(), "date");
   try {
     const record = await pb
       .collection("attendance")
-      .getFirstListItem(`learner = "${learnerId}" && date ~ "${targetDate}"`);
+      .getFirstListItem(
+        pb.filter("learner = {:learnerId} && date ~ {:date}", {
+          learnerId,
+          date: targetDate,
+        }),
+      );
 
     const updated = await pb.collection("attendance").update(record.id, {
       time_in: null,

@@ -3,6 +3,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { checkLearnerIn, type CheckInResult } from "../utils/utils";
 import { getLearnerByNfc } from "@/lib/pb-client";
+import { pb } from "@/app/pb";
+import { debug } from "@/lib/debug";
 
 interface NfcHookOptions {
   testTime?: Date | null;   // Simulated time (overrides real clock for check-in logic)
@@ -44,7 +46,7 @@ export function useNfcLearner(options?: NfcHookOptions) {
 
   // Sync the ref whenever the caller's options change.
   useEffect(() => {
-    console.log(`[useNfcLearner] options changed:`, {
+    debug.log(`[useNfcLearner] options changed:`, {
       testTime: options?.testTime?.toLocaleTimeString() || 'null',
       testDate: options?.testDate || 'null',
     });
@@ -66,21 +68,21 @@ export function useNfcLearner(options?: NfcHookOptions) {
       // Discard scans that were queued more than 30 seconds ago (e.g. during
       // an offline period or a previous processing backlog).
       if (Date.now() - job.timestamp > 30000) {
-        console.log(`[useNfcLearner] Skipping stale scan: ${scannedUid}`);
+        debug.log(`[useNfcLearner] Skipping stale scan`);
         continue;
       }
 
       // Deduplicate consecutive scans of the same card: if the very next item
       // in the queue is the same UID, this was a double-tap and we skip it.
       if (queueRef.current.length > 0 && queueRef.current[0].uid === scannedUid) {
-        console.log(`[useNfcLearner] Deduplicating scan: ${scannedUid}`);
+        debug.log(`[useNfcLearner] Deduplicating scan`);
         continue;
       }
 
       setIsLoading(true);
       // Capture options at the time of processing, not at event arrival.
       const currentOptions = optionsRef.current;
-      console.log(`[useNfcLearner] Processing scan: ${scannedUid} (queue: ${queueRef.current.length} remaining)`);
+      debug.log(`[useNfcLearner] Processing scan (queue: ${queueRef.current.length} remaining)`);
 
       try {
         const data = await getLearnerByNfc(scannedUid);
@@ -91,7 +93,7 @@ export function useNfcLearner(options?: NfcHookOptions) {
         setUid(scannedUid);
 
         if (data) {
-          console.log(`[useNfcLearner] Calling checkLearnerIn for ${data.name}`);
+          debug.log(`[useNfcLearner] Calling checkLearnerIn`);
           const result = await checkLearnerIn(scannedUid, {
             testTime: currentOptions?.testTime,
             testDate: currentOptions?.testDate,
@@ -100,7 +102,7 @@ export function useNfcLearner(options?: NfcHookOptions) {
           if (result) setLastAction(result);
         }
       } catch (err) {
-        console.error("[useNfcLearner] NFC handling error:", err);
+        debug.error("[useNfcLearner] NFC handling error:", err);
       } finally {
         setIsLoading(false);
       }
@@ -115,8 +117,15 @@ export function useNfcLearner(options?: NfcHookOptions) {
 
     (async () => {
       unlisten = await listen<string>("nfc-scanned", (event) => {
+        // Drop scans when no privileged user is signed in — prevents writes
+        // landing under a stale or learner-role session.
+        const role = (pb.authStore.record as { role?: string } | null)?.role;
+        if (!pb.authStore.isValid || (role !== "admin" && role !== "lg")) {
+          return;
+        }
+
         const scannedUid = event.payload;
-        console.log(`[useNfcLearner] NFC scanned, queuing: ${scannedUid}`);
+        debug.log(`[useNfcLearner] NFC scanned, queuing`);
 
         queueRef.current.push({ uid: scannedUid, timestamp: Date.now() });
 
@@ -125,14 +134,26 @@ export function useNfcLearner(options?: NfcHookOptions) {
       });
     })();
 
+    // Whenever the auth state changes (login/logout), drop any queued scans
+    // so an in-flight job can't write under a previous session's identity.
+    const unsubscribeAuth = pb.authStore.onChange(() => {
+      if (queueRef.current.length > 0) {
+        debug.log(
+          `[useNfcLearner] Auth changed, dropping ${queueRef.current.length} queued scan(s)`,
+        );
+        queueRef.current = [];
+      }
+    });
+
     return () => {
       if (unlisten) unlisten();
+      unsubscribeAuth();
     };
   }, [processQueue]);
 
   /** Simulate an NFC scan without a physical reader (for test mode). */
   const simulateScan = useCallback((nfcUid: string) => {
-    console.log(`[useNfcLearner] Simulating scan: ${nfcUid}`);
+    debug.log(`[useNfcLearner] Simulating scan`);
     queueRef.current.push({ uid: nfcUid, timestamp: Date.now() });
     processQueue();
   }, [processQueue]);

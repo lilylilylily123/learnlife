@@ -23,10 +23,12 @@ export async function listLearners(
 
   const filterParts: string[] = [];
   if (search) {
-    filterParts.push(`(name ~ "${search}" || email ~ "${search}")`);
+    filterParts.push(
+      pb.filter("(name ~ {:search} || email ~ {:search})", { search }),
+    );
   }
   if (program) {
-    filterParts.push(`program = "${program}"`);
+    filterParts.push(pb.filter("program = {:program}", { program }));
   }
 
   const response = await pb.collection("learners").getList(page, perPage, {
@@ -49,7 +51,7 @@ export async function getLearnerByNfc(
   try {
     const record = await pb
       .collection("learners")
-      .getFirstListItem(`NFC_ID = '${nfcId}'`);
+      .getFirstListItem(pb.filter("NFC_ID = {:nfcId}", { nfcId }));
     return record as unknown as Learner;
   } catch {
     return null;

@@ -3,6 +3,7 @@ import * as pbClient from "@/lib/pb-client";
 import type { AttendanceRecord } from "@/lib/pb-client";
 import { withRetry, PROGRAM_CODES } from "@learnlife/pb-client";
 import { computeCheckInAction } from "@learnlife/shared";
+import { debug } from "@/lib/debug";
 
 /**
  * Create a new learner record.
@@ -23,7 +24,7 @@ export async function createLearner(
     dob,
     NFC_ID,
   });
-  console.log("Learner created");
+  debug.log("Learner created");
 }
 
 /**
@@ -72,14 +73,14 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
   const learner = options?.learnerData || await pbClient.getLearnerByNfc(NFC_ID);
 
   if (!learner) {
-    console.log("Learner not found");
+    debug.log("Learner not found");
     return null;
   }
 
   const now = options?.testTime || new Date();
   const dateStr = options?.testDate || now.toISOString().split("T")[0];
 
-  console.log(
+  debug.log(
     `[checkLearnerIn] ${learner.name} - time: ${now.toLocaleTimeString()}, date: ${dateStr}`,
   );
 
@@ -95,7 +96,7 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
   const action = computeCheckInAction(existing, now);
 
   if (action.type === "no_action") {
-    console.log(`[checkLearnerIn] ${learner.name} ${action.reason}`);
+    debug.log(`[checkLearnerIn] ${learner.name} ${action.reason}`);
     return { type: "no_action", learnerName: learner.name, program: learner.program || "" };
   }
 
@@ -108,16 +109,16 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
 
     switch (action.type) {
       case "check_in":
-        console.log(`[checkLearnerIn] ${learner.name} checked in (${action.fields.status})`);
+        debug.log(`[checkLearnerIn] ${learner.name} checked in (${action.fields.status})`);
         break;
       case "lunch_event":
-        console.log(`[checkLearnerIn] ${learner.name} lunch event recorded`);
+        debug.log(`[checkLearnerIn] ${learner.name} lunch event recorded`);
         break;
       case "late_lunch_return":
-        console.log(`[checkLearnerIn] ${learner.name} back from lunch (late - after 2pm)`);
+        debug.log(`[checkLearnerIn] ${learner.name} back from lunch (late - after 2pm)`);
         break;
       case "check_out":
-        console.log(`[checkLearnerIn] ${learner.name} checked out for the day`);
+        debug.log(`[checkLearnerIn] ${learner.name} checked out for the day`);
         break;
     }
 
@@ -129,7 +130,7 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
       ...(action.type === "check_in" && { status: action.fields.status }),
     };
   } catch (err) {
-    console.error(`[checkLearnerIn] Failed to update ${learner.name}:`, err);
+    debug.error(`[checkLearnerIn] Failed to update ${learner.name}:`, err);
     return null;
   }
 }

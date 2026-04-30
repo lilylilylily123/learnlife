@@ -1,26 +1,86 @@
 @import "tailwindcss";
 
-/*:root {
-    --background: #ffffff;
-    --foreground: black;
+/* Paper palette · Editorial typography — locked from design handoff */
+:root {
+  --ll-bg: #f3eee5;          /* warm cream */
+  --ll-surface: #fbf8f2;     /* lighter paper */
+  --ll-surface-2: #eae3d3;   /* panel / selected row */
+  --ll-ink: #1f1b16;         /* near-black warm */
+  --ll-ink-2: #3a342a;
+  --ll-muted: #807663;
+  --ll-divider: #d9d1bf;
+  --ll-accent: #4f6b4a;      /* muted sage */
+  --ll-accent-ink: #f3eee5;
+  --ll-warm: #c26b3c;        /* rust (alerts / urgent) */
+  --ll-warm-ink: #fbf8f2;
+  --ll-lime: #c4d98b;        /* calmed lime nod to heritage */
+  --ll-lime-ink: #1f1b16;
 }
 
 @theme inline {
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
-    --font-sans: var(--font-geist-sans);
-    --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --background: #0a0a0a;
-        --foreground: #ededed;
-    }
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-heading);
+  --font-mono: var(--font-mono);
+  --color-ll-bg: var(--ll-bg);
+  --color-ll-surface: var(--ll-surface);
+  --color-ll-surface-2: var(--ll-surface-2);
+  --color-ll-ink: var(--ll-ink);
+  --color-ll-ink-2: var(--ll-ink-2);
+  --color-ll-muted: var(--ll-muted);
+  --color-ll-divider: var(--ll-divider);
+  --color-ll-accent: var(--ll-accent);
+  --color-ll-accent-ink: var(--ll-accent-ink);
+  --color-ll-warm: var(--ll-warm);
+  --color-ll-warm-ink: var(--ll-warm-ink);
+  --color-ll-lime: var(--ll-lime);
+  --color-ll-lime-ink: var(--ll-lime-ink);
 }
 
 body {
-    background: var(--background);
-    color: var(--foreground);
-    font-family: Arial, Helvetica, sans-serif;
-}*/
+  background: var(--ll-bg);
+  color: var(--ll-ink);
+  font-family: var(--font-body), -apple-system, system-ui, sans-serif;
+}
+
+@keyframes ll-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* Hover/focus polish */
+.ll-pill:hover {
+  background: var(--ll-surface-2);
+}
+.ll-pill:focus-visible {
+  outline: 2px solid var(--ll-accent);
+  outline-offset: 1px;
+}
+.ll-link:hover {
+  color: var(--ll-ink);
+}
+.ll-bulk:hover {
+  text-decoration: underline;
+}
+.ll-mini {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  line-height: 1.2;
+}
+.ll-icon {
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 3px;
+}
+.ll-icon:hover {
+  color: var(--ll-ink);
+}
+.ll-time:hover {
+  text-decoration: underline;
+}
+.ll-row:hover {
+  background: var(--ll-surface-2) !important;
+}

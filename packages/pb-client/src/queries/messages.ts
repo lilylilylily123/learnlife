@@ -7,22 +7,33 @@ export async function fetchConversations(
   userId: string,
 ): Promise<Conversation[]> {
   return pb.collection("conversations").getFullList<Conversation>({
-    filter: `participants.id ?= "${userId}"`,
+    filter: pb.filter("participants.id ?= {:userId}", { userId }),
     sort: "-last_message_at",
     expand: "participants,last_sender",
   });
 }
 
-/** Fetch all messages in a conversation in chronological order. */
+/**
+ * Fetch the most recent page of messages in a conversation, sorted oldest
+ * first within the page. Capped at `perPage` to bound memory and avoid
+ * runaway requests on conversations with thousands of messages — callers can
+ * increase `perPage` or paginate older messages on demand.
+ */
 export async function fetchMessages(
   pb: PocketBase,
   conversationId: string,
+  opts: { page?: number; perPage?: number } = {},
 ): Promise<Message[]> {
-  return pb.collection("messages").getFullList<Message>({
-    filter: `conversation = "${conversationId}"`,
-    sort: "created",
+  const page = opts.page ?? 1;
+  const perPage = Math.min(opts.perPage ?? 100, 200);
+  const result = await pb.collection("messages").getList<Message>(page, perPage, {
+    filter: pb.filter("conversation = {:conversationId}", { conversationId }),
+    // Newest first so we can grab the latest page; reverse before returning so
+    // the UI gets chronological order.
+    sort: "-created",
     expand: "sender",
   });
+  return result.items.slice().reverse();
 }
 
 /**
@@ -74,23 +85,106 @@ export async function createConversation(
 }
 
 /**
- * Mark all unread messages in a conversation as read by the given user.
- *
- * Each message is updated individually — for conversations with many unread
- * messages this can result in a large number of requests. A server-side hook
- * or batch endpoint would be more efficient if this becomes a bottleneck.
+ * Find an existing 1:1 conversation between exactly the given participant ids.
+ * Returns null if none exists. Order of ids does not matter.
  */
+export async function findDirectConversation(
+  pb: PocketBase,
+  participantIds: string[],
+): Promise<Conversation | null> {
+  if (participantIds.length === 0) return null;
+  const filter = participantIds
+    .map((id, i) => pb.filter(`participants.id ?= {:p${i}}`, { [`p${i}`]: id }))
+    .join(" && ");
+  const results = await pb
+    .collection("conversations")
+    .getFullList<Conversation>({ filter });
+  return (
+    results.find((c) => c.participants.length === participantIds.length) ?? null
+  );
+}
+
+export interface MessageableUser {
+  id: string;
+  name: string;
+  username: string;
+  email: string;
+  avatar: string;
+  role: string;
+}
+
+/**
+ * List users that can be messaged. Filters out the current user and supports
+ * search by name/username/email and an optional role allowlist.
+ */
+export async function listMessageableUsers(
+  pb: PocketBase,
+  opts: {
+    excludeUserId: string;
+    search?: string;
+    roles?: string[];
+  } = { excludeUserId: "" },
+): Promise<MessageableUser[]> {
+  const filterParts: string[] = [];
+  if (opts.excludeUserId) {
+    filterParts.push(
+      pb.filter("id != {:excludeUserId}", { excludeUserId: opts.excludeUserId }),
+    );
+  }
+  if (opts.roles && opts.roles.length > 0) {
+    const roleFilter = opts.roles
+      .map((r, i) => pb.filter(`role = {:r${i}}`, { [`r${i}`]: r }))
+      .join(" || ");
+    filterParts.push(`(${roleFilter})`);
+  }
+  if (opts.search && opts.search.trim()) {
+    // Note: don't include `email` here — PB's users collection protects email
+    // by default (emailVisibility=false), and filtering on it returns HTTP 400
+    // for non-owner records.
+    const q = opts.search.trim();
+    filterParts.push(pb.filter("(name ~ {:q} || username ~ {:q})", { q }));
+  }
+  const records = await pb.collection("users").getFullList({
+    filter: filterParts.length > 0 ? filterParts.join(" && ") : undefined,
+    sort: "name",
+  });
+  return records.map((r) => ({
+    id: r.id,
+    name: (r.name as string) ?? "",
+    username: (r.username as string) ?? "",
+    email: (r.email as string) ?? "",
+    avatar: (r.avatar as string) ?? "",
+    role: (r.role as string) ?? "",
+  }));
+}
+
+/**
+ * Mark unread messages in a conversation as read by the given user.
+ *
+ * Each message is updated individually, capped at `MARK_READ_BATCH` per call
+ * so a single user opening a long-stale conversation can't trigger thousands
+ * of writes. The cap is well above any realistic in-session unread count;
+ * callers can re-invoke if more remain.
+ */
+const MARK_READ_BATCH = 100;
 export async function markMessagesRead(
   pb: PocketBase,
   conversationId: string,
   userId: string,
 ): Promise<void> {
-  const unread = await pb.collection("messages").getFullList<Message>({
-    filter: `conversation = "${conversationId}" && read_by !~ "${userId}"`,
-  });
+  const unread = await pb.collection("messages").getList<Message>(
+    1,
+    MARK_READ_BATCH,
+    {
+      filter: pb.filter(
+        "conversation = {:conversationId} && read_by !~ {:userId}",
+        { conversationId, userId },
+      ),
+    },
+  );
 
   await Promise.all(
-    unread.map((msg) =>
+    unread.items.map((msg) =>
       pb.collection("messages").update(msg.id, {
         read_by: [...msg.read_by, userId],
       }),
@@ -103,29 +197,22 @@ export async function markMessagesRead(
  *
  * Returns an unsubscribe function. Call it when the component unmounts or
  * the conversation changes to avoid memory leaks.
- *
- * ⚠️  Bug: the returned cleanup calls `unsubscribe("*")` which removes ALL
- * message subscriptions on this client, not just the one registered here.
- * If multiple conversations are subscribed simultaneously, switching away
- * from one will silently break the others. Fix by storing and calling the
- * specific unsubscribe function returned by `pb.collection().subscribe()`.
  */
-export function subscribeToMessages(
+export async function subscribeToMessages(
   pb: PocketBase,
   conversationId: string,
   callback: (message: Message) => void,
-): () => void {
-  pb.collection("messages").subscribe<Message>("*", (e) => {
-    // Filter client-side: PocketBase realtime sends all message events; we
-    // only forward ones that belong to the conversation we care about.
-    if (e.record.conversation === conversationId) {
-      callback(e.record);
-    }
-  });
+): Promise<() => void> {
+  const unsubscribe = await pb.collection("messages").subscribe<Message>(
+    "*",
+    (e) => {
+      // Filter client-side: PocketBase realtime sends all message events; we
+      // only forward ones that belong to the conversation we care about.
+      if (e.record.conversation === conversationId) {
+        callback(e.record);
+      }
+    },
+  );
 
-  return () => {
-    // TODO: store the unsubscribe fn from subscribe() and call it here instead
-    // of using the collection-wide unsubscribe("*").
-    pb.collection("messages").unsubscribe("*");
-  };
+  return unsubscribe;
 }

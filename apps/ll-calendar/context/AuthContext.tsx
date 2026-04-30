@@ -31,17 +31,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Fetch learner's program when user changes
   useEffect(() => {
     async function fetchProgram() {
-      console.log("[AuthContext] fetchProgram - user.learner:", user?.learner);
       if (!user?.learner) {
         setProgram(null);
         return;
       }
       try {
         const learner = await pb.collection("learners").getOne(user.learner);
-        console.log("[AuthContext] Fetched learner:", learner.id, "program:", learner.program);
         setProgram((learner.program as ProgramCode) || null);
-      } catch (e) {
-        console.error("[AuthContext] Failed to fetch learner:", e);
+      } catch {
         setProgram(null);
       }
     }

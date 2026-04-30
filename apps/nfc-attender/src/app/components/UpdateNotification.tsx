@@ -13,7 +13,6 @@ type Phase =
 
 export function UpdateNotification() {
   const [phase, setPhase] = useState<Phase>({ status: 'idle' });
-  const [dismissed, setDismissed] = useState(false);
   const downloadedRef = useRef(0);
 
   useEffect(() => {
@@ -75,15 +74,15 @@ export function UpdateNotification() {
     }
   }
 
-  if (phase.status === 'idle' || dismissed) return null;
+  if (phase.status === 'idle') return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 max-w-md">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex items-start gap-3">
-          <div className="shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6">
+      <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-8">
+        <div className="flex flex-col items-center text-center">
+          <div className="mb-4 rounded-full bg-blue-100 dark:bg-blue-900/40 p-4">
             <svg
-              className="w-6 h-6 text-blue-500"
+              className="w-10 h-10 text-blue-600 dark:text-blue-400"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -96,92 +95,84 @@ export function UpdateNotification() {
               />
             </svg>
           </div>
-          <div className="flex-1">
-            {phase.status === 'available' && (
-              <>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Update Available
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  Version {phase.update.version} is ready to install
-                </p>
-                {phase.update.body && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    {phase.update.body}
-                  </p>
-                )}
-              </>
-            )}
 
-            {phase.status === 'downloading' && (
-              <>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Downloading Update...
-                </h3>
-                <div className="mt-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${phase.progress}%` }}
-                  />
-                </div>
-                {phase.progress > 0 && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {phase.progress}%
-                  </p>
-                )}
-              </>
-            )}
-
-            {phase.status === 'ready' && (
-              <>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Update Ready
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  Restart to apply the update.
-                </p>
-              </>
-            )}
-
-            {phase.status === 'error' && (
-              <>
-                <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">
-                  Update Failed
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-                  {phase.message}
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-3 flex gap-2">
           {phase.status === 'available' && (
-            <button
-              onClick={handleUpdate}
-              className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-            >
-              Update Now
-            </button>
+            <>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Update Required
+              </h2>
+              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
+                Version {phase.update.version} must be installed before you can
+                continue using Attender.
+              </p>
+              {phase.update.body && (
+                <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 whitespace-pre-line">
+                  {phase.update.body}
+                </p>
+              )}
+              <button
+                onClick={handleUpdate}
+                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                Install Update
+              </button>
+            </>
+          )}
+
+          {phase.status === 'downloading' && (
+            <>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Downloading Update…
+              </h2>
+              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
+                Please don&apos;t close the app.
+              </p>
+              <div className="mt-6 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+                <div
+                  className="bg-blue-500 h-3 rounded-full transition-all duration-300"
+                  style={{ width: `${phase.progress}%` }}
+                />
+              </div>
+              {phase.progress > 0 && (
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  {phase.progress}%
+                </p>
+              )}
+            </>
           )}
 
           {phase.status === 'ready' && (
-            <button
-              onClick={() => relaunch()}
-              className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-            >
-              Restart Now
-            </button>
+            <>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Update Ready
+              </h2>
+              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
+                Restart now to finish installing.
+              </p>
+              <button
+                onClick={() => relaunch()}
+                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                Restart Now
+              </button>
+            </>
           )}
 
-          {phase.status !== 'downloading' && (
-            <button
-              onClick={() => setDismissed(true)}
-              className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
-            >
-              Dismiss
-            </button>
+          {phase.status === 'error' && (
+            <>
+              <h2 className="text-2xl font-bold text-red-600 dark:text-red-400">
+                Update Failed
+              </h2>
+              <p className="mt-2 text-base text-gray-600 dark:text-gray-300">
+                {phase.message}
+              </p>
+              <button
+                onClick={() => setPhase({ status: 'idle' })}
+                className="mt-6 w-full px-4 py-3 text-base font-semibold text-white bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                Continue Without Updating
+              </button>
+            </>
           )}
         </div>
       </div>

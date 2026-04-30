@@ -13,19 +13,14 @@ export function logout(pb: PocketBase) {
   pb.authStore.clear();
 }
 
-export async function register(
-  pb: PocketBase,
-  userData: { email: string; password: string; passwordConfirm: string; name: string; role: string; learner?: string; [key: string]: any },
-) {
-  const record = await pb.collection("users").create(userData);
-  await pb.collection("users").authWithPassword(userData.email, userData.password);
-  return record;
-}
-
 export function isAuthenticated(pb: PocketBase): boolean {
   return pb.authStore.isValid;
 }
 
 export function getCurrentUser(pb: PocketBase) {
   return pb.authStore.record;
+}
+
+export async function requestPasswordReset(pb: PocketBase, email: string) {
+  await pb.collection("users").requestPasswordReset(email);
 }

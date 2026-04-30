@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { lookupInvite, redeemInvite } from "../lib/pocketbase";
+import { mapInviteError, mapPbError } from "../lib/errors";
 
 type Step = "code" | "password";
 
@@ -42,19 +43,15 @@ export default function RegisterScreen() {
   async function handleVerifyCode() {
     setIsLoading(true);
     try {
-      console.log("[register] Looking up code:", code.trim());
       const invite = await lookupInvite(code.trim());
-      console.log("[register] Lookup result:", invite);
       if (!invite) {
         Alert.alert("Invalid Code", "This invite code is invalid or has expired. Please check with your facilitator.");
         return;
       }
       setLearnerName(invite.expand?.learner?.name ?? invite.email);
       setStep("password");
-    } catch (error: any) {
-      console.error("[register] Verify error:", error);
-      const msg = error?.response?.data || error?.message || "Something went wrong. The invites collection may not exist yet.";
-      Alert.alert("Error", typeof msg === "string" ? msg : JSON.stringify(msg));
+    } catch (error: unknown) {
+      Alert.alert("Invalid Code", mapInviteError(error));
     } finally {
       setIsLoading(false);
     }
@@ -65,13 +62,16 @@ export default function RegisterScreen() {
     try {
       const result = await redeemInvite(code.trim(), password);
       if (!result.success) {
-        Alert.alert("Registration Failed", result.error);
+        // redeemInvite returns its own copy; if it slipped a raw PB payload
+        // through we'd rather show a neutral fallback than echo it.
+        const safe = result.error && result.error.length < 120 ? result.error : "We couldn't create your account. Please try again.";
+        Alert.alert("Registration Failed", safe);
         return;
       }
       // Auth state change is picked up by AuthContext automatically
       router.replace("/(tabs)/");
-    } catch (error: any) {
-      Alert.alert("Error", error.message || "Something went wrong.");
+    } catch (error: unknown) {
+      Alert.alert("Error", mapPbError(error, "We couldn't create your account. Please try again."));
     } finally {
       setIsLoading(false);
     }

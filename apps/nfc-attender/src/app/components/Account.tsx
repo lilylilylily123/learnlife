@@ -189,7 +189,7 @@ export default function Account() {
     try {
       await pb.collection("users").create({
         email,
-        emailVisibility: true,
+        emailVisibility: false,
         name,
         password,
         passwordConfirm: confirmPassword,

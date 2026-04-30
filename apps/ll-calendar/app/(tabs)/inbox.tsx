@@ -58,10 +58,12 @@ interface DisplayRow {
 }
 
 function toDisplayRow(conv: Conversation, currentUserId: string): DisplayRow {
-  // PocketBase may nest multi-relation expand under the field name or a keyed variant
+  // PocketBase only expands participants the current user is allowed to view.
+  // If the other side is hidden by the users listRule, `other` will be
+  // undefined — never fall back to `participants[0]`, which is self.
   const participants = conv.expand?.participants ?? [];
-  const other = participants.find((p) => p.id !== currentUserId) ?? participants[0];
-  const name = other?.name || other?.username || other?.email || "Unknown";
+  const other = participants.find((p) => p.id !== currentUserId);
+  const name = other?.name || other?.username || other?.email || "Unknown user";
   const initials = name.charAt(0).toUpperCase();
   const color = getInitialsColor(name);
   const hasUnread = !!conv.last_message && conv.last_sender !== currentUserId;
@@ -130,33 +132,31 @@ function ConversationRow({ row, card = false }: { row: DisplayRow; card?: boolea
 }
 
 export default function InboxScreen() {
-  const { isAuthenticated, user, role } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const [conversations, setConversations] = useState<DisplayRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
       let cancelled = false;
       (async () => {
-        setLoading(true);
         try {
           const convos = await fetchConversations(user.id);
-          if (__DEV__ && convos.length > 0) {
-            console.log("[inbox] first conv expand:", JSON.stringify(convos[0].expand));
-          }
           if (!cancelled) {
             setConversations(convos.map((c) => toDisplayRow(c, user.id)));
           }
         } catch (e: any) {
           console.error("[inbox] Failed to load conversations", e?.message);
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) setHasLoadedOnce(true);
         }
       })();
       return () => { cancelled = true; };
     }, [user?.id])
   );
+
+  const loading = !hasLoadedOnce && conversations.length === 0;
 
   if (!isAuthenticated) return <Redirect href="/(tabs)/" />;
 
@@ -170,11 +170,12 @@ export default function InboxScreen() {
           <Text style={s.kicker}>Inbox</Text>
           <Text style={s.title}>Messages</Text>
         </View>
-        {(role === "lg" || role === "admin") && (
-          <Pressable style={s.addBtn}>
-            <MaterialIcons name="add" size={22} color={Colors.textPrimary} />
-          </Pressable>
-        )}
+        <Pressable
+          style={s.addBtn}
+          onPress={() => router.push("/(modals)/new-conversation")}
+        >
+          <MaterialIcons name="add" size={22} color={Colors.textPrimary} />
+        </Pressable>
       </View>
 
       {loading ? (

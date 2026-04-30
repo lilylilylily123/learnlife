@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://learnlife.pockethost.io wss://learnlife.pockethost.io; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'none'; connect-src 'self' https://learnlife.pockethost.io wss://learnlife.pockethost.io; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://learnlife.pockethost.io; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "plugins": {

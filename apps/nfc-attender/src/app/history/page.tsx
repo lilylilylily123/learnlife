@@ -4,19 +4,24 @@ import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
 import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
-
-const STATUS_CLASSES: Record<string, string> = {
-  present: "bg-green-100 text-green-800",
-  late: "bg-yellow-100 text-yellow-800",
-  absent: "bg-red-100 text-red-800",
-  jLate: "bg-blue-100 text-blue-700",
-  jAbsent: "bg-blue-100 text-blue-700",
-};
+import {
+  HEADING,
+  KICKER,
+  Kicker,
+  Pill,
+  StatusBadge,
+  Avatar,
+  LMark,
+  InkInput,
+  InkSelect,
+} from "../components/ll-ui";
 
 export default function HistoryPage() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [selectedDate, setSelectedDate] = useState(
+    () => new Date().toISOString().split("T")[0],
+  );
   const [selectedLearnerId, setSelectedLearnerId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [learners, setLearners] = useState<Learner[]>([]);
@@ -30,7 +35,9 @@ export default function HistoryPage() {
     }
   }, [router]);
 
-  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
+  const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(
+    null,
+  );
   const [editForm, setEditForm] = useState({
     time_in: "",
     time_out: "",
@@ -87,7 +94,11 @@ export default function HistoryPage() {
   const formatTime = (val: string | null) => {
     if (!val) return "—";
     const d = new Date(val);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
   };
 
   const formatTimeForInput = (val: string | null) => {
@@ -96,7 +107,6 @@ export default function HistoryPage() {
     return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
   };
 
-  // Derive lunch out/in from lunch_events (new format) or fall back to legacy fields
   const getLunchOut = (record: AttendanceRecord): string | null => {
     if (record.lunch_events && record.lunch_events.length > 0) {
       const firstOut = record.lunch_events.find((e) => e.type === "out");
@@ -114,16 +124,6 @@ export default function HistoryPage() {
       return null;
     }
     return record.lunch_in;
-  };
-
-  const statusBadge = (status: string | null) => {
-    if (!status) return <span className="text-gray-400 text-xs">—</span>;
-    const cls = STATUS_CLASSES[status] || "bg-gray-100 text-gray-600";
-    return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
-        {status}
-      </span>
-    );
   };
 
   const startEditing = (record: AttendanceRecord) => {
@@ -155,7 +155,11 @@ export default function HistoryPage() {
 
     try {
       const dateBase = selectedDate;
-      const updates: Array<{ field: string; value?: string; timestamp?: string }> = [];
+      const updates: Array<{
+        field: string;
+        value?: string;
+        timestamp?: string;
+      }> = [];
 
       const timeFields = ["time_in", "time_out"] as const;
       for (const field of timeFields) {
@@ -182,11 +186,16 @@ export default function HistoryPage() {
         lunchEvents.push({ type: "in", time: dt.toISOString() });
       }
       if (lunchEvents.length > 0) {
-        updates.push({ field: "lunch_events", value: JSON.stringify(lunchEvents) });
+        updates.push({
+          field: "lunch_events",
+          value: JSON.stringify(lunchEvents),
+        });
       }
 
-      if (editForm.status) updates.push({ field: "status", value: editForm.status });
-      if (editForm.lunch_status) updates.push({ field: "lunch_status", value: editForm.lunch_status });
+      if (editForm.status)
+        updates.push({ field: "status", value: editForm.status });
+      if (editForm.lunch_status)
+        updates.push({ field: "lunch_status", value: editForm.lunch_status });
 
       const fields: Record<string, string> = {};
       for (const update of updates) {
@@ -207,7 +216,12 @@ export default function HistoryPage() {
   };
 
   const resetRecord = async (record: AttendanceRecord) => {
-    if (!confirm(`Reset attendance for ${record.expand?.learner?.name || "this learner"}?`)) return;
+    if (
+      !confirm(
+        `Reset attendance for ${record.expand?.learner?.name || "this learner"}?`,
+      )
+    )
+      return;
 
     try {
       await pbClient.resetAttendance(record.learner, selectedDate);
@@ -218,287 +232,521 @@ export default function HistoryPage() {
     }
   };
 
+  const counts = useMemo(() => {
+    const total = filteredRecords.length;
+    const present = filteredRecords.filter((r) => r.status === "present").length;
+    const late = filteredRecords.filter((r) => r.status === "late").length;
+    const absent = filteredRecords.filter((r) => r.status === "absent").length;
+    const jLate = filteredRecords.filter((r) => r.status === "jLate").length;
+    const jAbsent = filteredRecords.filter((r) => r.status === "jAbsent").length;
+    const noStatus = filteredRecords.filter((r) => !r.status).length;
+    return { total, present, late, absent, jLate, jAbsent, noStatus };
+  }, [filteredRecords]);
+
+  const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString(
+    undefined,
+    { weekday: "long", month: "long", day: "numeric", year: "numeric" },
+  );
+
   return (
-    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
-      <div className="w-full max-w-7xl mx-auto">
+    <div
+      className="flex flex-col h-screen w-screen overflow-hidden"
+      style={{ background: "var(--ll-bg)", color: "var(--ll-ink)" }}
+    >
+      {/* ─── Top bar ───────────────────────────────────────── */}
+      <header
+        className="flex items-stretch shrink-0"
+        style={{
+          padding: "18px 28px",
+          gap: 22,
+          borderBottom: "1.5px solid var(--ll-ink)",
+          background: "var(--ll-surface)",
+        }}
+      >
+        <div
+          className="flex items-center"
+          style={{
+            gap: 14,
+            paddingRight: 22,
+            borderRight: "1px solid var(--ll-divider)",
+          }}
+        >
+          <LMark size={38} />
+          <div>
+            <Kicker>Attender · History</Kicker>
+            <div
+              style={{ ...HEADING, fontSize: 22, lineHeight: 1.15, marginTop: 2 }}
+            >
+              {dateLabel}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="flex items-center" style={{ gap: 6 }}>
+          <Pill size="sm" onClick={() => fetchAttendance()}>
+            ↻ Refresh
+          </Pill>
+          <Pill
+            size="sm"
+            variant="accent"
+            onClick={() => router.push("/history/admin")}
+          >
+            ↗ Reports
+          </Pill>
+          <Pill size="sm" variant="ink" onClick={() => router.push("/")}>
+            ← Dashboard
+          </Pill>
+        </div>
+      </header>
+
+      {/* ─── Filter toolbar ────────────────────────────────── */}
+      <div
+        className="flex items-center shrink-0 flex-wrap"
+        style={{
+          padding: "14px 28px",
+          gap: 12,
+          borderBottom: "1px solid var(--ll-divider)",
+          background: "var(--ll-bg)",
+        }}
+      >
+        <Kicker>Date</Kicker>
+        <InkInput
+          type="date"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+        />
+
+        <div
+          className="self-stretch"
+          style={{ width: 1, background: "var(--ll-divider)", margin: "0 4px" }}
+        />
+        <Kicker>Learner</Kicker>
+        <InkSelect
+          value={selectedLearnerId}
+          onChange={(e) => setSelectedLearnerId(e.target.value)}
+          style={{ minWidth: 200 }}
+        >
+          <option value="">All learners</option>
+          {learners.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </InkSelect>
+
+        <div
+          className="self-stretch"
+          style={{ width: 1, background: "var(--ll-divider)", margin: "0 4px" }}
+        />
+        <div
+          className="flex items-center flex-1 min-w-[220px]"
+          style={{
+            background: "var(--ll-surface)",
+            border: "1.5px solid var(--ll-ink)",
+            padding: "7px 12px",
+            gap: 9,
+            maxWidth: 380,
+          }}
+        >
+          <span style={{ fontSize: 13, color: "var(--ll-muted)" }}>🔍</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name or email…"
+            className="bg-transparent outline-none flex-1"
+            style={{
+              fontFamily: "var(--font-body)",
+              fontSize: 14,
+              color: "var(--ll-ink)",
+              minWidth: 0,
+            }}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="cursor-pointer"
+              style={{ color: "var(--ll-muted)", fontSize: 16 }}
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Records table ─────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            Attendance history
-          </h1>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/history/admin")}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
-            >
-              📈 Reports
-            </button>
-            <button
-              onClick={() => router.push("/")}
-              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
-            >
-              ← Dashboard
-            </button>
-          </div>
+        <div
+          className="grid items-center shrink-0"
+          style={{
+            gridTemplateColumns:
+              "44px minmax(0,1.6fr) 110px 100px 100px 100px 110px 100px 130px",
+            padding: "11px 28px",
+            borderBottom: "1px solid var(--ll-divider)",
+            background: "var(--ll-surface)",
+            ...KICKER,
+            color: "var(--ll-muted)",
+          }}
+        >
+          <div></div>
+          <div>Learner</div>
+          <div>Status</div>
+          <div>Check-in</div>
+          <div>Lunch out</div>
+          <div>Lunch in</div>
+          <div>Lunch</div>
+          <div>Check-out</div>
+          <div className="text-right">Actions</div>
         </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">Date:</label>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">Learner:</label>
-              <select
-                value={selectedLearnerId}
-                onChange={(e) => setSelectedLearnerId(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer min-w-[200px]"
-              >
-                <option value="">All Learners</option>
-                {learners.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
-              <label className="text-sm font-medium text-gray-700">Search:</label>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name or email..."
-                className="flex-1 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-              />
-            </div>
-
-            <button
-              onClick={() => fetchAttendance()}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        {/* Records table */}
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
           {loading ? (
-            <div className="text-center py-12 text-gray-500">Loading...</div>
+            <div
+              className="text-center"
+              style={{
+                padding: "80px 24px",
+                color: "var(--ll-muted)",
+              }}
+            >
+              <div style={{ ...HEADING, fontSize: 22 }}>Loading…</div>
+            </div>
           ) : filteredRecords.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              No attendance records found for this date.
+            <div
+              className="text-center"
+              style={{
+                padding: "80px 24px",
+                color: "var(--ll-muted)",
+              }}
+            >
+              <div style={{ ...HEADING, fontSize: 22 }}>
+                Nothing on the page.
+              </div>
+              <div style={{ ...KICKER, marginTop: 10 }}>
+                No attendance records for this date
+              </div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Learner</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Check In</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch Out</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch In</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Lunch Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Check Out</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.map((record) => (
-                    <tr key={record.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-gray-900">{record.expand?.learner?.name || "Unknown"}</div>
-                        <div className="text-xs text-gray-500">{record.expand?.learner?.email}</div>
-                      </td>
-                      <td className="py-3 px-4">{statusBadge(record.status)}</td>
-                      <td className="py-3 px-4 text-gray-700">{formatTime(record.time_in)}</td>
-                      <td className="py-3 px-4 text-gray-700">{formatTime(getLunchOut(record))}</td>
-                      <td className="py-3 px-4 text-gray-700">{formatTime(getLunchIn(record))}</td>
-                      <td className="py-3 px-4">{statusBadge(record.lunch_status)}</td>
-                      <td className="py-3 px-4 text-gray-700">{formatTime(record.time_out)}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => startEditing(record)}
-                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded cursor-pointer hover:bg-blue-200"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => resetRecord(record)}
-                            className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded cursor-pointer hover:bg-gray-200"
-                          >
-                            Reset
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            filteredRecords.map((record, i) => {
+              const name = record.expand?.learner?.name || "Unknown";
+              const email = record.expand?.learner?.email || "";
+              return (
+                <div
+                  key={record.id}
+                  className="grid items-center ll-row"
+                  style={{
+                    gridTemplateColumns:
+                      "44px minmax(0,1.6fr) 110px 100px 100px 100px 110px 100px 130px",
+                    padding: "10px 28px",
+                    borderBottom: "1px solid var(--ll-divider)",
+                    fontSize: 14,
+                    background:
+                      i % 2 ? "var(--ll-bg)" : "var(--ll-surface)",
+                  }}
+                >
+                  <Avatar name={name} size={32} />
+                  <div className="min-w-0 pr-3">
+                    <div
+                      className="truncate"
+                      style={{ fontWeight: 600, lineHeight: 1.2, fontSize: 14 }}
+                      title={name}
+                    >
+                      {name}
+                    </div>
+                    {email && (
+                      <div
+                        className="truncate"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 10.5,
+                          color: "var(--ll-muted)",
+                          letterSpacing: "0.04em",
+                          marginTop: 2,
+                        }}
+                        title={email}
+                      >
+                        {email}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <StatusBadge status={record.status} />
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                    }}
+                  >
+                    {formatTime(record.time_in)}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                      color: "var(--ll-muted)",
+                    }}
+                  >
+                    {formatTime(getLunchOut(record))}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                      color: "var(--ll-muted)",
+                    }}
+                  >
+                    {formatTime(getLunchIn(record))}
+                  </div>
+                  <div>
+                    <StatusBadge status={record.lunch_status} />
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                    }}
+                  >
+                    {formatTime(record.time_out)}
+                  </div>
+                  <div
+                    className="flex justify-end items-center"
+                    style={{ gap: 6 }}
+                  >
+                    <button
+                      onClick={() => startEditing(record)}
+                      className="cursor-pointer ll-mini"
+                      style={{
+                        background: "transparent",
+                        color: "var(--ll-ink)",
+                        border: "1px solid var(--ll-ink-2)",
+                      }}
+                      title="Edit"
+                    >
+                      ✎ Edit
+                    </button>
+                    <button
+                      onClick={() => resetRecord(record)}
+                      className="cursor-pointer ll-icon"
+                      title="Reset record"
+                      aria-label="Reset"
+                      style={{ color: "var(--ll-muted)" }}
+                    >
+                      ↺
+                    </button>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* Summary stats */}
+        {/* Summary footer */}
         {!loading && filteredRecords.length > 0 && (
-          <div className="mt-4 bg-white rounded-2xl shadow-sm p-4 flex flex-wrap gap-6 text-sm">
-            <div>
-              <span className="text-gray-500">Total:</span>{" "}
-              <span className="font-semibold text-gray-900">{filteredRecords.length}</span>
-            </div>
-            <div>
-              <span className="text-gray-500">Present:</span>{" "}
-              <span className="font-semibold text-green-700">
-                {filteredRecords.filter((r) => r.status === "present").length}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-500">Late:</span>{" "}
-              <span className="font-semibold text-yellow-700">
-                {filteredRecords.filter((r) => r.status === "late").length}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-500">Absent:</span>{" "}
-              <span className="font-semibold text-red-700">
-                {filteredRecords.filter((r) => r.status === "absent").length}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-500">Justified Late:</span>{" "}
-              <span className="font-semibold text-blue-700">
-                {filteredRecords.filter((r) => r.status === "jLate").length}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-500">Justified Absent:</span>{" "}
-              <span className="font-semibold text-blue-700">
-                {filteredRecords.filter((r) => r.status === "jAbsent").length}
-              </span>
-            </div>
-            <div>
-              <span className="text-gray-500">No Status:</span>{" "}
-              <span className="font-semibold text-gray-700">
-                {filteredRecords.filter((r) => !r.status).length}
-              </span>
-            </div>
+          <div
+            className="flex items-center shrink-0 flex-wrap"
+            style={{
+              gap: 24,
+              padding: "14px 28px",
+              borderTop: "1px solid var(--ll-divider)",
+              background: "var(--ll-surface)",
+            }}
+          >
+            <SummaryCell label="Total" value={counts.total} />
+            <Sep />
+            <SummaryCell
+              label="Present"
+              value={counts.present}
+              tone="accent"
+            />
+            <SummaryCell label="Late" value={counts.late} tone="lime" />
+            <SummaryCell label="Absent" value={counts.absent} tone="warm" />
+            <Sep />
+            <SummaryCell label="J·Late" value={counts.jLate} />
+            <SummaryCell label="J·Absent" value={counts.jAbsent} />
+            <SummaryCell label="No status" value={counts.noStatus} />
           </div>
         )}
+      </div>
 
-        {/* Edit Modal */}
-        {editingRecord && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">
-                Edit Attendance: {editingRecord.expand?.learner?.name}
-              </h3>
+      {/* ─── Edit modal ────────────────────────────────────── */}
+      {editingRecord && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(31,27,22,0.55)" }}
+          onClick={cancelEditing}
+        >
+          <div
+            className="w-full max-w-lg"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--ll-surface)",
+              border: "1.5px solid var(--ll-ink)",
+              padding: 24,
+            }}
+          >
+            <Kicker>Edit attendance</Kicker>
+            <div
+              style={{
+                ...HEADING,
+                fontSize: 22,
+                marginTop: 4,
+                marginBottom: 16,
+              }}
+            >
+              {editingRecord.expand?.learner?.name || "Learner"}
+            </div>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Check In</label>
-                    <input
-                      type="time"
-                      value={editForm.time_in}
-                      onChange={(e) => setEditForm({ ...editForm, time_in: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                    <select
-                      value={editForm.status}
-                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    >
-                      <option value="">— None —</option>
-                      <option value="present">Present</option>
-                      <option value="late">Late</option>
-                      <option value="absent">Absent</option>
-                      <option value="jLate">Justified Late</option>
-                      <option value="jAbsent">Justified Absent</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch Out</label>
-                    <input
-                      type="time"
-                      value={editForm.lunch_out}
-                      onChange={(e) => setEditForm({ ...editForm, lunch_out: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch In</label>
-                    <input
-                      type="time"
-                      value={editForm.lunch_in}
-                      onChange={(e) => setEditForm({ ...editForm, lunch_in: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Lunch Status</label>
-                    <select
-                      value={editForm.lunch_status}
-                      onChange={(e) => setEditForm({ ...editForm, lunch_status: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    >
-                      <option value="">— None —</option>
-                      <option value="present">Present</option>
-                      <option value="late">Late</option>
-                      <option value="absent">Absent</option>
-                      <option value="jLate">Justified Late</option>
-                      <option value="jAbsent">Justified Absent</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Check Out</label>
-                    <input
-                      type="time"
-                      value={editForm.time_out}
-                      onChange={(e) => setEditForm({ ...editForm, time_out: e.target.value })}
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 mt-6">
-                <button
-                  onClick={cancelEditing}
-                  className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Check in">
+                <InkInput
+                  type="time"
+                  value={editForm.time_in}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, time_in: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </Field>
+              <Field label="Status">
+                <InkSelect
+                  value={editForm.status}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, status: e.target.value })
+                  }
+                  className="w-full"
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveEditing}
-                  className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
+                  <option value="">— None —</option>
+                  <option value="present">Present</option>
+                  <option value="late">Late</option>
+                  <option value="absent">Absent</option>
+                  <option value="jLate">Justified late</option>
+                  <option value="jAbsent">Justified absent</option>
+                </InkSelect>
+              </Field>
+              <Field label="Lunch out">
+                <InkInput
+                  type="time"
+                  value={editForm.lunch_out}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, lunch_out: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </Field>
+              <Field label="Lunch in">
+                <InkInput
+                  type="time"
+                  value={editForm.lunch_in}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, lunch_in: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </Field>
+              <Field label="Lunch status">
+                <InkSelect
+                  value={editForm.lunch_status}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, lunch_status: e.target.value })
+                  }
+                  className="w-full"
                 >
-                  Save Changes
-                </button>
-              </div>
+                  <option value="">— None —</option>
+                  <option value="present">Present</option>
+                  <option value="late">Late</option>
+                  <option value="absent">Absent</option>
+                  <option value="jLate">Justified late</option>
+                  <option value="jAbsent">Justified absent</option>
+                </InkSelect>
+              </Field>
+              <Field label="Check out">
+                <InkInput
+                  type="time"
+                  value={editForm.time_out}
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, time_out: e.target.value })
+                  }
+                  className="w-full"
+                />
+              </Field>
+            </div>
+
+            <div className="flex justify-end mt-6" style={{ gap: 6 }}>
+              <Pill size="sm" onClick={cancelEditing}>
+                Cancel
+              </Pill>
+              <Pill size="sm" variant="ink" onClick={saveEditing}>
+                Save changes
+              </Pill>
             </div>
           </div>
-        )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div style={{ ...KICKER, marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Sep() {
+  return (
+    <div
+      style={{
+        width: 1,
+        height: 28,
+        background: "var(--ll-divider)",
+      }}
+    />
+  );
+}
+
+function SummaryCell({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "accent" | "warm" | "lime";
+}) {
+  const color =
+    tone === "accent"
+      ? "var(--ll-accent)"
+      : tone === "warm"
+        ? "var(--ll-warm)"
+        : tone === "lime"
+          ? "var(--ll-ink-2)"
+          : "var(--ll-ink)";
+  return (
+    <div className="flex flex-col">
+      <div style={KICKER}>{label}</div>
+      <div
+        style={{
+          ...HEADING,
+          fontSize: 28,
+          color,
+          lineHeight: 1.05,
+          marginTop: 4,
+        }}
+      >
+        {value}
       </div>
     </div>
   );

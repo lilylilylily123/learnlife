@@ -10,12 +10,10 @@ import { useAttendanceFilters } from "./hooks/useAttendanceFilters";
 import Account from "./components/Account";
 import CreateLearnerModal from "./components/CreateLearnerModal";
 import { TestModePanel } from "./components/TestModePanel";
-import { AttendanceFilterPills } from "./components/AttendanceFilterPills";
-import { LearnerGrid } from "./components/LearnerGrid";
-import { LearnerListView } from "./components/LearnerListView";
 import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
+import { AttenderD } from "./components/AttenderD";
 import type { Student } from "./types";
 
 export default function AttendancePage() {
@@ -47,19 +45,19 @@ export default function AttendancePage() {
   const [totalPages, setTotalPages] = useState<number>(1);
   const [totalItems, setTotalItems] = useState<number>(0);
 
-  // View mode
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-
   // Raw data
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
 
-  // Update auth state after mount to avoid hydration mismatch
+  // Update auth state after mount to avoid hydration mismatch.
+  // Treat learner-role accounts as logged out — nfc-attender is a guide tool.
   useEffect(() => {
-    setIsLoggedIn(pb.authStore.isValid);
-    const unsubscribe = pb.authStore.onChange(() =>
-      setIsLoggedIn(pb.authStore.isValid),
-    );
+    const isPrivileged = () => {
+      const role = (pb.authStore.record as { role?: string } | null)?.role;
+      return pb.authStore.isValid && (role === "admin" || role === "lg");
+    };
+    setIsLoggedIn(isPrivileged());
+    const unsubscribe = pb.authStore.onChange(() => setIsLoggedIn(isPrivileged()));
     getVersion().then(setAppVersion).catch(() => {});
     return () => unsubscribe();
   }, []);
@@ -487,144 +485,52 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
+    <>
       <UpdateNotification />
-      <div className="w-full max-w-7xl mx-auto">
-        {/* Header Row */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-              Attender
-            </h1>
-            {appVersion && (
-              <span className="text-xs text-gray-400 font-normal">
-                v{appVersion}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowModal(true)}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
-            >
-              + Learner
-            </button>
-            <button
-              onClick={() => setShowActivityFeed((v) => !v)}
-              className={`cursor-pointer px-3 py-2 rounded-xl text-sm font-medium shadow ${
-                showActivityFeed
-                  ? "bg-green-500 text-white hover:bg-green-600"
-                  : "bg-green-100 text-green-700 hover:bg-green-200"
-              }`}
-            >
-              📡 Live
-              {activityEvents.length > 0 ? ` (${activityEvents.length})` : ""}
-            </button>
-            <button
-              onClick={() => router.push("/history")}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
-            >
-              📊 History
-            </button>
-            <button
-              onClick={() => pb.authStore.clear()}
-              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
 
-        {/* Controls Row */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Search */}
-            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 flex-1 min-w-[200px] max-w-md">
-              <svg
-                className="w-4 h-4 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search learners..."
-                className="outline-none text-sm bg-transparent flex-1"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch("")}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ×
-                </button>
-              )}
-            </div>
+      <AttenderD
+        appVersion={appVersion}
+        viewDate={viewDate}
+        testMode={testMode}
+        uid={uid}
+        exists={exists}
+        search={search}
+        setSearch={setSearch}
+        programFilter={programFilter}
+        setProgramFilter={setProgramFilter}
+        attendanceFilter={attendanceFilter}
+        setAttendanceFilter={setAttendanceFilter}
+        attendanceCounts={attendanceCounts}
+        filtered={filtered}
+        totalItems={totalItems}
+        page={page}
+        perPage={perPage}
+        totalPages={totalPages}
+        setPage={setPage}
+        setPerPage={setPerPage}
+        activityEvents={activityEvents}
+        onShowActivityFeed={() => setShowActivityFeed((v) => !v)}
+        onShowAddLearner={() => setShowModal(true)}
+        onShowHistory={() => router.push("/history")}
+        onLogout={() => pb.authStore.clear()}
+        onToggleTestMode={() => {
+          setTestMode((t) => !t);
+          if (testMode) {
+            setTestTime(null);
+            setTestDate(null);
+          }
+        }}
+        onCheckAction={handleCheckAction}
+        onCommentUpdate={handleCommentUpdate}
+        onTimeEdit={handleTimeEdit}
+        onReset={handleReset}
+      />
 
-            {/* Program Filter */}
-            <select
-              value={programFilter}
-              onChange={(e) => setProgramFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer"
-            >
-              <option value="all">All programs</option>
-              <option value="exp">Explorers</option>
-              <option value="cre">Creators</option>
-              <option value="chmk">Changemakers</option>
-            </select>
-
-            {/* View toggle */}
-            <div className="flex rounded-xl overflow-hidden border border-gray-200">
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "grid" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
-              >
-                ▦ Grid
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "list" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
-              >
-                ☰ List
-              </button>
-            </div>
-
-            <div className="flex-1" />
-
-            {/* Test Mode Toggle */}
-            <button
-              onClick={() => {
-                setTestMode((t) => !t);
-                if (testMode) {
-                  setTestTime(null);
-                  setTestDate(null);
-                }
-              }}
-              className={`px-3 py-2 rounded-xl text-sm cursor-pointer font-medium ${
-                testMode
-                  ? "bg-orange-500 text-white"
-                  : "bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              {testMode ? "🧪 Test Mode ON" : "🧪 Test Mode"}
-            </button>
-          </div>
-        </div>
-
-        {/* Test Mode Panel */}
-        {testMode && (
+      {testMode && (
+        <div
+          className="fixed bottom-4 left-4 right-4 z-30"
+          style={{ maxWidth: 720, margin: "0 auto" }}
+        >
           <TestModePanel
             testDate={testDate}
             testTime={testTime}
@@ -635,138 +541,9 @@ export default function AttendancePage() {
             setTestTime={setTestTime}
             simulateScan={simulateScan}
           />
-        )}
-
-        {/* NFC Status */}
-        {uid && (
-          <div
-            className={`mb-4 px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 ${
-              exists
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
-            <span className="font-medium">NFC:</span>
-            <code className="font-mono">{uid}</code>
-            <span>•</span>
-            <span>{exists ? "✓ Learner found" : "✗ Not registered"}</span>
-          </div>
-        )}
-
-        {/* Date indicator (non-test mode) */}
-        {!testMode && (
-          <div className="mb-4 text-sm text-gray-500">
-            Showing attendance for{" "}
-            <span className="font-medium text-gray-700">
-              {new Date(viewDate).toLocaleDateString(undefined, {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </span>
-          </div>
-        )}
-
-        {/* Attendance filter pills */}
-        <AttendanceFilterPills
-          attendanceFilter={attendanceFilter}
-          attendanceCounts={attendanceCounts}
-          setAttendanceFilter={setAttendanceFilter}
-        />
-
-        {/* Learner grid or list */}
-        {viewMode === "grid" ? (
-          <LearnerGrid
-            filtered={filtered}
-            uid={uid}
-            testMode={testMode}
-            testTime={testTime}
-            onStatusChange={handleSetStatus}
-            onCheckAction={handleCheckAction}
-            onCommentUpdate={handleCommentUpdate}
-            onReset={handleReset}
-          />
-        ) : (
-          <LearnerListView
-            filtered={filtered}
-            uid={uid}
-            onStatusChange={handleSetStatus}
-            onCheckAction={handleCheckAction}
-            onCommentUpdate={handleCommentUpdate}
-            onTimeEdit={handleTimeEdit}
-          />
-        )}
-
-        {/* Pagination controls */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mt-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="text-sm text-gray-600">
-              Showing{" "}
-              <span className="font-semibold">{filtered.length}</span> of{" "}
-              <span className="font-semibold">{totalItems}</span> learners
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page <= 1 ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
-              >
-                ← Prev
-              </button>
-
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 text-sm">
-                <span className="text-gray-500">Page</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  value={page}
-                  onChange={(e) =>
-                    setPage(
-                      Math.max(
-                        1,
-                        Math.min(totalPages, Number(e.target.value || 1)),
-                      ),
-                    )
-                  }
-                  className="w-12 text-center text-sm outline-none bg-white border border-gray-200 rounded px-1 py-0.5"
-                />
-                <span className="text-gray-500">of {totalPages}</span>
-              </div>
-
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page >= totalPages ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
-              >
-                Next →
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Show:</span>
-              <select
-                value={perPage}
-                onChange={(e) => {
-                  setPerPage(Number(e.target.value));
-                  setPage(1);
-                }}
-                className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-sm cursor-pointer"
-              >
-                <option value={4}>4</option>
-                <option value={8}>8</option>
-                <option value={12}>12</option>
-                <option value={24}>24</option>
-                <option value={500}>All</option>
-              </select>
-            </div>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Activity feed panel */}
       {showActivityFeed && (
         <ActivityFeed
           events={activityEvents}
@@ -774,13 +551,12 @@ export default function AttendancePage() {
         />
       )}
 
-      {/* Modal for creating learner */}
       <CreateLearnerModal
         open={showModal}
         onClose={() => setShowModal(false)}
         onCreate={handleCreateLearner}
         uid={uid}
       />
-    </div>
+    </>
   );
 }
