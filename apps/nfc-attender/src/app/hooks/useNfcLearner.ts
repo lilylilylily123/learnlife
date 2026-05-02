@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { checkLearnerIn, type CheckInResult } from "../utils/utils";
-import { getLearnerByNfc } from "@/lib/pb-client";
+import { getLearnerByNfc, type Learner } from "@/lib/pb-client";
 import { pb } from "@/app/pb";
 import { debug } from "@/lib/debug";
 
@@ -29,7 +29,7 @@ interface ScanJob {
  */
 export function useNfcLearner(options?: NfcHookOptions) {
   const [uid, setUid] = useState("");
-  const [learner, setLearner] = useState<any>(null); // TODO: type as Learner from pb-client
+  const [learner, setLearner] = useState<Learner | null>(null);
   const [exists, setExists] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(false);
   const [lastAction, setLastAction] = useState<CheckInResult | null>(null);
