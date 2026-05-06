@@ -175,29 +175,43 @@ export default function AttendancePage() {
     let cancelled = false;
 
     const setup = async () => {
-      const unsubLearners = await pb
-        .collection("learners")
-        .subscribe("*", () => {
-          if (learnersTimer) clearTimeout(learnersTimer);
-          learnersTimer = setTimeout(() => fetchLearnersRef.current(), 1000);
-        });
-      const unsubAttendance = await pb
-        .collection("attendance")
-        .subscribe("*", () => {
-          if (attendanceTimer) clearTimeout(attendanceTimer);
-          attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
-        });
+      try {
+        const unsubLearners = await pb
+          .collection("learners")
+          .subscribe("*", () => {
+            if (learnersTimer) clearTimeout(learnersTimer);
+            learnersTimer = setTimeout(() => fetchLearnersRef.current(), 1000);
+          });
+        const unsubAttendance = await pb
+          .collection("attendance")
+          .subscribe("*", () => {
+            if (attendanceTimer) clearTimeout(attendanceTimer);
+            attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
+          });
 
-      if (cancelled) {
-        unsubLearners();
-        unsubAttendance();
-        return;
+        if (cancelled) {
+          // Page navigated away while subscribe() was awaiting. Tear the
+          // freshly-created subscriptions down quietly — calling unsub on a
+          // half-dead client can itself 404, which is harmless.
+          try {
+            unsubLearners();
+            unsubAttendance();
+          } catch {}
+          return;
+        }
+
+        cleanup.unsub = () => {
+          try {
+            unsubLearners();
+            unsubAttendance();
+          } catch {}
+        };
+      } catch (err) {
+        // PocketBase realtime can 404 with "Missing or invalid client id"
+        // during fast navigation when the SSE client_id goes stale. Logging
+        // the cause here is enough — the next page load will re-subscribe.
+        console.warn("Realtime subscribe failed:", err);
       }
-
-      cleanup.unsub = () => {
-        unsubLearners();
-        unsubAttendance();
-      };
     };
 
     const cleanup: { unsub?: () => void } = {};
@@ -521,6 +535,7 @@ export default function AttendancePage() {
           }
         }}
         onCheckAction={handleCheckAction}
+        onStatusChange={handleSetStatus}
         onCommentUpdate={handleCommentUpdate}
         onTimeEdit={handleTimeEdit}
         onReset={handleReset}

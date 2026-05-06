@@ -12,7 +12,7 @@ const {
   const mockCreate = vi.fn();
   const mockUpdate = vi.fn();
   const mockGetList = vi.fn();
-  const mockCollection = vi.fn(() => ({
+  const mockCollection = vi.fn((_name: string) => ({
     getFirstListItem: mockGetFirstListItem,
     create: mockCreate,
     update: mockUpdate,

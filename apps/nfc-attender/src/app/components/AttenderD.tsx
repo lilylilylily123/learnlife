@@ -8,6 +8,7 @@ import {
   Pill,
   Kicker,
   StatusPill,
+  StatusBadge,
   Avatar,
   BigStat,
   LMark,
@@ -46,6 +47,12 @@ interface AttenderDProps {
   onToggleTestMode: () => void;
 
   onCheckAction: (id: string, action: string) => void;
+  onStatusChange: (
+    id: string,
+    status: string,
+    field?: "status" | "lunch_status",
+    toggle?: boolean,
+  ) => void;
   onCommentUpdate: (id: string, comment: string) => Promise<void>;
   onTimeEdit: (
     id: string,
@@ -53,6 +60,520 @@ interface AttenderDProps {
     timeStr: string,
   ) => Promise<void>;
   onReset: (id: string) => void;
+}
+
+const STATUS_OPTIONS: ReadonlyArray<{
+  key: string;
+  label: string;
+  title: string;
+  bg: string;
+  fg: string;
+  bd?: string;
+}> = [
+  {
+    key: "present",
+    label: "P",
+    title: "Present",
+    bg: "var(--ll-accent)",
+    fg: "var(--ll-accent-ink)",
+  },
+  {
+    key: "late",
+    label: "L",
+    title: "Late",
+    bg: "var(--ll-lime)",
+    fg: "var(--ll-lime-ink)",
+  },
+  {
+    key: "absent",
+    label: "A",
+    title: "Absent",
+    bg: "var(--ll-warm)",
+    fg: "var(--ll-warm-ink)",
+  },
+  {
+    key: "jLate",
+    label: "JL",
+    title: "Justified late",
+    bg: "transparent",
+    fg: "var(--ll-ink-2)",
+    bd: "var(--ll-ink-2)",
+  },
+  {
+    key: "jAbsent",
+    label: "JA",
+    title: "Justified absent",
+    bg: "transparent",
+    fg: "var(--ll-ink-2)",
+    bd: "var(--ll-ink-2)",
+  },
+];
+
+export function StatusEditor({
+  value,
+  lunchValue,
+  onChange,
+  onLunchChange,
+}: {
+  value: string | undefined;
+  lunchValue?: string;
+  onChange: (v: string) => void;
+  onLunchChange?: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  return (
+    <div
+      className="relative"
+      ref={ref}
+      style={{ justifySelf: "start", display: "inline-block" }}
+    >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="cursor-pointer flex flex-col items-start"
+        title="Set status"
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          gap: 3,
+        }}
+      >
+        {value ? (
+          <StatusBadge status={value} />
+        ) : (
+          <span
+            style={{
+              ...KICKER,
+              padding: "3px 9px",
+              border: "1px dashed var(--ll-divider)",
+              color: "var(--ll-muted)",
+              display: "inline-block",
+            }}
+          >
+            Set
+          </span>
+        )}
+        {lunchValue && (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              letterSpacing: "0.06em",
+              fontWeight: 700,
+              color: "var(--ll-muted)",
+              textTransform: "uppercase",
+            }}
+          >
+            ↳ lunch · {lunchLabel(lunchValue)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute z-30"
+          style={{
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "var(--ll-surface)",
+            border: "1.5px solid var(--ll-ink)",
+            padding: 6,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            minWidth: 168,
+            boxShadow: "0 6px 14px rgba(31,27,22,0.12)",
+          }}
+        >
+          <div
+            style={{
+              ...KICKER,
+              fontSize: 9.5,
+              padding: "2px 4px 4px",
+              borderBottom: "1px solid var(--ll-divider)",
+              marginBottom: 2,
+            }}
+          >
+            Morning
+          </div>
+          {STATUS_OPTIONS.map((opt) => (
+            <StatusMenuItem
+              key={`m-${opt.key}`}
+              option={opt}
+              active={value === opt.key}
+              onPick={() => {
+                onChange(opt.key);
+                setOpen(false);
+              }}
+            />
+          ))}
+          {value && (
+            <button
+              onClick={() => {
+                onChange(value);
+                setOpen(false);
+              }}
+              className="cursor-pointer"
+              style={{
+                padding: "4px 8px",
+                background: "transparent",
+                color: "var(--ll-muted)",
+                border: "1px dashed var(--ll-divider)",
+                fontSize: 10.5,
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                textAlign: "left",
+              }}
+              title="Click again to clear (toggle)"
+            >
+              Clear morning
+            </button>
+          )}
+          {onLunchChange && (
+            <>
+              <div
+                style={{
+                  ...KICKER,
+                  fontSize: 9.5,
+                  padding: "8px 4px 4px",
+                  borderTop: "1px solid var(--ll-divider)",
+                  marginTop: 4,
+                }}
+              >
+                Lunch
+              </div>
+              {STATUS_OPTIONS.map((opt) => (
+                <StatusMenuItem
+                  key={`l-${opt.key}`}
+                  option={opt}
+                  active={lunchValue === opt.key}
+                  onPick={() => {
+                    onLunchChange(opt.key);
+                    setOpen(false);
+                  }}
+                />
+              ))}
+              {lunchValue && (
+                <button
+                  onClick={() => {
+                    onLunchChange(lunchValue);
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer"
+                  style={{
+                    padding: "4px 8px",
+                    background: "transparent",
+                    color: "var(--ll-muted)",
+                    border: "1px dashed var(--ll-divider)",
+                    fontSize: 10.5,
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    textAlign: "left",
+                  }}
+                  title="Click again to clear (toggle)"
+                >
+                  Clear lunch
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ScanEvent {
+  iso: string;
+  label: string;
+  arrow: string;
+  tone: "in" | "out" | "lunch-out" | "lunch-in";
+}
+
+export function buildScanHistory(s: Student): ScanEvent[] {
+  const events: ScanEvent[] = [];
+  if (s.time_in) {
+    events.push({ iso: s.time_in, label: "Check-in", arrow: "→", tone: "in" });
+  }
+  for (const e of s.lunch_events || []) {
+    events.push({
+      iso: e.time,
+      label: e.type === "out" ? "Lunch out" : "Lunch in",
+      arrow: e.type === "out" ? "↗" : "↘",
+      tone: e.type === "out" ? "lunch-out" : "lunch-in",
+    });
+  }
+  if (s.time_out) {
+    events.push({
+      iso: s.time_out,
+      label: "Check-out",
+      arrow: "←",
+      tone: "out",
+    });
+  }
+  events.sort((a, b) => (a.iso < b.iso ? -1 : a.iso > b.iso ? 1 : 0));
+  return events;
+}
+
+export function ScanHistoryCell({ student }: { student: Student }) {
+  const events = useMemo(() => buildScanHistory(student), [student]);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  const lunchCount = events.filter(
+    (e) => e.tone === "lunch-out" || e.tone === "lunch-in",
+  ).length;
+  const last = events.length > 0 ? events[events.length - 1] : null;
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
+
+  if (events.length === 0) {
+    return (
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12.5,
+          color: "var(--ll-muted)",
+        }}
+      >
+        —
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="relative"
+      ref={ref}
+      style={{ justifySelf: "start", display: "inline-block" }}
+    >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="cursor-pointer flex flex-col items-start ll-time"
+        style={{
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          gap: 1,
+        }}
+        title={`${events.length} scan${events.length === 1 ? "" : "s"} — click for history`}
+      >
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 12.5,
+            color: "var(--ll-ink)",
+          }}
+        >
+          {last ? `${last.arrow} ${fmt(last.iso)}` : "—"}
+        </span>
+        {lunchCount > 0 && (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              letterSpacing: "0.06em",
+              fontWeight: 700,
+              color: "var(--ll-muted)",
+              textTransform: "uppercase",
+            }}
+          >
+            🍴 lunch · {lunchCount}×
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute z-30"
+          style={{
+            top: "calc(100% + 4px)",
+            right: 0,
+            background: "var(--ll-surface)",
+            border: "1.5px solid var(--ll-ink)",
+            padding: 6,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            minWidth: 220,
+            boxShadow: "0 6px 14px rgba(31,27,22,0.12)",
+          }}
+        >
+          <div
+            style={{
+              ...KICKER,
+              fontSize: 9.5,
+              padding: "2px 6px 4px",
+              borderBottom: "1px solid var(--ll-divider)",
+              marginBottom: 2,
+            }}
+          >
+            Scan history · {events.length}
+          </div>
+          {events.map((e, i) => (
+            <div
+              key={i}
+              className="flex items-center"
+              style={{
+                gap: 8,
+                padding: "4px 6px",
+                background:
+                  i === events.length - 1
+                    ? "color-mix(in srgb, var(--ll-accent) 10%, transparent)"
+                    : "transparent",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 13,
+                  width: 18,
+                  textAlign: "center",
+                  color:
+                    e.tone === "in"
+                      ? "var(--ll-accent)"
+                      : e.tone === "out"
+                        ? "var(--ll-ink)"
+                        : "var(--ll-ink-2)",
+                }}
+              >
+                {e.arrow}
+              </span>
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  flex: 1,
+                  color: "var(--ll-ink)",
+                }}
+              >
+                {e.label}
+              </span>
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11.5,
+                  letterSpacing: "0.04em",
+                  color: "var(--ll-muted)",
+                }}
+              >
+                {fmt(e.iso)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function lunchLabel(s: string): string {
+  switch (s) {
+    case "present":
+      return "on time";
+    case "late":
+      return "late";
+    case "absent":
+      return "skipped";
+    case "jLate":
+      return "j·late";
+    case "jAbsent":
+      return "j·skipped";
+    default:
+      return s;
+  }
+}
+
+function StatusMenuItem({
+  option,
+  active,
+  onPick,
+}: {
+  option: (typeof STATUS_OPTIONS)[number];
+  active: boolean;
+  onPick: () => void;
+}) {
+  const { label, title, bg, fg, bd } = option;
+  return (
+    <button
+      onClick={onPick}
+      className="cursor-pointer flex items-center"
+      style={{
+        gap: 8,
+        padding: "5px 8px",
+        background: active ? bg : "transparent",
+        color: active ? fg : "var(--ll-ink)",
+        border: `1px solid ${active ? bd ?? bg : "transparent"}`,
+        textAlign: "left",
+        fontSize: 12,
+        fontFamily: "var(--font-body)",
+      }}
+    >
+      <span
+        className="inline-flex items-center justify-center"
+        style={{
+          width: 22,
+          height: 18,
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          background: active ? "transparent" : bg,
+          color: fg,
+          border: bd ? `1px solid ${bd}` : "none",
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ flex: 1 }}>{title}</span>
+    </button>
+  );
 }
 
 const PROGRAM_LABEL: Record<string, string> = {
@@ -82,6 +603,85 @@ function getPresenceState(s: Student): ScanState {
     return "in";
   }
   return "absent";
+}
+
+interface WallTone {
+  bg: string;
+  fg: string;
+  border: string;
+  dashed?: boolean;
+  flag?: string; // small UPPERCASE marker (e.g. "LATE", "J·A")
+  title?: string;
+}
+
+// WallView tone factors in the manual `status` field on top of presence —
+// otherwise a learner marked Late visually looks identical to one marked
+// Present, and Justified Absent looks identical to a no-show.
+function getWallTone(s: Student): WallTone {
+  const events = s.lunch_events || [];
+  const atLunch =
+    events.length > 0 && events[events.length - 1].type === "out";
+
+  if (s.time_out) {
+    return {
+      bg: "var(--ll-surface-2)",
+      fg: "var(--ll-muted)",
+      border: "var(--ll-divider)",
+      title: "Checked out",
+    };
+  }
+  if (s.time_in) {
+    if (atLunch) {
+      return {
+        bg: "var(--ll-lime)",
+        fg: "var(--ll-lime-ink)",
+        border: "var(--ll-ink)",
+        flag: "LUNCH",
+        title: "At lunch",
+      };
+    }
+    if (s.status === "late") {
+      return {
+        bg: "var(--ll-lime)",
+        fg: "var(--ll-lime-ink)",
+        border: "var(--ll-ink)",
+        flag: "LATE",
+        title: "Late",
+      };
+    }
+    if (s.status === "jLate") {
+      return {
+        bg: "transparent",
+        fg: "var(--ll-ink-2)",
+        border: "var(--ll-ink-2)",
+        flag: "J·L",
+        title: "Justified late",
+      };
+    }
+    return {
+      bg: "var(--ll-accent)",
+      fg: "var(--ll-accent-ink)",
+      border: "var(--ll-ink)",
+      title: "Present",
+    };
+  }
+  // No check-in
+  if (s.status === "jAbsent") {
+    return {
+      bg: "transparent",
+      fg: "var(--ll-ink-2)",
+      border: "var(--ll-ink-2)",
+      flag: "J·A",
+      title: "Justified absent",
+    };
+  }
+  return {
+    bg: "transparent",
+    fg: "var(--ll-warm)",
+    border: "var(--ll-warm)",
+    dashed: true,
+    title: s.status === "absent" ? "Marked absent" : "No check-in",
+  };
 }
 
 function shortCardNum(id: string) {
@@ -128,6 +728,7 @@ export function AttenderD(props: AttenderDProps) {
     onLogout,
     onToggleTestMode,
     onCheckAction,
+    onStatusChange,
     onCommentUpdate,
     onTimeEdit,
     onReset,
@@ -768,6 +1369,26 @@ export function AttenderD(props: AttenderDProps) {
               <button
                 className="cursor-pointer ll-bulk"
                 onClick={() => {
+                  for (const id of selectedIds)
+                    onStatusChange(id, "absent", "status", false);
+                }}
+                title="Mark all selected as Absent"
+              >
+                ⊘ Mark absent
+              </button>
+              <button
+                className="cursor-pointer ll-bulk"
+                onClick={() => {
+                  for (const id of selectedIds)
+                    onStatusChange(id, "jAbsent", "status", false);
+                }}
+                title="Mark all selected as Justified absent"
+              >
+                ⊘ J·Absent
+              </button>
+              <button
+                className="cursor-pointer ll-bulk"
+                onClick={() => {
                   for (const id of selectedIds) onReset(id);
                   setSelectedIds(new Set());
                 }}
@@ -791,7 +1412,7 @@ export function AttenderD(props: AttenderDProps) {
                 className="grid items-center shrink-0"
                 style={{
                   gridTemplateColumns:
-                    "32px 44px minmax(0,1.4fr) minmax(0,1fr) 100px 100px 100px 130px",
+                    "32px 44px minmax(0,1.4fr) minmax(0,1fr) 120px 100px 100px 130px",
                   padding: "11px 28px",
                   borderBottom: "1px solid var(--ll-divider)",
                   background: "var(--ll-surface)",
@@ -841,11 +1462,6 @@ export function AttenderD(props: AttenderDProps) {
                     const state = getPresenceState(s);
                     const selected = selectedIds.has(s.id);
                     const isCurrent = !!uid && s.NFC_ID === uid;
-                    const lunchEvents = s.lunch_events || [];
-                    const lastScanTime =
-                      lunchEvents.length > 0
-                        ? lunchEvents[lunchEvents.length - 1].time
-                        : s.time_out || s.time_in;
                     return (
                       <div
                         key={s.id}
@@ -909,9 +1525,14 @@ export function AttenderD(props: AttenderDProps) {
                         >
                           {PROGRAM_LABEL[s.program || ""] || s.program || "—"}
                         </div>
-                        <div>
-                          <StatusPill state={state} />
-                        </div>
+                        <StatusEditor
+                          value={s.status}
+                          lunchValue={s.lunch_status}
+                          onChange={(v) => onStatusChange(s.id, v, "status")}
+                          onLunchChange={(v) =>
+                            onStatusChange(s.id, v, "lunch_status")
+                          }
+                        />
                         <div
                           style={{
                             fontFamily: "var(--font-mono)",
@@ -980,17 +1601,7 @@ export function AttenderD(props: AttenderDProps) {
                             </button>
                           )}
                         </div>
-                        <div
-                          style={{
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 12.5,
-                            color: "var(--ll-muted)",
-                          }}
-                        >
-                          {state === "in"
-                            ? "—"
-                            : formatTimeShort(lastScanTime || null)}
-                        </div>
+                        <ScanHistoryCell student={s} />
                         <div
                           className="flex justify-end items-center"
                           style={{ gap: 6, color: "var(--ll-muted)" }}
@@ -1288,50 +1899,24 @@ function WallView({
         }}
       >
         {filtered.map((s) => {
-          const state = getPresenceState(s);
+          const tone = getWallTone(s);
           const isCurrent = !!uid && s.NFC_ID === uid;
-          const cfg: Record<
-            ScanState,
-            { bg: string; fg: string; border: string }
-          > = {
-            in: {
-              bg: "var(--ll-accent)",
-              fg: "var(--ll-accent-ink)",
-              border: "var(--ll-ink)",
-            },
-            lunch: {
-              bg: "var(--ll-lime)",
-              fg: "var(--ll-lime-ink)",
-              border: "var(--ll-ink)",
-            },
-            out: {
-              bg: "var(--ll-surface-2)",
-              fg: "var(--ll-muted)",
-              border: "var(--ll-divider)",
-            },
-            absent: {
-              bg: "transparent",
-              fg: "var(--ll-warm)",
-              border: "var(--ll-warm)",
-            },
-          };
-          const c = cfg[state];
           return (
             <div
               key={s.id}
               style={{
-                background: c.bg,
-                color: c.fg,
-                border:
-                  state === "absent"
-                    ? `1.5px dashed ${c.border}`
-                    : `1.5px solid ${c.border}`,
+                background: tone.bg,
+                color: tone.fg,
+                border: tone.dashed
+                  ? `1.5px dashed ${tone.border}`
+                  : `1.5px solid ${tone.border}`,
                 padding: "7px 9px",
                 minHeight: 54,
                 boxShadow: isCurrent
                   ? `0 0 0 2px var(--ll-bg), 0 0 0 4px var(--ll-accent)`
                   : "none",
               }}
+              title={tone.title}
             >
               <div
                 className="truncate"
@@ -1354,10 +1939,11 @@ function WallView({
                 }}
               >
                 <span style={{ opacity: 0.75 }}>
-                  {(s.program || "").slice(0, 4).toUpperCase()}
+                  {tone.flag ||
+                    (s.program || "").slice(0, 4).toUpperCase()}
                 </span>
                 <span style={{ fontWeight: 700 }}>
-                  {state === "absent" ? "—" : formatTimeShort(s.time_in)}
+                  {s.time_in ? formatTimeShort(s.time_in) : "—"}
                 </span>
               </div>
             </div>
