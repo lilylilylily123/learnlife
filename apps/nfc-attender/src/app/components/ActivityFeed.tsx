@@ -1,5 +1,13 @@
 "use client";
 import { useEffect, useRef } from "react";
+import {
+  HEADING,
+  KICKER,
+  Kicker,
+  Avatar,
+  StatusPill,
+  type ScanState,
+} from "./ll-ui";
 
 export interface ActivityEvent {
   id: string;
@@ -10,21 +18,15 @@ export interface ActivityEvent {
   status?: string;
 }
 
-const ACTION_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
-  check_in: { label: "Checked in", icon: "→", color: "bg-green-100 text-green-700" },
-  check_out: { label: "Checked out", icon: "←", color: "bg-blue-100 text-blue-700" },
-  lunch_event: { label: "Lunch", icon: "🍽", color: "bg-orange-100 text-orange-700" },
-  late_lunch_return: { label: "Back from lunch (late)", icon: "←", color: "bg-yellow-100 text-yellow-700" },
-  "morning-in": { label: "Checked in", icon: "→", color: "bg-green-100 text-green-700" },
-  "lunch-out": { label: "Lunch out", icon: "→", color: "bg-orange-100 text-orange-700" },
-  "lunch-in": { label: "Back from lunch", icon: "←", color: "bg-green-100 text-green-700" },
-  "day-out": { label: "Checked out", icon: "←", color: "bg-blue-100 text-blue-700" },
-};
-
-const PROGRAM_COLORS: Record<string, string> = {
-  exp: "bg-rose-100 text-rose-700",
-  cre: "bg-emerald-100 text-emerald-700",
-  chmk: "bg-sky-100 text-sky-700",
+const ACTION_LABEL: Record<string, string> = {
+  check_in: "Checked in",
+  check_out: "Checked out",
+  lunch_event: "Lunch",
+  late_lunch_return: "Back from lunch · late",
+  "morning-in": "Checked in",
+  "lunch-out": "Out for lunch",
+  "lunch-in": "Back from lunch",
+  "day-out": "Checked out",
 };
 
 const PROGRAM_LABELS: Record<string, string> = {
@@ -33,8 +35,19 @@ const PROGRAM_LABELS: Record<string, string> = {
   chmk: "CHMK",
 };
 
+function actionState(actionType: string): ScanState {
+  if (actionType === "lunch-out" || actionType === "lunch_event") return "lunch";
+  if (actionType === "day-out" || actionType === "check_out") return "out";
+  return "in";
+}
+
 function formatTime(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 }
 
 interface ActivityFeedProps {
@@ -50,83 +63,145 @@ export function ActivityFeed({ events, onClose }: ActivityFeedProps) {
   }, [events.length]);
 
   return (
-    <div className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl border-l border-gray-200 z-50 flex flex-col">
+    <aside
+      className="fixed top-0 right-0 h-full flex flex-col z-50"
+      style={{
+        width: 340,
+        background: "var(--ll-surface)",
+        borderLeft: "1.5px solid var(--ll-ink)",
+        color: "var(--ll-ink)",
+        boxShadow: "-12px 0 28px -16px rgba(31, 27, 22, 0.25)",
+      }}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">📡</span>
-          <h2 className="font-bold text-gray-900 text-sm">Live Activity</h2>
-          <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
-            {events.length}
+      <div
+        className="flex items-center justify-between shrink-0"
+        style={{
+          padding: "16px 20px 14px",
+          borderBottom: "1.5px solid var(--ll-ink)",
+          background: "var(--ll-bg)",
+          gap: 12,
+        }}
+      >
+        <div className="flex items-baseline" style={{ gap: 10 }}>
+          <Kicker>Live activity</Kicker>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--ll-muted)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {events.length} today
           </span>
         </div>
         <button
           onClick={onClose}
-          className="w-7 h-7 rounded-lg bg-gray-200 text-gray-600 hover:bg-gray-300 flex items-center justify-center text-sm cursor-pointer"
+          aria-label="Close"
+          className="cursor-pointer ll-link"
+          style={{
+            ...KICKER,
+            background: "transparent",
+            border: "1px solid var(--ll-ink-2)",
+            padding: "3px 9px",
+            color: "var(--ll-ink)",
+            fontSize: 12,
+            lineHeight: 1,
+          }}
         >
           ×
         </button>
       </div>
 
       {/* Event list */}
-      <div className="flex-1 overflow-y-auto px-3 py-2">
+      <div className="flex-1 overflow-y-auto">
         {events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400">
-            <span className="text-3xl mb-2">👋</span>
-            <p className="text-sm">Waiting for scans...</p>
+          <div
+            className="flex flex-col items-center justify-center h-full text-center"
+            style={{ padding: 32, gap: 8 }}
+          >
+            <div
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 999,
+                border: "2px dashed var(--ll-divider)",
+                animation: "ll-pulse 2s ease-in-out infinite",
+              }}
+            />
+            <div style={{ ...HEADING, fontSize: 18, color: "var(--ll-ink-2)" }}>
+              Nothing yet today.
+            </div>
+            <Kicker>Tap a card to begin</Kicker>
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            {events.map((ev) => {
-              const config = ACTION_CONFIG[ev.actionType] || {
-                label: ev.actionType,
-                icon: "•",
-                color: "bg-gray-100 text-gray-700",
-              };
-              const programColor = PROGRAM_COLORS[ev.program] || "bg-gray-100 text-gray-600";
-              const programLabel = PROGRAM_LABELS[ev.program] || ev.program.toUpperCase();
+          <>
+            {events.map((ev, i) => {
+              const fresh = i === events.length - 1;
+              const state = actionState(ev.actionType);
+              const programLabel =
+                PROGRAM_LABELS[ev.program] ||
+                (ev.program ? ev.program.toUpperCase() : "—");
+              const label = ACTION_LABEL[ev.actionType] || ev.actionType;
 
               return (
                 <div
                   key={ev.id}
-                  className="flex items-start gap-2.5 p-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors"
+                  className="flex items-center"
+                  style={{
+                    gap: 12,
+                    padding: "11px 20px",
+                    borderBottom: "1px solid var(--ll-divider)",
+                    background: fresh
+                      ? "color-mix(in srgb, var(--ll-accent) 12%, transparent)"
+                      : "transparent",
+                  }}
                 >
-                  {/* Action icon */}
-                  <div className={`w-8 h-8 rounded-lg ${config.color} flex items-center justify-center text-sm font-bold shrink-0`}>
-                    {config.icon}
+                  <div
+                    className="shrink-0"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      color: "var(--ll-muted)",
+                      letterSpacing: "0.04em",
+                      width: 56,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {formatTime(ev.timestamp)}
                   </div>
-
-                  {/* Details */}
+                  <Avatar name={ev.learnerName} size={30} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-gray-900 text-sm truncate">
-                        {ev.learnerName}
-                      </span>
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${programColor}`}>
-                        {programLabel}
-                      </span>
+                    <div
+                      className="truncate"
+                      style={{ fontWeight: 600, fontSize: 13.5, lineHeight: 1.25 }}
+                      title={ev.learnerName}
+                    >
+                      {ev.learnerName}
                     </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`text-xs font-medium ${config.color.split(" ")[1]}`}>
-                        {config.label}
-                      </span>
-                      {ev.status && ev.status !== "present" && (
-                        <span className="px-1 py-0.5 rounded text-[10px] font-medium bg-yellow-100 text-yellow-700">
-                          {ev.status}
-                        </span>
-                      )}
+                    <div
+                      className="truncate"
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 10.5,
+                        color: "var(--ll-muted)",
+                        letterSpacing: "0.04em",
+                        marginTop: 2,
+                      }}
+                    >
+                      {programLabel} · {label}
+                      {ev.status && ev.status !== "present" && ` · ${ev.status}`}
                     </div>
-                    <span className="text-[10px] text-gray-400 mt-0.5 block">
-                      {formatTime(ev.timestamp)}
-                    </span>
                   </div>
+                  <StatusPill state={state} />
                 </div>
               );
             })}
             <div ref={bottomRef} />
-          </div>
+          </>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

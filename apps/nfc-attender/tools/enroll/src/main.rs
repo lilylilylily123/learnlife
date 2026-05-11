@@ -120,8 +120,9 @@ async fn check_existing_learner(
     token: &str,
     uid: &str,
 ) -> Result<Option<PbLearner>, String> {
+    let filter = urlencoding::encode(&format!("NFC_ID='{uid}'"));
     let url = format!(
-        "{PB_URL}/api/collections/learners/records?filter=NFC_ID='{uid}'&perPage=1"
+        "{PB_URL}/api/collections/learners/records?filter={filter}&perPage=1"
     );
     let resp = client
         .get(&url)
@@ -208,8 +209,10 @@ async fn main() {
 
     // Auth
     let email = std::env::var("PB_ADMIN_EMAIL").unwrap_or_else(|_| prompt("PocketBase admin email: "));
-    let password =
-        std::env::var("PB_ADMIN_PASSWORD").unwrap_or_else(|_| prompt("PocketBase admin password: "));
+    let password = std::env::var("PB_ADMIN_PASSWORD").unwrap_or_else(|_| {
+        rpassword::prompt_password("PocketBase admin password: ")
+            .expect("failed to read password")
+    });
 
     let client = Client::new();
     let token = match pb_auth(&client, &email, &password).await {

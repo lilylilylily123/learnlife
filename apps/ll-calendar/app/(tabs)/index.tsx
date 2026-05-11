@@ -1,5 +1,4 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Image } from "expo-image";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import { BottomNav } from "@/components/bottom-nav";
@@ -18,17 +17,12 @@ import {
 } from "react-native";
 import {
   login,
-  logout as doLogout,
   fetchCalendarEvents,
 } from "../../lib/pocketbase";
+import { mapLoginError } from "../../lib/errors";
 import { expandEvents, type CalEvent } from "../../lib/calendar-utils";
 import { useAuth } from "../../context/AuthContext";
 import { Colors, Fonts } from "@/constants/theme";
-
-const dashboardImages = {
-  surf:
-    "https://lh3.googleusercontent.com/aida-public/AB6AXuA8M9Z6seNBY6LX8OW31bQXz4c5Ftn159R9nQarJqNMhKnhK9AGj1U94UGArB-4ZhoNlEVSo0A3fxlMOBiY3CdfzSMfGaJoJCRgE336GLUOZLHRzt7wW4JxM_q5gHrD3BLp7d9Udvk73SQWoJF960SkBES_MnyF4BhFDlJdN3jh-gLZ_AyFQlVIXPOLRwXcU0fwKZvAyih0jcsskFgndAcL8gdGceVV-LakQnWGJqfTD0lMlcVVkfVsiifHuCa_r6oNXso4haKd2zi-",
-};
 
 const DAY_LABELS = [
   "Sun",
@@ -57,11 +51,7 @@ export default function HomeScreen() {
     try {
       await login(email, password);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Invalid credentials. Please try again.";
-      Alert.alert("Login Failed", message);
+      Alert.alert("Login Failed", mapLoginError(err));
     } finally {
       setIsLoading(false);
     }
@@ -140,6 +130,14 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
             </View>
+
+            <Pressable
+              onPress={() => router.push("/forgot-password")}
+              style={{ alignSelf: "flex-end" }}
+              hitSlop={6}
+            >
+              <Text style={s.forgotLink}>Forgot password?</Text>
+            </Pressable>
           </View>
 
           <View style={{ flex: 1 }} />
@@ -177,7 +175,7 @@ export default function HomeScreen() {
 function DashboardMainScreen() {
   const { user, role, program } = useAuth();
   const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
-  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [hasLoadedEvents, setHasLoadedEvents] = useState(false);
 
   const today = new Date();
   const dayName = DAY_LABELS[today.getDay()] ?? "";
@@ -194,30 +192,15 @@ function DashboardMainScreen() {
       let cancelled = false;
       const now = new Date();
       (async () => {
-        setLoadingEvents(true);
         try {
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-          const monthEnd = new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            0,
-            23,
-            59,
-            59,
-          );
-          const records = await fetchCalendarEvents(
-            user.id,
-            monthStart,
-            monthEnd,
-            program ?? undefined,
-          );
+          const records = await fetchCalendarEvents();
           const expanded = expandEvents(records, now.getFullYear(), now.getMonth());
           const key = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
           if (!cancelled) setTodayEvents(expanded[key] ?? []);
         } catch {
           if (!cancelled) setTodayEvents([]);
         } finally {
-          if (!cancelled) setLoadingEvents(false);
+          if (!cancelled) setHasLoadedEvents(true);
         }
       })();
       return () => {
@@ -226,13 +209,6 @@ function DashboardMainScreen() {
     }, [user?.id, program]),
   );
 
-  function handleLogout() {
-    Alert.alert("Log out", "Are you sure?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Log out", style: "destructive", onPress: () => doLogout() },
-    ]);
-  }
-
   const isGuide = role === "admin" || role === "lg";
   const urgentItems: {
     id: string;
@@ -240,31 +216,17 @@ function DashboardMainScreen() {
     sub: string;
     accent: string;
     onPress?: () => void;
-  }[] = [
-    ...(isGuide
-      ? [
-          {
-            id: "invites",
-            title: "Manage invites",
-            sub: "Create & track learner invites",
-            accent: Colors.lavender,
-            onPress: () => router.push("/(modals)/manage-invites"),
-          },
-        ]
-      : []),
-    {
-      id: "waiver",
-      title: "Sign Friday surf waiver",
-      sub: "Due tomorrow · Guide Sarah",
-      accent: Colors.orange,
-    },
-    {
-      id: "meeting",
-      title: "Meeting request: 2pm Tue",
-      sub: "Guide Sarah · check-in",
-      accent: Colors.lavender,
-    },
-  ];
+  }[] = isGuide
+    ? [
+        {
+          id: "invites",
+          title: "Manage invites",
+          sub: "Create & track learner invites",
+          accent: Colors.lavender,
+          onPress: () => router.push("/(modals)/manage-invites"),
+        },
+      ]
+    : [];
 
   return (
     <SafeAreaView style={s.dashSafe}>
@@ -280,7 +242,7 @@ function DashboardMainScreen() {
             </Text>
             <Text style={s.h2}>Morning, {displayName}</Text>
           </View>
-          <Pressable onPress={handleLogout} hitSlop={8}>
+          <Pressable onPress={() => router.push("/settings")} hitSlop={8}>
             <View style={s.avatarCircle}>
               <Text style={s.avatarInitial}>{initial}</Text>
             </View>
@@ -332,7 +294,7 @@ function DashboardMainScreen() {
             </Text>
           </View>
 
-          {loadingEvents ? (
+          {!hasLoadedEvents && todayEvents.length === 0 ? (
             <View style={{ paddingVertical: 24, alignItems: "center" }}>
               <ActivityIndicator size="small" color={Colors.lavender} />
             </View>
@@ -352,7 +314,7 @@ function DashboardMainScreen() {
                     i < todayEvents.length - 1 && s.timelineRowBorder,
                   ]}
                 >
-                  <Text style={s.timelineTime}>
+                  <Text style={s.timelineTime} numberOfLines={1}>
                     {ev.time.split(" – ")[0]}
                   </Text>
                   <View
@@ -373,34 +335,6 @@ function DashboardMainScreen() {
           )}
         </View>
 
-        {/* Featured outing */}
-        <View style={{ marginTop: 24 }}>
-          <View style={s.sectionHeadRow}>
-            <Text style={s.h3}>Featured outings</Text>
-            <Pressable>
-              <Text style={s.link}>See all →</Text>
-            </Pressable>
-          </View>
-
-          <Pressable style={s.featuredCard}>
-            <View style={s.featuredHero}>
-              <Image
-                source={{ uri: dashboardImages.surf }}
-                style={s.featuredImage}
-                contentFit="cover"
-              />
-            </View>
-            <View style={s.featuredFooter}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.featuredTitle}>Surf Trip 🏄</Text>
-                <Text style={s.featuredSub}>Fri · 12 joining</Text>
-              </View>
-              <View style={s.limePill}>
-                <Text style={s.limePillText}>TOMORROW</Text>
-              </View>
-            </View>
-          </Pressable>
-        </View>
       </ScrollView>
 
       <BottomNav active="home" />
@@ -549,6 +483,12 @@ const s = StyleSheet.create({
     color: Colors.muted,
     fontSize: 13,
   },
+  forgotLink: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "600",
+    textDecorationLine: "underline",
+  },
   inviteTextLink: {
     color: Colors.textPrimary,
     fontWeight: "700",
@@ -656,7 +596,7 @@ const s = StyleSheet.create({
     borderBottomColor: Colors.divider,
   },
   timelineTime: {
-    width: 48,
+    width: 68,
     color: Colors.textPrimary,
     fontSize: 12,
     fontFamily: Fonts.mono,

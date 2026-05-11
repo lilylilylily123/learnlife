@@ -5,6 +5,7 @@ import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
 import {
   summarizeByLearner,
   emptySummary,
+  countWeekdays,
   type AttendanceSummary,
 } from "@learnlife/shared";
 
@@ -101,6 +102,14 @@ export function useAdminHistoryData({
     void refresh();
   }, [refresh]);
 
+  // Weekdays in the selected range drive the denominator for attendance rates.
+  // Days where a learner never scanned (and the scheduler didn't create an
+  // absent row) would otherwise disappear from the math entirely.
+  const expectedDays = useMemo(
+    () => countWeekdays(range.from, range.to),
+    [range.from, range.to],
+  );
+
   // Build per-learner rows, including learners with zero records in range so
   // admins can spot "never showed up" cases. Pre-filter records by the
   // currently loaded learner set to keep cohort totals consistent when the
@@ -108,7 +117,7 @@ export function useAdminHistoryData({
   const rows = useMemo<LearnerRow[]>(() => {
     const learnerIds = new Set(learners.map((l) => l.id));
     const scopedRecords = records.filter((r) => learnerIds.has(r.learner));
-    const byLearner = summarizeByLearner(scopedRecords);
+    const byLearner = summarizeByLearner(scopedRecords, { expectedDays });
     const recordsByLearner = new Map<string, AttendanceRecord[]>();
     for (const r of scopedRecords) {
       const arr = recordsByLearner.get(r.learner);
@@ -121,10 +130,10 @@ export function useAdminHistoryData({
     }
     return learners.map((learner) => ({
       learner,
-      summary: byLearner.get(learner.id) ?? emptySummary(),
+      summary: byLearner.get(learner.id) ?? emptySummary(expectedDays),
       records: recordsByLearner.get(learner.id) ?? [],
     }));
-  }, [learners, records]);
+  }, [learners, records, expectedDays]);
 
-  return { rows, learners, records, loading, error, refresh };
+  return { rows, learners, records, expectedDays, loading, error, refresh };
 }

@@ -3,7 +3,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { pb } from "@/app/pb";
 import { PROGRAM_CODES, type ProgramCode } from "@learnlife/pb-client";
-import { formatMinutesOfDay, prettyTimestamp, parsePBDate } from "@learnlife/shared";
+import {
+  formatMinutesOfDay,
+  prettyTimestamp,
+  parsePBDate,
+  computeAttendanceRates,
+} from "@learnlife/shared";
 import type { AttendanceRecord } from "@learnlife/pb-client";
 import {
   useAdminHistoryData,
@@ -12,6 +17,16 @@ import {
   type LearnerRow,
   type RangePreset,
 } from "@/app/hooks/useAdminHistoryData";
+import {
+  HEADING,
+  KICKER,
+  Kicker,
+  Pill,
+  LMark,
+  InkSelect,
+  InkInput,
+} from "@/app/components/ll-ui";
+import { logAuditEvent } from "@/lib/audit";
 
 const PROGRAM_LABEL: Record<ProgramCode, string> = {
   chmk: "Changemaker",
@@ -20,7 +35,7 @@ const PROGRAM_LABEL: Record<ProgramCode, string> = {
 };
 
 type SortKey =
-  | "name" | "program" | "present" | "late" | "absent"
+  | "name" | "program" | "present" | "late" | "absent" | "missing"
   | "avgIn" | "avgOut" | "lateLunch" | "missingOut" | "pct";
 
 type SortState = { key: SortKey; dir: "asc" | "desc" };
@@ -50,7 +65,8 @@ export default function AdminHistoryPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!pb.authStore.isValid) {
+    const role = (pb.authStore.record as { role?: string } | null)?.role;
+    if (!pb.authStore.isValid || (role !== "admin" && role !== "lg")) {
       router.push("/");
       return;
     }
@@ -58,7 +74,7 @@ export default function AdminHistoryPage() {
     setAuthChecked(true);
   }, [router]);
 
-  const { rows, loading, error, refresh } = useAdminHistoryData({
+  const { rows, expectedDays, loading, error, refresh } = useAdminHistoryData({
     isLoggedIn: authChecked,
     range,
     programFilter,
@@ -76,7 +92,10 @@ export default function AdminHistoryPage() {
     return [...filtered].sort(compareRows(sort));
   }, [rows, search, sort]);
 
-  const programTotals = useMemo(() => buildProgramTotals(rows), [rows]);
+  const programTotals = useMemo(
+    () => buildProgramTotals(rows, expectedDays),
+    [rows, expectedDays],
+  );
 
   const toggleSort = (key: SortKey) =>
     setSort((cur) =>
@@ -94,265 +113,459 @@ export default function AdminHistoryPage() {
     });
   };
 
-  const onExportCsv = () => downloadCsv(visibleRows, range);
+  const onExportCsv = () => {
+    downloadCsv(visibleRows, range);
+    // Fire-and-forget — never block the download on the audit write.
+    void logAuditEvent("csv_export", {
+      rowCount: visibleRows.length,
+      from: range.from,
+      to: range.to,
+      programFilter,
+      preset,
+    });
+  };
 
   if (!authChecked) {
     return (
-      <div className="min-h-screen bg-yellow-50 flex items-center justify-center text-gray-500 font-sans">
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{
+          background: "var(--ll-bg)",
+          color: "var(--ll-muted)",
+          ...HEADING,
+          fontSize: 22,
+        }}
+      >
         Checking access…
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
-      <div className="w-full max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <div
+      className="flex flex-col h-screen w-screen overflow-hidden"
+      style={{ background: "var(--ll-bg)", color: "var(--ll-ink)" }}
+    >
+      {/* ─── Top bar ───────────────────────────────────────── */}
+      <header
+        className="flex items-stretch shrink-0"
+        style={{
+          padding: "14px 24px",
+          gap: 18,
+          borderBottom: "1.5px solid var(--ll-ink)",
+          background: "var(--ll-surface)",
+        }}
+      >
+        <div
+          className="flex items-center"
+          style={{
+            gap: 12,
+            paddingRight: 18,
+            borderRight: "1px solid var(--ll-divider)",
+          }}
+        >
+          <LMark size={30} />
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-              📈 Attendance Reports
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Range <span className="font-mono">{range.from}</span> →{" "}
-              <span className="font-mono">{range.to}</span> ·{" "}
-              {loading ? "loading…" : `${visibleRows.length} learners`}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={refresh}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
-            >
-              Refresh
-            </button>
-            <button
-              onClick={onExportCsv}
-              disabled={loading || visibleRows.length === 0}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-green-500 text-white text-sm font-medium shadow hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              ⬇ Download CSV
-            </button>
-            <button
-              onClick={() => router.push("/history")}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
-            >
-              📊 Daily view
-            </button>
-            <button
-              onClick={() => router.push("/")}
-              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
-            >
-              ← Dashboard
-            </button>
+            <Kicker>Attender · Reports</Kicker>
+            <div style={{ ...HEADING, fontSize: 18, lineHeight: 1.15 }}>
+              Attendance over time
+            </div>
           </div>
         </div>
 
-        {/* Range presets + filters */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
-          <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">
-            Date range
-          </div>
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            {PRESETS.map((p) => (
-              <button
-                key={p.key}
-                onClick={() => setPreset(p.key)}
-                className={`px-3 py-2 rounded-xl text-sm font-medium cursor-pointer transition ${
-                  preset === p.key
-                    ? "bg-blue-500 text-white shadow hover:bg-blue-600"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {p.label}
-              </button>
+        <div className="flex-1 flex items-center" style={{ gap: 8 }}>
+          <span style={KICKER}>Range</span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--ll-ink)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {range.from} → {range.to}
+          </span>
+          <span style={{ ...KICKER, marginLeft: 14 }}>
+            {loading ? "loading…" : `${visibleRows.length} learners`}
+          </span>
+        </div>
+
+        <div className="flex items-center" style={{ gap: 6 }}>
+          <Pill size="sm" onClick={refresh}>
+            ↻ Refresh
+          </Pill>
+          <Pill
+            size="sm"
+            variant="accent"
+            onClick={onExportCsv}
+            title={
+              loading || visibleRows.length === 0
+                ? "No data to export"
+                : "Download CSV"
+            }
+          >
+            ⬇ CSV
+          </Pill>
+          <Pill size="sm" onClick={() => router.push("/history")}>
+            Daily view
+          </Pill>
+          <Pill size="sm" variant="ink" onClick={() => router.push("/")}>
+            ← Dashboard
+          </Pill>
+        </div>
+      </header>
+
+      {/* ─── Range presets + filters toolbar ──────────────── */}
+      <div
+        className="shrink-0"
+        style={{
+          padding: "10px 24px",
+          borderBottom: "1px solid var(--ll-divider)",
+          background: "var(--ll-bg)",
+        }}
+      >
+        <div
+          className="flex items-center flex-wrap"
+          style={{ gap: 8, marginBottom: 8 }}
+        >
+          <Kicker>Date range</Kicker>
+          {PRESETS.map((p) => (
+            <Pill
+              key={p.key}
+              active={preset === p.key}
+              onClick={() => setPreset(p.key)}
+            >
+              {p.label}
+            </Pill>
+          ))}
+          <div
+            className="self-stretch"
+            style={{
+              width: 1,
+              background: "var(--ll-divider)",
+              margin: "0 4px",
+            }}
+          />
+          <Kicker>Custom</Kicker>
+          <InkInput
+            type="date"
+            value={customRange.from}
+            onChange={(e) => {
+              setCustomRange((r) => ({ ...r, from: e.target.value }));
+              setPreset("custom");
+            }}
+          />
+          <span style={{ color: "var(--ll-muted)", fontSize: 14 }}>→</span>
+          <InkInput
+            type="date"
+            value={customRange.to}
+            onChange={(e) => {
+              setCustomRange((r) => ({ ...r, to: e.target.value }));
+              setPreset("custom");
+            }}
+          />
+        </div>
+
+        <div className="flex items-center flex-wrap" style={{ gap: 8 }}>
+          <Kicker>Program</Kicker>
+          <InkSelect
+            value={programFilter}
+            onChange={(e) => setProgramFilter(e.target.value)}
+          >
+            <option value="all">All programs</option>
+            {Object.entries(PROGRAM_CODES).map(([name, code]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
             ))}
-            <div className="ml-2 flex items-center gap-2 pl-3 border-l border-gray-200">
-              <label className="text-xs uppercase text-gray-500 font-semibold">Custom</label>
-              <input
-                type="date"
-                value={customRange.from}
-                onChange={(e) => {
-                  setCustomRange((r) => ({ ...r, from: e.target.value }));
-                  setPreset("custom");
-                }}
-                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-              />
-              <span className="text-gray-400">→</span>
-              <input
-                type="date"
-                value={customRange.to}
-                onChange={(e) => {
-                  setCustomRange((r) => ({ ...r, to: e.target.value }));
-                  setPreset("custom");
-                }}
-                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-              />
-            </div>
-          </div>
+          </InkSelect>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">Program:</label>
-              <select
-                value={programFilter}
-                onChange={(e) => setProgramFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer"
+          <div
+            className="self-stretch"
+            style={{
+              width: 1,
+              background: "var(--ll-divider)",
+              margin: "0 4px",
+            }}
+          />
+          <div
+            className="flex items-center flex-1 min-w-[200px]"
+            style={{
+              background: "var(--ll-surface)",
+              border: "1.5px solid var(--ll-ink)",
+              padding: "5px 10px",
+              gap: 8,
+              maxWidth: 360,
+            }}
+          >
+            <span style={{ fontSize: 11, color: "var(--ll-muted)" }}>🔍</span>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Name or email…"
+              className="bg-transparent outline-none flex-1"
+              style={{
+                fontFamily: "var(--font-body)",
+                fontSize: 12.5,
+                color: "var(--ll-ink)",
+                minWidth: 0,
+              }}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="cursor-pointer"
+                style={{ color: "var(--ll-muted)", fontSize: 14 }}
+                aria-label="Clear search"
               >
-                <option value="all">All programs</option>
-                {Object.entries(PROGRAM_CODES).map(([name, code]) => (
-                  <option key={code} value={code}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 flex-1 min-w-[220px] max-w-md">
-              <label className="text-sm font-medium text-gray-700">Search:</label>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Name or email…"
-                className="flex-1 px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
-              />
-            </div>
+                ×
+              </button>
+            )}
           </div>
         </div>
+      </div>
 
-        {/* Program totals */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-          {programTotals.map((p) => (
-            <div
+      {/* ─── Body: program cards + per-learner table ─────── */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Program cards */}
+        <div
+          className="grid"
+          style={{
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 0,
+            borderBottom: "1px solid var(--ll-divider)",
+          }}
+        >
+          {programTotals.map((p, i) => (
+            <ProgramCard
               key={p.code}
-              className="bg-white rounded-2xl shadow-sm p-4"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-semibold text-gray-900">{p.label}</span>
-                <span className="text-xs text-gray-500">
-                  {p.learnerCount} {p.learnerCount === 1 ? "learner" : "learners"}
-                </span>
-              </div>
-              <div className="text-2xl font-bold text-gray-900">{p.attendancePct}%</div>
-              <div className="flex gap-3 mt-1 text-xs text-gray-600">
-                <span>
-                  <span className="text-green-700 font-medium">{p.present}</span> present
-                </span>
-                <span>
-                  <span className="text-yellow-700 font-medium">{p.late}</span> late
-                </span>
-                <span>
-                  <span className="text-red-700 font-medium">{p.absent}</span> absent
-                </span>
-              </div>
-            </div>
+              total={p}
+              border={i < programTotals.length - 1}
+            />
           ))}
         </div>
 
-        {/* Per-learner table */}
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-          {error ? (
-            <div className="py-12 px-4 text-center text-red-600">{error}</div>
-          ) : loading ? (
-            <div className="py-12 text-center text-gray-500">Loading…</div>
-          ) : visibleRows.length === 0 ? (
-            <div className="py-12 text-center text-gray-500">
-              No learners match the current filters.
+        {/* Learner table */}
+        {error ? (
+          <div
+            className="text-center"
+            style={{
+              padding: "80px 24px",
+              color: "var(--ll-warm)",
+              ...HEADING,
+              fontSize: 22,
+            }}
+          >
+            {error}
+          </div>
+        ) : loading ? (
+          <div
+            className="text-center"
+            style={{
+              padding: "80px 24px",
+              color: "var(--ll-muted)",
+            }}
+          >
+            <div style={{ ...HEADING, fontSize: 22 }}>Loading…</div>
+          </div>
+        ) : visibleRows.length === 0 ? (
+          <div
+            className="text-center"
+            style={{
+              padding: "80px 24px",
+              color: "var(--ll-muted)",
+            }}
+          >
+            <div style={{ ...HEADING, fontSize: 22 }}>No matches.</div>
+            <div style={{ ...KICKER, marginTop: 10 }}>
+              Try adjusting the range or filters
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50 text-left text-gray-700">
-                    <Th sort={sort} k="name" onClick={toggleSort}>Learner</Th>
-                    <Th sort={sort} k="program" onClick={toggleSort}>Program</Th>
-                    <Th sort={sort} k="present" onClick={toggleSort}>Present</Th>
-                    <Th sort={sort} k="late" onClick={toggleSort}>Late</Th>
-                    <Th sort={sort} k="absent" onClick={toggleSort}>Absent</Th>
-                    <Th sort={sort} k="avgIn" onClick={toggleSort}>Avg in</Th>
-                    <Th sort={sort} k="avgOut" onClick={toggleSort}>Avg out</Th>
-                    <Th sort={sort} k="lateLunch" onClick={toggleSort}>Late lunches</Th>
-                    <Th sort={sort} k="missingOut" onClick={toggleSort}>Missing out</Th>
-                    <Th sort={sort} k="pct" onClick={toggleSort}>Attendance</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRows.map((row) => {
-                    const isOpen = expanded.has(row.learner.id);
-                    return (
-                      <React.Fragment key={row.learner.id}>
-                        <tr
-                          className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
-                            isOpen ? "bg-blue-50" : ""
-                          }`}
-                          onClick={() => toggleExpanded(row.learner.id)}
-                        >
-                          <td className="py-2 px-3 font-medium text-gray-900">
-                            <span className="inline-block w-4 text-gray-400">
-                              {isOpen ? "▼" : "▶"}
-                            </span>{" "}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table
+              className="w-full"
+              style={{ fontSize: 12.5, borderCollapse: "collapse" }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    background: "var(--ll-surface)",
+                    borderBottom: "1px solid var(--ll-divider)",
+                  }}
+                >
+                  <Th sort={sort} k="name" onClick={toggleSort}>Learner</Th>
+                  <Th sort={sort} k="program" onClick={toggleSort}>Program</Th>
+                  <Th sort={sort} k="present" onClick={toggleSort} align="right">Present</Th>
+                  <Th sort={sort} k="late" onClick={toggleSort} align="right">Late</Th>
+                  <Th sort={sort} k="absent" onClick={toggleSort} align="right">Absent</Th>
+                  <Th sort={sort} k="missing" onClick={toggleSort} align="right">Missing</Th>
+                  <Th sort={sort} k="avgIn" onClick={toggleSort} align="right">Avg in</Th>
+                  <Th sort={sort} k="avgOut" onClick={toggleSort} align="right">Avg out</Th>
+                  <Th sort={sort} k="lateLunch" onClick={toggleSort} align="right">Late lunch</Th>
+                  <Th sort={sort} k="missingOut" onClick={toggleSort} align="right">No out</Th>
+                  <Th sort={sort} k="pct" onClick={toggleSort} align="right">Attendance</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((row, i) => {
+                  const isOpen = expanded.has(row.learner.id);
+                  return (
+                    <React.Fragment key={row.learner.id}>
+                      <tr
+                        className="ll-row cursor-pointer"
+                        style={{
+                          borderBottom: "1px solid var(--ll-divider)",
+                          background: isOpen
+                            ? "color-mix(in srgb, var(--ll-accent) 8%, transparent)"
+                            : i % 2
+                              ? "var(--ll-bg)"
+                              : "var(--ll-surface)",
+                        }}
+                        onClick={() => toggleExpanded(row.learner.id)}
+                      >
+                        <td style={cellStyle}>
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: 14,
+                              color: "var(--ll-muted)",
+                              fontSize: 10,
+                            }}
+                          >
+                            {isOpen ? "▼" : "▶"}
+                          </span>{" "}
+                          <span style={{ fontWeight: 600 }}>
                             {row.learner.name}
-                          </td>
-                          <td className="py-2 px-3 text-gray-700">
-                            {row.learner.program
-                              ? PROGRAM_LABEL[row.learner.program] ?? row.learner.program
-                              : "—"}
-                          </td>
-                          <td className="py-2 px-3 text-green-700 font-medium">{row.summary.present}</td>
-                          <td className="py-2 px-3 text-yellow-700 font-medium">{row.summary.late}</td>
-                          <td className="py-2 px-3 text-red-700 font-medium">{row.summary.absent}</td>
-                          <td className="py-2 px-3 text-gray-700">{formatMinutesOfDay(row.summary.avgCheckInMinutes)}</td>
-                          <td className="py-2 px-3 text-gray-700">{formatMinutesOfDay(row.summary.avgCheckOutMinutes)}</td>
-                          <td className="py-2 px-3 text-gray-700">{row.summary.lateLunches}</td>
-                          <td className="py-2 px-3 text-gray-700">{row.summary.missingCheckouts}</td>
-                          <td className="py-2 px-3">
-                            <AttendancePctPill pct={row.summary.attendancePct} />
-                          </td>
-                        </tr>
-                        {isOpen && <DailyDetailRow row={row} />}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                          </span>
+                        </td>
+                        <td
+                          style={{
+                            ...cellStyle,
+                            color: "var(--ll-muted)",
+                            fontSize: 11.5,
+                          }}
+                        >
+                          {row.learner.program
+                            ? PROGRAM_LABEL[row.learner.program] ??
+                              row.learner.program
+                            : "—"}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell, color: "var(--ll-accent)" }}>
+                          {row.summary.present}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell, color: "var(--ll-ink-2)" }}>
+                          {row.summary.late}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell, color: "var(--ll-warm)" }}>
+                          {row.summary.absent}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell, color: "var(--ll-muted)" }}>
+                          {row.summary.missingRecords}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell }}>
+                          {formatMinutesOfDay(row.summary.avgCheckInMinutes)}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell }}>
+                          {formatMinutesOfDay(row.summary.avgCheckOutMinutes)}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell }}>
+                          {row.summary.lateLunches}
+                        </td>
+                        <td style={{ ...cellStyle, ...numCell }}>
+                          {row.summary.missingCheckouts}
+                        </td>
+                        <td style={{ ...cellStyle, textAlign: "right" }}>
+                          <AttendancePctPill pct={row.summary.attendancePct} />
+                        </td>
+                      </tr>
+                      {isOpen && <DailyDetailRow row={row} />}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+const cellStyle: React.CSSProperties = {
+  padding: "11px 14px",
+  fontSize: 13.5,
+};
+const numCell: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 13,
+  textAlign: "right",
+  fontWeight: 600,
+};
 
 function Th({
   children,
   k,
   sort,
   onClick,
+  align = "left",
 }: {
   children: React.ReactNode;
   k: SortKey;
   sort: SortState;
   onClick: (k: SortKey) => void;
+  align?: "left" | "right";
 }) {
   const active = sort.key === k;
   return (
     <th
       onClick={() => onClick(k)}
-      className="py-3 px-3 font-medium select-none cursor-pointer"
+      style={{
+        ...KICKER,
+        padding: "13px 14px",
+        textAlign: align,
+        cursor: "pointer",
+        userSelect: "none",
+        whiteSpace: "nowrap",
+      }}
     >
       {children}
-      {active && <span className="ml-1 text-gray-400">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+      {active && (
+        <span
+          style={{
+            marginLeft: 4,
+            color: "var(--ll-ink)",
+            fontSize: 9,
+          }}
+        >
+          {sort.dir === "asc" ? "▲" : "▼"}
+        </span>
+      )}
     </th>
   );
 }
 
 function AttendancePctPill({ pct }: { pct: number }) {
-  const tone =
-    pct >= 90 ? "bg-green-100 text-green-800"
-    : pct >= 75 ? "bg-yellow-100 text-yellow-800"
-    : "bg-red-100 text-red-800";
+  const cfg =
+    pct >= 90
+      ? { bg: "var(--ll-accent)", fg: "var(--ll-accent-ink)" }
+      : pct >= 75
+        ? { bg: "var(--ll-lime)", fg: "var(--ll-lime-ink)" }
+        : { bg: "var(--ll-warm)", fg: "var(--ll-warm-ink)" };
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${tone}`}>
+    <span
+      className="inline-block"
+      style={{
+        background: cfg.bg,
+        color: cfg.fg,
+        padding: "3px 10px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        fontWeight: 700,
+        letterSpacing: "0.05em",
+      }}
+    >
       {pct}%
     </span>
   );
@@ -362,7 +575,16 @@ function DailyDetailRow({ row }: { row: LearnerRow }) {
   if (row.records.length === 0) {
     return (
       <tr>
-        <td colSpan={10} className="py-4 px-8 text-sm text-gray-500 italic bg-gray-50">
+        <td
+          colSpan={11}
+          style={{
+            padding: "16px 32px",
+            background: "color-mix(in srgb, var(--ll-accent) 8%, transparent)",
+            color: "var(--ll-muted)",
+            fontStyle: "italic",
+            fontSize: 11.5,
+          }}
+        >
           No attendance records in this range.
         </td>
       </tr>
@@ -370,27 +592,50 @@ function DailyDetailRow({ row }: { row: LearnerRow }) {
   }
   return (
     <tr>
-      <td colSpan={10} className="bg-gray-50 px-8 py-3">
-        <table className="w-full text-xs">
+      <td
+        colSpan={11}
+        style={{
+          background: "color-mix(in srgb, var(--ll-accent) 8%, transparent)",
+          padding: "12px 32px",
+        }}
+      >
+        <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
           <thead>
-            <tr className="text-gray-500">
-              <th className="text-left py-1 pr-3">Date</th>
-              <th className="text-left py-1 pr-3">Status</th>
-              <th className="text-left py-1 pr-3">Time in</th>
-              <th className="text-left py-1 pr-3">Time out</th>
-              <th className="text-left py-1 pr-3">Lunch</th>
-              <th className="text-left py-1 pr-3">Lunch status</th>
+            <tr style={{ ...KICKER }}>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Date</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Status</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Time in</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Time out</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Lunch</th>
+              <th style={{ padding: "6px 8px", textAlign: "left" }}>Lunch status</th>
             </tr>
           </thead>
           <tbody>
             {row.records.map((r) => (
-              <tr key={r.id} className="border-t border-gray-200">
-                <td className="py-1 pr-3 font-mono text-gray-700">{r.date.slice(0, 10)}</td>
-                <td className="py-1 pr-3 text-gray-700">{r.status ?? "—"}</td>
-                <td className="py-1 pr-3 text-gray-700">{prettyTimestamp(r.time_in)}</td>
-                <td className="py-1 pr-3 text-gray-700">{prettyTimestamp(r.time_out)}</td>
-                <td className="py-1 pr-3 text-gray-700">{formatLunchCell(r)}</td>
-                <td className="py-1 pr-3 text-gray-700">{r.lunch_status ?? "—"}</td>
+              <tr
+                key={r.id}
+                style={{ borderTop: "1px solid var(--ll-divider)" }}
+              >
+                <td
+                  style={{
+                    padding: "6px 8px",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 10.5,
+                  }}
+                >
+                  {r.date.slice(0, 10)}
+                </td>
+                <td style={{ padding: "6px 8px" }}>{r.status ?? "—"}</td>
+                <td style={{ padding: "6px 8px", fontFamily: "var(--font-mono)" }}>
+                  {prettyTimestamp(r.time_in)}
+                </td>
+                <td style={{ padding: "6px 8px", fontFamily: "var(--font-mono)" }}>
+                  {prettyTimestamp(r.time_out)}
+                </td>
+                <td style={{ padding: "6px 8px", fontFamily: "var(--font-mono)" }}>
+                  {formatLunchCell(r)}
+                </td>
+                <td style={{ padding: "6px 8px" }}>{r.lunch_status ?? "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -409,7 +654,13 @@ function formatLunchCell(r: AttendanceRecord): string {
     return "—";
   }
   return events
-    .map((e) => `${e.type}@${parsePBDate(e.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`)
+    .map(
+      (e) =>
+        `${e.type}@${parsePBDate(e.time).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+    )
     .join(", ");
 }
 
@@ -434,6 +685,7 @@ function rowSortValue(r: LearnerRow, key: SortKey): number | string | null {
     case "present": return r.summary.present;
     case "late": return r.summary.late;
     case "absent": return r.summary.absent;
+    case "missing": return r.summary.missingRecords;
     case "avgIn": return r.summary.avgCheckInMinutes;
     case "avgOut": return r.summary.avgCheckOutMinutes;
     case "lateLunch": return r.summary.lateLunches;
@@ -446,42 +698,387 @@ interface ProgramTotal {
   code: ProgramCode;
   label: string;
   learnerCount: number;
+  daysTracked: number;
+  expectedDays: number;
+  missingRecords: number;
   present: number;
   late: number;
   absent: number;
+  jLate: number;
+  jAbsent: number;
+  onTimePct: number;
   attendancePct: number;
+  absentPct: number;
+  avgCheckInMinutes: number | null;
+  avgCheckOutMinutes: number | null;
+  lateLunches: number;
+  missingCheckouts: number;
 }
 
-function buildProgramTotals(rows: LearnerRow[]): ProgramTotal[] {
+function buildProgramTotals(rows: LearnerRow[], weekdays: number): ProgramTotal[] {
   const codes: ProgramCode[] = ["chmk", "cre", "exp"];
   return codes.map((code) => {
     const cohort = rows.filter((r) => r.learner.program === code);
-    let present = 0, late = 0, absent = 0, jLate = 0, daysTracked = 0;
+    let present = 0,
+      late = 0,
+      absent = 0,
+      jLate = 0,
+      jAbsent = 0,
+      daysTracked = 0,
+      lateLunches = 0,
+      missingCheckouts = 0;
+    let inSum = 0,
+      inCount = 0,
+      outSum = 0,
+      outCount = 0;
     for (const r of cohort) {
       present += r.summary.present;
       late += r.summary.late;
       absent += r.summary.absent;
       jLate += r.summary.jLate;
+      jAbsent += r.summary.jAbsent;
       daysTracked += r.summary.daysTracked;
+      lateLunches += r.summary.lateLunches;
+      missingCheckouts += r.summary.missingCheckouts;
+      if (r.summary.avgCheckInMinutes !== null) {
+        inSum += r.summary.avgCheckInMinutes;
+        inCount++;
+      }
+      if (r.summary.avgCheckOutMinutes !== null) {
+        outSum += r.summary.avgCheckOutMinutes;
+        outCount++;
+      }
     }
-    const attendancePct = daysTracked === 0
-      ? 0
-      : Math.round(((present + late + jLate) / daysTracked) * 100);
+    const rates = computeAttendanceRates(
+      { present, late, absent, jLate, jAbsent, daysTracked },
+      weekdays * cohort.length,
+    );
     return {
       code,
       label: PROGRAM_LABEL[code],
       learnerCount: cohort.length,
-      present, late, absent,
-      attendancePct,
+      daysTracked,
+      expectedDays: rates.expectedDays,
+      missingRecords: rates.missingRecords,
+      present,
+      late,
+      absent,
+      jLate,
+      jAbsent,
+      onTimePct: rates.onTimePct,
+      attendancePct: rates.attendancePct,
+      absentPct: rates.absentPct,
+      avgCheckInMinutes: inCount > 0 ? Math.round(inSum / inCount) : null,
+      avgCheckOutMinutes: outCount > 0 ? Math.round(outSum / outCount) : null,
+      lateLunches,
+      missingCheckouts,
     };
   });
 }
 
+function ProgramCard({
+  total: p,
+  border,
+}: {
+  total: ProgramTotal;
+  border: boolean;
+}) {
+  const empty = p.learnerCount === 0;
+  return (
+    <div
+      style={{
+        background: "var(--ll-surface)",
+        padding: "20px 24px",
+        borderRight: border ? "1px solid var(--ll-divider)" : "none",
+        opacity: empty ? 0.6 : 1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      }}
+    >
+      {/* Label row */}
+      <div className="flex items-baseline justify-between" style={{ gap: 8 }}>
+        <div style={{ ...HEADING, fontSize: 22 }}>{p.label}</div>
+        <div style={{ ...KICKER, color: "var(--ll-muted)" }}>
+          {p.learnerCount}{" "}
+          {p.learnerCount === 1 ? "learner" : "learners"}
+        </div>
+      </div>
+
+      {empty ? (
+        <div
+          style={{
+            color: "var(--ll-muted)",
+            fontStyle: "italic",
+            fontSize: 13.5,
+          }}
+        >
+          No learners in this program.
+        </div>
+      ) : (
+        <>
+          {/* Headline percentages */}
+          <div className="flex items-end" style={{ gap: 24 }}>
+            <div>
+              <div
+                style={{
+                  ...HEADING,
+                  fontSize: 44,
+                  color: "var(--ll-accent)",
+                  lineHeight: 1,
+                }}
+              >
+                {p.onTimePct}%
+              </div>
+              <div style={{ ...KICKER, marginTop: 6 }}>On time</div>
+            </div>
+            <div>
+              <div
+                style={{
+                  ...HEADING,
+                  fontSize: 28,
+                  color: "var(--ll-ink-2)",
+                  lineHeight: 1.05,
+                }}
+              >
+                {p.attendancePct}%
+              </div>
+              <div style={{ ...KICKER, marginTop: 6 }}>Attended</div>
+            </div>
+            <div className="flex-1" />
+            <div className="text-right">
+              <div
+                style={{
+                  ...HEADING,
+                  fontSize: 18,
+                  color: "var(--ll-warm)",
+                  lineHeight: 1.05,
+                }}
+              >
+                {p.absentPct}%
+              </div>
+              <div style={{ ...KICKER, marginTop: 6 }}>Absent</div>
+            </div>
+          </div>
+
+          {/* Stacked attendance bar */}
+          <AttendanceBar p={p} />
+
+          {/* Counts breakdown */}
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 10,
+            }}
+          >
+            <CountCell label="Present" value={p.present} tone="accent" />
+            <CountCell label="Late" value={p.late} tone="lime" />
+            <CountCell label="Absent" value={p.absent} tone="warm" />
+            <CountCell label="J·Absent" value={p.jAbsent} />
+          </div>
+
+          {/* Schedule + behaviour breakdown */}
+          <div
+            className="grid"
+            style={{
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: 10,
+              paddingTop: 10,
+              borderTop: "1px solid var(--ll-divider)",
+            }}
+          >
+            <DetailCell
+              label="Avg in"
+              value={formatMinutesOfDay(p.avgCheckInMinutes)}
+            />
+            <DetailCell
+              label="Avg out"
+              value={formatMinutesOfDay(p.avgCheckOutMinutes)}
+            />
+            <DetailCell
+              label="Late lunches"
+              value={String(p.lateLunches)}
+              tone={p.lateLunches > 0 ? "warm" : "muted"}
+            />
+            <DetailCell
+              label="No check-out"
+              value={String(p.missingCheckouts)}
+              tone={p.missingCheckouts > 0 ? "warm" : "muted"}
+            />
+          </div>
+
+          {/* Tracked vs expected */}
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--ll-muted)",
+              letterSpacing: "0.04em",
+              borderTop: "1px solid var(--ll-divider)",
+              paddingTop: 10,
+            }}
+          >
+            <span style={{ color: "var(--ll-ink-2)", fontWeight: 700 }}>
+              {p.daysTracked}
+            </span>{" "}
+            of{" "}
+            <span style={{ color: "var(--ll-ink-2)", fontWeight: 700 }}>
+              {p.expectedDays}
+            </span>{" "}
+            learner-days tracked ·{" "}
+            <span style={{ color: "var(--ll-warm)", fontWeight: 700 }}>
+              {p.missingRecords}
+            </span>{" "}
+            missing
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AttendanceBar({ p }: { p: ProgramTotal }) {
+  const total = p.present + p.late + p.absent + p.jAbsent + p.missingRecords;
+  if (total === 0)
+    return (
+      <div
+        style={{
+          height: 8,
+          background: "var(--ll-surface-2)",
+          border: "1px solid var(--ll-divider)",
+        }}
+      />
+    );
+  const seg = (n: number) => `${(n / total) * 100}%`;
+  return (
+    <div
+      className="flex"
+      style={{
+        height: 10,
+        border: "1.5px solid var(--ll-ink)",
+        background: "var(--ll-surface)",
+        overflow: "hidden",
+      }}
+    >
+      {p.present > 0 && (
+        <div
+          style={{
+            width: seg(p.present),
+            background: "var(--ll-accent)",
+          }}
+        />
+      )}
+      {p.late > 0 && (
+        <div
+          style={{
+            width: seg(p.late),
+            background: "var(--ll-lime)",
+          }}
+        />
+      )}
+      {p.absent > 0 && (
+        <div
+          style={{
+            width: seg(p.absent),
+            background: "var(--ll-warm)",
+          }}
+        />
+      )}
+      {p.jAbsent > 0 && (
+        <div
+          style={{
+            width: seg(p.jAbsent),
+            background: "var(--ll-ink-2)",
+          }}
+        />
+      )}
+      {p.missingRecords > 0 && (
+        <div
+          style={{
+            width: seg(p.missingRecords),
+            background:
+              "repeating-linear-gradient(45deg, var(--ll-divider) 0 4px, transparent 4px 8px), var(--ll-bg)",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CountCell({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "accent" | "warm" | "lime";
+}) {
+  const color =
+    tone === "accent"
+      ? "var(--ll-accent)"
+      : tone === "warm"
+        ? "var(--ll-warm)"
+        : tone === "lime"
+          ? "var(--ll-ink-2)"
+          : "var(--ll-ink-2)";
+  return (
+    <div>
+      <div
+        style={{
+          ...HEADING,
+          fontSize: 22,
+          color,
+          lineHeight: 1.05,
+        }}
+      >
+        {value}
+      </div>
+      <div style={{ ...KICKER, marginTop: 4 }}>{label}</div>
+    </div>
+  );
+}
+
+function DetailCell({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "warm" | "muted";
+}) {
+  const color =
+    tone === "warm"
+      ? "var(--ll-warm)"
+      : tone === "muted"
+        ? "var(--ll-muted)"
+        : "var(--ll-ink)";
+  return (
+    <div>
+      <div style={{ ...KICKER, marginBottom: 3 }}>{label}</div>
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 14,
+          fontWeight: 700,
+          color,
+          letterSpacing: "0.02em",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function downloadCsv(rows: LearnerRow[], range: DateRange) {
   const header = [
-    "Learner","Email","Program","Days tracked","Present","Late","Absent",
-    "jLate","jAbsent","Avg check-in","Avg check-out","Total lunch (min)",
-    "Late lunches","Missing checkouts","Attendance %",
+    "Learner","Email","Program","Expected days","Days tracked","Missing records",
+    "Present","Late","Absent","jLate","jAbsent",
+    "Avg check-in","Avg check-out","Total lunch (min)","Late lunches","Missing checkouts",
+    "On time %","Attendance %","Absent %",
   ];
   const csvRows: string[] = [header.join(",")];
   for (const r of rows) {
@@ -490,13 +1087,13 @@ function downloadCsv(rows: LearnerRow[], range: DateRange) {
       csvCell(r.learner.name),
       csvCell(r.learner.email),
       csvCell(r.learner.program ? PROGRAM_LABEL[r.learner.program] ?? r.learner.program : ""),
-      s.daysTracked,
+      s.expectedDays, s.daysTracked, s.missingRecords,
       s.present, s.late, s.absent, s.jLate, s.jAbsent,
       csvCell(formatMinutesOfDay(s.avgCheckInMinutes)),
       csvCell(formatMinutesOfDay(s.avgCheckOutMinutes)),
       s.totalLunchMinutes,
       s.lateLunches, s.missingCheckouts,
-      s.attendancePct,
+      s.onTimePct, s.attendancePct, s.absentPct,
     ].join(","));
   }
   const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });

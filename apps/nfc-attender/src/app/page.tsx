@@ -10,25 +10,25 @@ import { useAttendanceFilters } from "./hooks/useAttendanceFilters";
 import Account from "./components/Account";
 import CreateLearnerModal from "./components/CreateLearnerModal";
 import { TestModePanel } from "./components/TestModePanel";
-import { AttendanceFilterPills } from "./components/AttendanceFilterPills";
-import { LearnerGrid } from "./components/LearnerGrid";
-import { LearnerListView } from "./components/LearnerListView";
-import { JustificationModal } from "./components/JustificationModal";
 import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
+import { AttenderD } from "./components/AttenderD";
+import { JustificationModal } from "./components/JustificationModal";
 import type { Student } from "./types";
+import { deriveStatus, findLearnersToMarkAbsent } from "@learnlife/shared";
 import {
-  deriveStatus,
-  findLearnersToMarkAbsent,
-} from "@learnlife/shared";
-import type { ArrivalStatus, AttendanceStatus } from "@learnlife/pb-client";
+  TIME_THRESHOLDS,
+  type ArrivalStatus,
+  type AttendanceStatus,
+} from "@learnlife/pb-client";
 
 // Diff two attendance row snapshots and return the ActionType that occurred,
-// or null if no meaningful change. Mirrors the state-machine action keys used
-// by ActivityFeed's ACTION_CONFIG (check_in, check_out, lunch_event,
-// late_lunch_return). Also catches the sweep's auto_absent transition where
-// arrival flips to "absent" without any time_in being written.
+// or null if no meaningful change. Used to synthesise Live Activity entries
+// from PocketBase realtime events so any scanner (local USB reader OR the
+// standalone ESP32 firmware) populates the feed. The "auto_absent" branch
+// catches sweep-generated writes where arrival flips to "absent" with no
+// time_in — distinct from a guide pressing the A button.
 function inferAttendanceAction(
   prev: any,
   next: any,
@@ -44,8 +44,6 @@ function inferAttendanceAction(
     }
     return "lunch_event";
   }
-  // Auto-absent sweep: arrival flips to "absent" with no time_in. Distinct
-  // from a guide clicking A manually so the activity feed can label it.
   if (
     prev?.arrival !== "absent" &&
     next?.arrival === "absent" &&
@@ -56,8 +54,8 @@ function inferAttendanceAction(
   return null;
 }
 
-// Map a status button label (the legacy 5-enum) to the canonical split-field
-// representation. Clicking P/L/A/JL/JA writes the corresponding pair below.
+// Map a legacy 5-enum status (the value the P/L/A/JL/JA buttons emit) to the
+// canonical split-field pair. Clicking a button writes the corresponding pair.
 const STATUS_BUTTON_MAP: Record<AttendanceStatus, { arrival: ArrivalStatus; justified: boolean }> = {
   present: { arrival: "present", justified: false },
   late: { arrival: "late", justified: false },
@@ -80,9 +78,11 @@ export default function AttendancePage() {
   const viewDate =
     testMode && testDate ? testDate : new Date().toISOString().split("T")[0];
 
-  // NFC hook
+  // NFC hook (lastAction is consumed via the PocketBase realtime listener
+  // below — every tap lands in PB and is read back through the subscription
+  // so external scanners light up the Activity feed too.)
   const nfcOptions = testMode ? { testTime, testDate } : undefined;
-  const { uid, learner, exists, isLoading, lastAction, simulateScan } =
+  const { uid, learner, exists, isLoading, simulateScan } =
     useNfcLearner(nfcOptions);
 
   // Activity feed
@@ -95,23 +95,26 @@ export default function AttendancePage() {
   const [totalPages, setTotalPages] = useState<number>(1);
   const [totalItems, setTotalItems] = useState<number>(0);
 
-  // View mode
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-
   // Raw data
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
 
-  // Justification modal — opens when a guide clicks the "add note" icon next
+  // Justification modal — opens when a guide clicks the "add reason" icon next
   // to a justified status. Stores the learner whose reason we're editing.
   const [justifyingLearnerId, setJustifyingLearnerId] = useState<string | null>(null);
+  // Lift the error out of the modal's local state so a failed save doesn't
+  // close the modal and lose the user's input (review #2).
+  const [justifyError, setJustifyError] = useState<string | null>(null);
 
-  // Update auth state after mount to avoid hydration mismatch
+  // Update auth state after mount to avoid hydration mismatch.
+  // Treat learner-role accounts as logged out — nfc-attender is a guide tool.
   useEffect(() => {
-    setIsLoggedIn(pb.authStore.isValid);
-    const unsubscribe = pb.authStore.onChange(() =>
-      setIsLoggedIn(pb.authStore.isValid),
-    );
+    const isPrivileged = () => {
+      const role = (pb.authStore.record as { role?: string } | null)?.role;
+      return pb.authStore.isValid && (role === "admin" || role === "lg");
+    };
+    setIsLoggedIn(isPrivileged());
+    const unsubscribe = pb.authStore.onChange(() => setIsLoggedIn(isPrivileged()));
     getVersion().then(setAppVersion).catch(() => {});
     return () => unsubscribe();
   }, []);
@@ -223,56 +226,70 @@ export default function AttendancePage() {
     let cancelled = false;
 
     const setup = async () => {
-      const unsubLearners = await pb
-        .collection("learners")
-        .subscribe("*", () => {
-          if (learnersTimer) clearTimeout(learnersTimer);
-          learnersTimer = setTimeout(() => fetchLearnersRef.current(), 1000);
-        });
-      const unsubAttendance = await pb
-        .collection("attendance")
-        .subscribe("*", (e) => {
-          if (attendanceTimer) clearTimeout(attendanceTimer);
-          attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
+      try {
+        const unsubLearners = await pb
+          .collection("learners")
+          .subscribe("*", () => {
+            if (learnersTimer) clearTimeout(learnersTimer);
+            learnersTimer = setTimeout(() => fetchLearnersRef.current(), 1000);
+          });
+        const unsubAttendance = await pb
+          .collection("attendance")
+          .subscribe("*", (e) => {
+            if (attendanceTimer) clearTimeout(attendanceTimer);
+            attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
 
-          // Synthesise a Live Activity entry for every scan that lands in PB,
-          // regardless of which device wrote it. Local USB-reader scans flow
-          // through here too (with a small RTT), so this is the single source
-          // of truth for the feed; the desktop kiosk no longer needs the
-          // lastAction-based path it used to use.
-          if (e.action !== "create" && e.action !== "update") return;
-          const rec = e.record as any;
-          const learnerId = rec?.learner;
-          if (!learnerId) return;
-          const prev = attendanceMapRef.current[learnerId] ?? {};
-          const actionType = inferAttendanceAction(prev, rec);
-          if (!actionType) return;
-          const student = studentsRef.current.find((s) => s.id === learnerId);
-          const name = (student as any)?.name ?? learnerId;
-          const program = ((student as any)?.program as string) ?? "";
-          setActivityEvents((arr) => [
-            ...arr.slice(-49),
-            {
-              id: `${rec.id}-${actionType}-${Date.now()}`,
-              learnerName: name,
-              program,
-              actionType,
-              timestamp: new Date(),
-              status: rec.status ?? undefined,
-            },
-          ]);
-        });
+            // Synthesise a Live Activity entry for every scan that lands in
+            // PB, regardless of which device wrote it. Local USB-reader scans
+            // flow through here too (with a small RTT), so this is the single
+            // source of truth for the feed — the lastAction-based path it
+            // used to use is gone.
+            if (e.action !== "create" && e.action !== "update") return;
+            const rec = e.record as any;
+            const learnerId = rec?.learner;
+            if (!learnerId) return;
+            const prev = attendanceMapRef.current[learnerId] ?? {};
+            const actionType = inferAttendanceAction(prev, rec);
+            if (!actionType) return;
+            const student = studentsRef.current.find((s) => s.id === learnerId);
+            const name = (student as any)?.name ?? learnerId;
+            const program = ((student as any)?.program as string) ?? "";
+            setActivityEvents((arr) => [
+              ...arr.slice(-49),
+              {
+                id: `${rec.id}-${actionType}-${Date.now()}`,
+                learnerName: name,
+                program,
+                actionType,
+                timestamp: new Date(),
+                status: rec.status ?? undefined,
+              },
+            ]);
+          });
 
-      if (cancelled) {
-        unsubLearners();
-        unsubAttendance();
-        return;
+        if (cancelled) {
+          // Page navigated away while subscribe() was awaiting. Tear the
+          // freshly-created subscriptions down quietly — calling unsub on a
+          // half-dead client can itself 404, which is harmless.
+          try {
+            unsubLearners();
+            unsubAttendance();
+          } catch {}
+          return;
+        }
+
+        cleanup.unsub = () => {
+          try {
+            unsubLearners();
+            unsubAttendance();
+          } catch {}
+        };
+      } catch (err) {
+        // PocketBase realtime can 404 with "Missing or invalid client id"
+        // during fast navigation when the SSE client_id goes stale. Logging
+        // the cause here is enough — the next page load will re-subscribe.
+        console.warn("Realtime subscribe failed:", err);
       }
-
-      cleanup.unsub = () => {
-        unsubLearners();
-        unsubAttendance();
-      };
     };
 
     const cleanup: { unsub?: () => void } = {};
@@ -287,11 +304,12 @@ export default function AttendancePage() {
   }, [isLoggedIn]);
 
   // ── Auto-absent sweep ────────────────────────────────────────────────────
-  // Server-side PB cron is unreliable in this hosting setup, so the dashboard
+  // Server-side PB cron isn't available in this hosting setup, so the dashboard
   // itself runs the sweep on a 1-minute timer while open. The sweep is
   // idempotent (findLearnersToMarkAbsent skips anyone who already has a
-  // recorded state) and gated to once-per-day via lastSweptDateRef. Front-desk
-  // dashboards are open all school day, so this fires reliably in practice.
+  // recorded state) and gated to once-per-day via lastSweptDateRef — but only
+  // after every write succeeded. A partial failure leaves the ref unchanged
+  // so the next tick retries the laggards (review #6).
   const lastSweptDateRef = useRef<string | null>(null);
 
   const runAbsentSweep = useCallback(async () => {
@@ -306,17 +324,27 @@ export default function AttendancePage() {
     const learners = studentsRef.current.map((s) => ({ id: s.id }));
 
     const toMark = findLearnersToMarkAbsent(records, learners, now);
+
+    // Compute "past the cutoff" using the threshold constants (review #5).
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    const pastCutoff =
+      hour > TIME_THRESHOLDS.ABSENT_HOUR ||
+      (hour === TIME_THRESHOLDS.ABSENT_HOUR && minute >= TIME_THRESHOLDS.ABSENT_MINUTE);
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+
     if (toMark.length === 0) {
-      // Pre-noon or weekend: don't claim the day as swept; try again later.
-      const hour = now.getHours();
-      const past = hour >= 12;
-      if (past && now.getDay() !== 0 && now.getDay() !== 6) {
+      // Nothing to do; only "close the day" when we're past the cutoff on a
+      // weekday — otherwise leave the ref unchanged so the next tick retries.
+      if (pastCutoff && !isWeekend) {
         lastSweptDateRef.current = todayStr;
       }
       return;
     }
 
     console.log(`[auto-absent] marking ${toMark.length} learner(s) absent for ${todayStr}`);
+    let okCount = 0;
+    const failedIds: string[] = [];
     for (const learnerId of toMark) {
       try {
         await pbClient.batchUpdateAttendance({
@@ -328,12 +356,20 @@ export default function AttendancePage() {
             status: "absent",
           },
         });
+        okCount++;
       } catch (err) {
+        failedIds.push(learnerId);
         console.error(`[auto-absent] failed for ${learnerId}:`, err);
       }
     }
-    lastSweptDateRef.current = todayStr;
-    // Realtime subscription will pick up the writes and refresh the UI.
+    console.log(`[auto-absent] ${okCount}/${toMark.length} succeeded`);
+    // Only close the day when every learner was written successfully — a
+    // partial failure means the next tick should retry the laggards.
+    if (failedIds.length === 0) {
+      lastSweptDateRef.current = todayStr;
+    } else {
+      console.warn(`[auto-absent] will retry next tick for: ${failedIds.join(", ")}`);
+    }
   }, [viewDate, testMode, testTime]);
 
   useEffect(() => {
@@ -376,8 +412,8 @@ export default function AttendancePage() {
       field: "status" | "lunch_status" = "status",
       toggle: boolean = true,
     ) => {
-      // Lunch status stays on the legacy single-enum model — only morning
-      // status gets the split arrival/justified treatment.
+      // Lunch status keeps the legacy single-enum model — only morning status
+      // gets the split arrival/justified treatment.
       if (field === "lunch_status") {
         const prevLunch = attendanceMap[id]?.lunch_status;
         const newLunch = toggle && prevLunch === status ? "" : status;
@@ -433,7 +469,7 @@ export default function AttendancePage() {
       }));
 
       // Only set justified_by / justified_at when we're flipping it on.
-      const userId = pb.authStore.model?.id;
+      const userId = pb.authStore.record?.id;
       const patch: Record<string, unknown> = {
         arrival: next.arrival,
         justified: next.justified,
@@ -510,26 +546,65 @@ export default function AttendancePage() {
       try {
         if (action === "morning-in") {
           if (time_in) return;
+          // Single atomic write — set time_in + arrival + (derived) status in
+          // one PB call so the realtime subscription never observes a record
+          // with time_in present but arrival/status still null.
           const lateTime = new Date(
-            now.getFullYear(), now.getMonth(), now.getDate(), 10, 1, 0, 0,
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            TIME_THRESHOLDS.LATE_HOUR,
+            TIME_THRESHOLDS.LATE_MINUTE,
+            0,
+            0,
           );
           const isLate = now.getTime() >= lateTime.getTime();
-          const status = isLate ? "late" : "present";
+          const arrival: ArrivalStatus = isLate ? "late" : "present";
+          // Preserve any prior justification — see state-machine for the
+          // same invariant when an NFC scan beats a pre-marked jAbsent.
+          const wasJustified =
+            attendance.justified === true ||
+            attendance.status === "jLate" ||
+            attendance.status === "jAbsent";
+          const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
           const timestamp = now.toISOString();
+
           setAttendanceMap((prev) => ({
             ...prev,
-            [id]: { ...prev[id], time_in: timestamp, status },
+            [id]: {
+              ...prev[id],
+              time_in: timestamp,
+              arrival,
+              justified: wasJustified,
+              status,
+            },
           }));
-          const result = await updateAttendance(id, "time_in", { timestamp });
-          if (!result.wrote) {
+
+          try {
+            await pbClient.batchUpdateAttendance({
+              learnerId: id,
+              date: viewDate,
+              fields: {
+                time_in: timestamp,
+                arrival,
+                justified: wasJustified,
+                status,
+              },
+            });
+            pushActivityEvent(id, "morning-in", status);
+          } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], time_in: undefined, status: undefined },
+              [id]: {
+                ...prev[id],
+                time_in: null,
+                arrival: attendance.arrival ?? null,
+                justified: Boolean(attendance.justified),
+                status: attendance.status ?? null,
+              },
             }));
-            return;
+            throw err;
           }
-          await handleSetStatus(id, status, "status", false);
-          pushActivityEvent(id, "morning-in", status);
         } else if (action === "lunch-out" || action === "lunch-in") {
           if (!time_in) return;
           const lastEvent =
@@ -543,22 +618,45 @@ export default function AttendancePage() {
           if (eventType !== nextEventType) return;
           const newEvent = { type: eventType, time: now.toISOString() };
           const updatedEvents = [...lunchEventsArray, newEvent];
+
+          // Compute lunch_status atomically when returning from lunch.
+          const lunchPatch: Record<string, unknown> = {
+            lunch_events: JSON.stringify(updatedEvents),
+          };
+          let computedLunchStatus: AttendanceStatus | null = null;
+          if (eventType === "in") {
+            const lunchLateTime = new Date(
+              now.getFullYear(),
+              now.getMonth(),
+              now.getDate(),
+              TIME_THRESHOLDS.LUNCH_LATE_HOUR,
+              TIME_THRESHOLDS.LUNCH_LATE_MINUTE,
+              0,
+              0,
+            );
+            computedLunchStatus =
+              now.getTime() >= lunchLateTime.getTime() ? "late" : "present";
+            lunchPatch.lunch_status = computedLunchStatus;
+          }
+
           setAttendanceMap((prev) => ({
             ...prev,
-            [id]: { ...prev[id], lunch_events: updatedEvents },
+            [id]: {
+              ...prev[id],
+              lunch_events: updatedEvents,
+              ...(computedLunchStatus
+                ? { lunch_status: computedLunchStatus }
+                : {}),
+            },
           }));
           try {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
               date: viewDate,
-              fields: { lunch_events: JSON.stringify(updatedEvents) },
+              fields: lunchPatch,
             });
             if (eventType === "in") {
-              const lunchLateTime = new Date(now);
-              lunchLateTime.setHours(14, 1, 0, 0);
-              const lunchStatus = now >= lunchLateTime ? "late" : "present";
-              await handleSetStatus(id, lunchStatus, "lunch_status", false);
-              pushActivityEvent(id, "lunch-in", lunchStatus);
+              pushActivityEvent(id, "lunch-in", computedLunchStatus ?? undefined);
             } else {
               pushActivityEvent(id, "lunch-out");
             }
@@ -566,7 +664,11 @@ export default function AttendancePage() {
           } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], lunch_events: lunchEventsArray },
+              [id]: {
+                ...prev[id],
+                lunch_events: lunchEventsArray,
+                lunch_status: attendance.lunch_status ?? null,
+              },
             }));
             throw err;
           }
@@ -578,12 +680,16 @@ export default function AttendancePage() {
             [id]: { ...prev[id], time_out: timestamp },
           }));
           try {
-            await updateAttendance(id, "time_out", { timestamp });
+            await pbClient.batchUpdateAttendance({
+              learnerId: id,
+              date: viewDate,
+              fields: { time_out: timestamp },
+            });
             pushActivityEvent(id, "day-out");
           } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], time_out: undefined },
+              [id]: { ...prev[id], time_out: null },
             }));
             throw err;
           }
@@ -594,8 +700,6 @@ export default function AttendancePage() {
     },
     [
       attendanceMap,
-      updateAttendance,
-      handleSetStatus,
       testMode,
       testTime,
       viewDate,
@@ -681,17 +785,19 @@ export default function AttendancePage() {
     await createLearner(name, email, program, dob, nfcUid);
   }
 
-  // Persist a justification reason for the currently-modal-edited learner.
-  // Uses the dedicated justifyAttendance helper so justified_by/_at land too.
+  // Persist a justification reason. Only closes the modal on success — a
+  // network blip surfaces inline so the user doesn't lose their typed reason
+  // (review #2).
   const handleSaveJustificationReason = useCallback(
     async (reason: string) => {
       if (!justifyingLearnerId) return;
       const record = attendanceMap[justifyingLearnerId];
       if (!record?.id) {
-        console.warn("No attendance record to attach reason to");
+        setJustifyError("No attendance record yet — mark the day with a status first.");
         return;
       }
-      const userId = pb.authStore.model?.id || "";
+      const userId = pb.authStore.record?.id || "";
+      setJustifyError(null);
       try {
         const updated = await pbClient.justifyAttendance({
           attendanceId: record.id,
@@ -703,10 +809,10 @@ export default function AttendancePage() {
           ...prev,
           [justifyingLearnerId]: { ...prev[justifyingLearnerId], ...updated },
         }));
-      } catch (err) {
-        console.error("Failed to save reason:", err);
-      } finally {
         setJustifyingLearnerId(null);
+      } catch (err: any) {
+        console.error("Failed to save reason:", err);
+        setJustifyError(err?.message || "Failed to save — please try again.");
       }
     },
     [justifyingLearnerId, attendanceMap],
@@ -717,144 +823,57 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="min-h-screen bg-yellow-50 p-4 sm:p-6 font-sans">
+    <>
       <UpdateNotification />
-      <div className="w-full max-w-7xl mx-auto">
-        {/* Header Row */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-              Attender
-            </h1>
-            {appVersion && (
-              <span className="text-xs text-gray-400 font-normal">
-                v{appVersion}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowModal(true)}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium shadow hover:bg-blue-600"
-            >
-              + Learner
-            </button>
-            <button
-              onClick={() => setShowActivityFeed((v) => !v)}
-              className={`cursor-pointer px-3 py-2 rounded-xl text-sm font-medium shadow ${
-                showActivityFeed
-                  ? "bg-green-500 text-white hover:bg-green-600"
-                  : "bg-green-100 text-green-700 hover:bg-green-200"
-              }`}
-            >
-              📡 Live
-              {activityEvents.length > 0 ? ` (${activityEvents.length})` : ""}
-            </button>
-            <button
-              onClick={() => router.push("/history")}
-              className="cursor-pointer px-3 py-2 rounded-xl bg-purple-500 text-white text-sm font-medium shadow hover:bg-purple-600"
-            >
-              📊 History
-            </button>
-            <button
-              onClick={() => pb.authStore.clear()}
-              className="px-3 py-2 rounded-xl bg-gray-200 text-gray-700 text-sm cursor-pointer hover:bg-gray-300"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
 
-        {/* Controls Row */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mb-4">
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Search */}
-            <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 flex-1 min-w-[200px] max-w-md">
-              <svg
-                className="w-4 h-4 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search learners..."
-                className="outline-none text-sm bg-transparent flex-1"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch("")}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ×
-                </button>
-              )}
-            </div>
+      <AttenderD
+        appVersion={appVersion}
+        viewDate={viewDate}
+        testMode={testMode}
+        uid={uid}
+        exists={exists}
+        search={search}
+        setSearch={setSearch}
+        programFilter={programFilter}
+        setProgramFilter={setProgramFilter}
+        attendanceFilter={attendanceFilter}
+        setAttendanceFilter={setAttendanceFilter}
+        attendanceCounts={attendanceCounts}
+        filtered={filtered}
+        totalItems={totalItems}
+        page={page}
+        perPage={perPage}
+        totalPages={totalPages}
+        setPage={setPage}
+        setPerPage={setPerPage}
+        activityEvents={activityEvents}
+        onShowActivityFeed={() => setShowActivityFeed((v) => !v)}
+        onShowAddLearner={() => setShowModal(true)}
+        onShowHistory={() => router.push("/history")}
+        onLogout={() => pb.authStore.clear()}
+        onToggleTestMode={() => {
+          setTestMode((t) => !t);
+          if (testMode) {
+            setTestTime(null);
+            setTestDate(null);
+          }
+        }}
+        onCheckAction={handleCheckAction}
+        onStatusChange={handleSetStatus}
+        onCommentUpdate={handleCommentUpdate}
+        onTimeEdit={handleTimeEdit}
+        onReset={handleReset}
+        onOpenJustification={(id: string) => {
+          setJustifyError(null);
+          setJustifyingLearnerId(id);
+        }}
+      />
 
-            {/* Program Filter */}
-            <select
-              value={programFilter}
-              onChange={(e) => setProgramFilter(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm cursor-pointer"
-            >
-              <option value="all">All programs</option>
-              <option value="exp">Explorers</option>
-              <option value="cre">Creators</option>
-              <option value="chmk">Changemakers</option>
-            </select>
-
-            {/* View toggle */}
-            <div className="flex rounded-xl overflow-hidden border border-gray-200">
-              <button
-                onClick={() => setViewMode("grid")}
-                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "grid" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
-              >
-                ▦ Grid
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={`px-3 py-2 text-sm cursor-pointer ${viewMode === "list" ? "bg-blue-500 text-white" : "bg-gray-50 text-gray-700 hover:bg-gray-100"}`}
-              >
-                ☰ List
-              </button>
-            </div>
-
-            <div className="flex-1" />
-
-            {/* Test Mode Toggle */}
-            <button
-              onClick={() => {
-                setTestMode((t) => !t);
-                if (testMode) {
-                  setTestTime(null);
-                  setTestDate(null);
-                }
-              }}
-              className={`px-3 py-2 rounded-xl text-sm cursor-pointer font-medium ${
-                testMode
-                  ? "bg-orange-500 text-white"
-                  : "bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              {testMode ? "🧪 Test Mode ON" : "🧪 Test Mode"}
-            </button>
-          </div>
-        </div>
-
-        {/* Test Mode Panel */}
-        {testMode && (
+      {testMode && (
+        <div
+          className="fixed bottom-4 left-4 right-4 z-30"
+          style={{ maxWidth: 720, margin: "0 auto" }}
+        >
           <TestModePanel
             testDate={testDate}
             testTime={testTime}
@@ -865,140 +884,9 @@ export default function AttendancePage() {
             setTestTime={setTestTime}
             simulateScan={simulateScan}
           />
-        )}
-
-        {/* NFC Status */}
-        {uid && (
-          <div
-            className={`mb-4 px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 ${
-              exists
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
-            <span className="font-medium">NFC:</span>
-            <code className="font-mono">{uid}</code>
-            <span>•</span>
-            <span>{exists ? "✓ Learner found" : "✗ Not registered"}</span>
-          </div>
-        )}
-
-        {/* Date indicator (non-test mode) */}
-        {!testMode && (
-          <div className="mb-4 text-sm text-gray-500">
-            Showing attendance for{" "}
-            <span className="font-medium text-gray-700">
-              {new Date(viewDate).toLocaleDateString(undefined, {
-                weekday: "long",
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </span>
-          </div>
-        )}
-
-        {/* Attendance filter pills */}
-        <AttendanceFilterPills
-          attendanceFilter={attendanceFilter}
-          attendanceCounts={attendanceCounts}
-          setAttendanceFilter={setAttendanceFilter}
-        />
-
-        {/* Learner grid or list */}
-        {viewMode === "grid" ? (
-          <LearnerGrid
-            filtered={filtered}
-            uid={uid}
-            testMode={testMode}
-            testTime={testTime}
-            onStatusChange={handleSetStatus}
-            onCheckAction={handleCheckAction}
-            onCommentUpdate={handleCommentUpdate}
-            onReset={handleReset}
-            onOpenJustification={(id) => setJustifyingLearnerId(id)}
-          />
-        ) : (
-          <LearnerListView
-            filtered={filtered}
-            uid={uid}
-            onStatusChange={handleSetStatus}
-            onCheckAction={handleCheckAction}
-            onCommentUpdate={handleCommentUpdate}
-            onTimeEdit={handleTimeEdit}
-            onOpenJustification={(id) => setJustifyingLearnerId(id)}
-          />
-        )}
-
-        {/* Pagination controls */}
-        <div className="bg-white rounded-2xl shadow-sm p-4 mt-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="text-sm text-gray-600">
-              Showing{" "}
-              <span className="font-semibold">{filtered.length}</span> of{" "}
-              <span className="font-semibold">{totalItems}</span> learners
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page <= 1 ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
-              >
-                ← Prev
-              </button>
-
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 text-sm">
-                <span className="text-gray-500">Page</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  value={page}
-                  onChange={(e) =>
-                    setPage(
-                      Math.max(
-                        1,
-                        Math.min(totalPages, Number(e.target.value || 1)),
-                      ),
-                    )
-                  }
-                  className="w-12 text-center text-sm outline-none bg-white border border-gray-200 rounded px-1 py-0.5"
-                />
-                <span className="text-gray-500">of {totalPages}</span>
-              </div>
-
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${page >= totalPages ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"}`}
-              >
-                Next →
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Show:</span>
-              <select
-                value={perPage}
-                onChange={(e) => {
-                  setPerPage(Number(e.target.value));
-                  setPage(1);
-                }}
-                className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-200 text-sm cursor-pointer"
-              >
-                <option value={4}>4</option>
-                <option value={8}>8</option>
-                <option value={12}>12</option>
-                <option value={24}>24</option>
-                <option value={500}>All</option>
-              </select>
-            </div>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Activity feed panel */}
       {showActivityFeed && (
         <ActivityFeed
           events={activityEvents}
@@ -1006,7 +894,6 @@ export default function AttendancePage() {
         />
       )}
 
-      {/* Modal for creating learner */}
       <CreateLearnerModal
         open={showModal}
         onClose={() => setShowModal(false)}
@@ -1014,21 +901,32 @@ export default function AttendancePage() {
         uid={uid}
       />
 
-      {/* Justification reason modal */}
+      {/* Justification reason modal. justifiedByName resolves the user FK
+          via the currently-logged-in user (matches the common case where the
+          guide who applies it is also the guide reading it back). */}
       {justifyingLearnerId && (() => {
         const rec = attendanceMap[justifyingLearnerId];
         const learner = students.find((s) => s.id === justifyingLearnerId);
+        const me = pb.authStore.record as { id?: string; name?: string } | null;
+        const justifiedByName =
+          rec?.expand?.justified_by?.name ||
+          (rec?.justified_by && me?.id === rec.justified_by ? me?.name : null) ||
+          null;
         return (
           <JustificationModal
             learnerName={(learner as any)?.name || "Learner"}
             currentReason={rec?.justification_reason || ""}
-            justifiedBy={rec?.justified_by || null}
+            justifiedByName={justifiedByName}
             justifiedAt={rec?.justified_at || null}
+            error={justifyError}
             onSave={handleSaveJustificationReason}
-            onClose={() => setJustifyingLearnerId(null)}
+            onClose={() => {
+              setJustifyingLearnerId(null);
+              setJustifyError(null);
+            }}
           />
         );
       })()}
-    </div>
+    </>
   );
 }

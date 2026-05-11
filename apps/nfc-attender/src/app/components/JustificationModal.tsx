@@ -1,12 +1,20 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { parsePBDate } from "@learnlife/shared";
 
 interface JustificationModalProps {
   learnerName: string;
   currentReason: string;
-  justifiedBy: string | null;
+  // Already-resolved display name. The raw user FK gets resolved by the
+  // parent (via `pb.authStore.record` for the common same-user case or by
+  // expanding the relation in the underlying query) so the modal can render
+  // a human name instead of a meaningless ID.
+  justifiedByName: string | null;
   justifiedAt: string | null;
+  // Error message lifted to the parent so a failed save doesn't close the
+  // modal and lose the user's typed reason.
+  error?: string | null;
   onSave: (reason: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -14,8 +22,9 @@ interface JustificationModalProps {
 export function JustificationModal({
   learnerName,
   currentReason,
-  justifiedBy,
+  justifiedByName,
   justifiedAt,
+  error,
   onSave,
   onClose,
 }: JustificationModalProps) {
@@ -46,8 +55,10 @@ export function JustificationModal({
     }
   };
 
+  // Use the shared PB date parser so we handle PB's space-separated format
+  // (e.g. "2026-05-11 14:30:00.000Z") the same way the rest of the app does.
   const audit = justifiedAt
-    ? new Date(justifiedAt).toLocaleString([], {
+    ? parsePBDate(justifiedAt).toLocaleString([], {
         month: "short",
         day: "numeric",
         hour: "2-digit",
@@ -85,10 +96,16 @@ export function JustificationModal({
           disabled={saving}
         />
 
-        {(audit || justifiedBy) && (
+        {(audit || justifiedByName) && (
           <div className="mt-2 text-xs text-gray-500">
-            {justifiedBy && <>Marked by {justifiedBy}</>}
+            {justifiedByName && <>Marked by {justifiedByName}</>}
             {audit && <> · {audit}</>}
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-xs border border-red-200">
+            {error}
           </div>
         )}
 

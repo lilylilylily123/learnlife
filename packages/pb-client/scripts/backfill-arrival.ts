@@ -151,6 +151,8 @@ async function main() {
         if (totalUpdated % 25 === 0) {
           console.log(`[backfill] ...${totalUpdated} records updated so far`);
         }
+        // Small breather between writes to keep PB rate-limiting happy.
+        await new Promise((r) => setTimeout(r, 50));
       } catch (err) {
         console.error(`[backfill] failed to update ${rec.id}:`, err);
       }
