@@ -23,14 +23,23 @@ export interface AttendanceState {
  *  - check_in         First NFC tap of the day (morning arrival)
  *  - lunch_event      NFC tap during the lunch window; toggles out→in→out…
  *  - late_lunch_return Learner scans in after 2 PM while still marked "out" for lunch
- *  - check_out        End-of-day departure scan (4:59 PM+)
+ *  - check_out        End-of-day departure scan (4:59 PM+). If the learner is
+ *                     still out for lunch when this fires, lunch is closed in
+ *                     the same write and marked as late.
  *  - no_action        All expected events have already been recorded
  */
 export type CheckInAction =
   | { type: "check_in"; fields: { time_in: string; status: AttendanceStatus } }
   | { type: "lunch_event"; fields: { lunch_events: string; lunch_status?: AttendanceStatus } }
   | { type: "late_lunch_return"; fields: { lunch_events: string; lunch_status: "late" } }
-  | { type: "check_out"; fields: { time_out: string } }
+  | {
+      type: "check_out";
+      fields: {
+        time_out: string;
+        lunch_events?: string;
+        lunch_status?: "late";
+      };
+    }
   | { type: "no_action"; reason: string };
 
 /**
@@ -38,11 +47,12 @@ export type CheckInAction =
  * the current attendance state and the current time.
  *
  * State machine flow (evaluated in order):
- *   1. No time_in yet           → check_in  (status = present | late)
- *   2. Lunch window (1–2 PM)    → lunch_event (toggles out/in; sets lunch_status on return)
- *   3. After 2 PM + still out   → late_lunch_return
- *   4. 4:59 PM+ and no time_out → check_out
- *   5. Otherwise                → no_action
+ *   1. No time_in yet                       → check_in  (status = present | late)
+ *   2. Lunch window (1–2 PM)                → lunch_event (toggles out/in; sets lunch_status on return)
+ *   3. Past checkout cutoff + no time_out   → check_out (also closes an open
+ *                                              lunch as late, in the same write)
+ *   4. After 2 PM + still out for lunch     → late_lunch_return
+ *   5. Otherwise                            → no_action
  *
  * Returns the action type and the fields to update — caller is responsible
  * for actually writing to PocketBase.
@@ -116,35 +126,18 @@ export function computeCheckInAction(
     return { type: "lunch_event", fields };
   }
 
-  // ── Step 3: Late lunch return (after 2 PM) ────────────────────────────────
-  // Lunch window is closed but the learner is still marked as "out". Append
-  // a synthetic "in" event and mark lunch_status as "late".
-  if (hour >= TIME_THRESHOLDS.LUNCH_LATE_HOUR) {
-    // Check both the modern lunch_events array and the legacy single-field format.
-    const currentlyAtLunch =
-      lunchEvents.length > 0 &&
-      lunchEvents[lunchEvents.length - 1].type === "out";
-    const currentlyAtLunchLegacy = state.lunch_out && !state.lunch_in;
+  // Is the learner currently mid-lunch (an unmatched "out" event)?
+  // Check both the modern lunch_events array and the legacy single-field format.
+  const currentlyAtLunch =
+    (lunchEvents.length > 0 && lunchEvents[lunchEvents.length - 1].type === "out") ||
+    Boolean(state.lunch_out && !state.lunch_in);
 
-    if (currentlyAtLunch || currentlyAtLunchLegacy) {
-      const updatedEvents = [
-        ...lunchEvents,
-        { type: "in" as const, time: now.toISOString() },
-      ];
-
-      return {
-        type: "late_lunch_return",
-        fields: {
-          lunch_events: JSON.stringify(updatedEvents),
-          lunch_status: "late",
-        },
-      };
-    }
-  }
-
-  // ── Step 4: End-of-day checkout ────────────────────────────────────────────
+  // ── Step 3: End-of-day checkout ────────────────────────────────────────────
   // Fridays use an earlier checkout time (2 PM) than other days (4:59 PM).
   // Only fire if time_out has not been recorded yet to prevent double-checkouts.
+  // Evaluated *before* late_lunch_return so a learner who never returned from
+  // lunch gets a single combined write — lunch closed as late + check_out —
+  // instead of two separate scans.
   const isFriday = now.getDay() === 5;
   const checkoutHour = isFriday ? TIME_THRESHOLDS.FRIDAY_CHECKOUT_HOUR : TIME_THRESHOLDS.CHECKOUT_HOUR;
   const checkoutMinute = isFriday ? TIME_THRESHOLDS.FRIDAY_CHECKOUT_MINUTE : TIME_THRESHOLDS.CHECKOUT_MINUTE;
@@ -153,9 +146,39 @@ export function computeCheckInAction(
       (hour === checkoutHour && minute >= checkoutMinute)) &&
     !state.time_out
   ) {
+    const fields: {
+      time_out: string;
+      lunch_events?: string;
+      lunch_status?: "late";
+    } = { time_out: now.toISOString() };
+
+    if (currentlyAtLunch) {
+      const updatedEvents = [
+        ...lunchEvents,
+        { type: "in" as const, time: now.toISOString() },
+      ];
+      fields.lunch_events = JSON.stringify(updatedEvents);
+      fields.lunch_status = "late";
+    }
+
+    return { type: "check_out", fields };
+  }
+
+  // ── Step 4: Late lunch return (after 2 PM, before checkout) ───────────────
+  // Lunch window is closed but the learner is still marked as "out". Append
+  // a synthetic "in" event and mark lunch_status as "late".
+  if (hour >= TIME_THRESHOLDS.LUNCH_LATE_HOUR && currentlyAtLunch) {
+    const updatedEvents = [
+      ...lunchEvents,
+      { type: "in" as const, time: now.toISOString() },
+    ];
+
     return {
-      type: "check_out",
-      fields: { time_out: now.toISOString() },
+      type: "late_lunch_return",
+      fields: {
+        lunch_events: JSON.stringify(updatedEvents),
+        lunch_status: "late",
+      },
     };
   }
 
