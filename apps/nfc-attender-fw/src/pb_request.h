@@ -35,6 +35,13 @@ std::string find_today_attendance_url(const std::string& base,
                                       const std::string& learner_id,
                                       const std::string& date_yyyy_mm_dd);
 
+// GET <base>/api/collections/attendance/records?page=N&perPage=M&filter=…
+// Filter: date ~ "<YYYY-MM-DD>" (URL-encoded). Used at boot to pre-populate
+// the in-memory cache so the first tap of each card is also fast.
+std::string list_attendance_for_date_url(const std::string& base,
+                                         const std::string& date_yyyy_mm_dd,
+                                         int page, int per_page);
+
 // POST <base>/api/collections/attendance/records
 // Body: {"learner":"<id>","date":"<YYYY-MM-DD>"}
 std::string create_attendance_url(const std::string& base);

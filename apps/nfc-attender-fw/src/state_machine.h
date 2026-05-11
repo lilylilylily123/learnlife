@@ -54,6 +54,7 @@ enum class ActionType {
   LunchEvent,
   LateLunchReturn,
   CheckOut,
+  Locked,    // scan rejected because we're in the no-scan window
   NoAction,
 };
 

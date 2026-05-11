@@ -16,7 +16,9 @@ enum class Event {
   LunchIn,
   LunchInLate,
   CheckOut,
-  AlreadyDone,
+  AlreadyDone,    // both time_in and time_out are set for today
+  AlreadyIn,      // already checked in, day still in progress (no checkout yet)
+  ScanLocked,     // 14:00–17:00 reject (state machine returned Locked)
   UnknownCard,
   Queued,         // appended after one of the action events when offline
   NetworkError,   // persistent indicator until cleared
@@ -32,5 +34,10 @@ void show(Event ev, const char* learner_name = nullptr);
 // Toggle the persistent network-error indicator. Layered on top of whatever
 // is currently being displayed.
 void set_network_error(bool on);
+
+// Called periodically from the UI task to advance time-based transitions
+// (auto-revert action feedback to idle, redraw the idle clock, blink the
+// network-error glyph). Cheap when nothing changed.
+void tick();
 
 }  // namespace llattender::ui

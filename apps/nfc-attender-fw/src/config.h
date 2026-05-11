@@ -31,4 +31,12 @@ bool is_provisioned();
 // valid credentials or the device is power-cycled. Persists on success.
 bool run_provisioning();
 
+// Wipe every key in the device namespace. Used by the factory-reset hotkey
+// so the next boot drops back into provisioning mode.
+bool wipe_nvs();
+
+// Watch Serial for ~2s at boot for a "RESET\n" command. Wipes NVS + reboots
+// if seen, otherwise returns. Cheap escape hatch for re-provisioning.
+void check_factory_reset_command();
+
 }  // namespace llattender::config

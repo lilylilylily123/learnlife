@@ -14,8 +14,12 @@ constexpr int LUNCH_START_HOUR = 13;
 constexpr int LUNCH_END_HOUR = 14;
 constexpr int LUNCH_LATE_HOUR = 14;
 constexpr int LUNCH_LATE_MINUTE = 1;
-constexpr int CHECKOUT_HOUR = 16;
-constexpr int CHECKOUT_MINUTE = 59;
+// No-scan window: after lunch closes (14:00) until check-out opens (17:00).
+// Mid-lunch returns (LateLunchReturn) still process inside this window — only
+// other taps are rejected.
+constexpr int LOCKED_END_HOUR = 17;
+constexpr int CHECKOUT_HOUR = 17;
+constexpr int CHECKOUT_MINUTE = 0;
 constexpr int FRIDAY_CHECKOUT_HOUR = 14;
 constexpr int FRIDAY_CHECKOUT_MINUTE = 0;
 
@@ -142,6 +146,17 @@ CheckInAction compute_check_in_action(const AttendanceState& state,
     CheckInAction a;
     a.type = ActionType::CheckOut;
     a.time_out_iso = now_iso;
+    return a;
+  }
+
+  // ── Step 4.5: No-scan window on non-Friday days. Anyone who's already
+  // checked in and isn't currently at lunch gets rejected until 17:00.
+  // (Friday's earlier checkout already returned in Step 4.) ─────────────────
+  if (!is_friday && state.has_time_in &&
+      hour >= LUNCH_LATE_HOUR && hour < LOCKED_END_HOUR) {
+    CheckInAction a;
+    a.type = ActionType::Locked;
+    a.reason = "Scans locked 14:00–17:00";
     return a;
   }
 

@@ -69,6 +69,19 @@ std::string find_today_attendance_url(const std::string& base,
          percent_encode(filter);
 }
 
+std::string list_attendance_for_date_url(const std::string& base,
+                                         const std::string& date,
+                                         int page, int per_page) {
+  std::string filter = "date ~ \"";
+  filter += date;
+  filter += "\"";
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "?page=%d&perPage=%d&filter=",
+                page, per_page);
+  return canonical_base(base) + "/api/collections/attendance/records" +
+         buf + percent_encode(filter);
+}
+
 std::string create_attendance_url(const std::string& base) {
   return canonical_base(base) + "/api/collections/attendance/records";
 }

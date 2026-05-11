@@ -12,9 +12,14 @@ namespace {
 // Default I2C IRQ/RESET pins are unused for I2C bus mode (-1 disables them).
 Adafruit_PN532 g_pn532(/*irq=*/-1, /*reset=*/-1, &Wire);
 
-// Mirrors `last_uid` in main.rs:29 — only emits on transition.
+// Time-based UID debounce. The PN532 occasionally returns "no target" for one
+// poll while a card is still on the reader; the previous edge-only debounce
+// would then count the next detection as a fresh tap, producing duplicate
+// scans. Suppress same-UID emissions within this window regardless of any
+// in-between "not present" reads.
+constexpr uint32_t kDebounceMs = 1500;
 std::string g_last_uid;
-bool g_card_present = false;
+uint32_t g_last_emit_ms = 0;
 }  // namespace
 
 bool init() {
@@ -35,11 +40,7 @@ bool poll_uid(std::string& out_uid_hex) {
   uint8_t uid_len = 0;
   // 50 ms timeout — short enough that the task can still service shutdown signals.
   bool found = g_pn532.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_len, 50);
-  if (!found) {
-    g_card_present = false;  // matches main.rs:96 — clear last_uid on removal
-    g_last_uid.clear();
-    return false;
-  }
+  if (!found) return false;
 
   // Build lowercase hex string to match the Rust hex::encode output.
   char buf[2 * 7 + 1];
@@ -48,11 +49,13 @@ bool poll_uid(std::string& out_uid_hex) {
   }
   std::string this_uid(buf, 2 * uid_len);
 
-  if (g_card_present && this_uid == g_last_uid) {
-    return false;  // same card still on the reader — debounce
+  const uint32_t now_ms = millis();
+  if (this_uid == g_last_uid && (now_ms - g_last_emit_ms) < kDebounceMs) {
+    return false;  // same card recently emitted — suppress regardless of any
+                   // "not present" blips in between
   }
-  g_card_present = true;
   g_last_uid = this_uid;
+  g_last_emit_ms = now_ms;
   out_uid_hex = std::move(this_uid);
   return true;
 }

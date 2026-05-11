@@ -156,14 +156,43 @@ void test_check_out_at_5pm_weekday() {
   TEST_ASSERT_TRUE(!action.time_out_iso.empty());
 }
 
-// 4:30 PM Wednesday with time_in → still NoAction (before 4:59 cutoff).
-void test_no_checkout_before_459() {
+// 4:30 PM Wednesday with time_in → Locked (in the new 14:00–17:00 no-scan
+// window; checkout doesn't open until 17:00).
+void test_locked_between_2pm_and_5pm() {
   AttendanceState state;
   state.has_time_in = true;
   auto now = make_local(2026, 4, 8, 16, 30);  // Wednesday
   auto action = compute_check_in_action(state, now, to_unix(now));
 
-  TEST_ASSERT_EQUAL(static_cast<int>(ActionType::NoAction),
+  TEST_ASSERT_EQUAL(static_cast<int>(ActionType::Locked),
+                    static_cast<int>(action.type));
+}
+
+// 4:59 PM Wednesday with time_in → Locked (one minute before checkout opens).
+void test_locked_at_459pm() {
+  AttendanceState state;
+  state.has_time_in = true;
+  auto now = make_local(2026, 4, 8, 16, 59);  // Wednesday
+  auto action = compute_check_in_action(state, now, to_unix(now));
+
+  TEST_ASSERT_EQUAL(static_cast<int>(ActionType::Locked),
+                    static_cast<int>(action.type));
+}
+
+// 2:30 PM Wednesday with time_in AND currently at lunch (lunch_out without
+// lunch_in) → LateLunchReturn, NOT Locked. The lock applies to everything
+// EXCEPT a learner mid-lunch.
+void test_lunch_return_beats_lock() {
+  AttendanceState state;
+  state.has_time_in = true;
+  LunchEvent ev;
+  ev.type = LunchEvent::Out;
+  ev.time_unix = 0;
+  state.lunch_events.push_back(ev);
+  auto now = make_local(2026, 4, 8, 14, 30);  // Wednesday
+  auto action = compute_check_in_action(state, now, to_unix(now));
+
+  TEST_ASSERT_EQUAL(static_cast<int>(ActionType::LateLunchReturn),
                     static_cast<int>(action.type));
 }
 
@@ -201,7 +230,9 @@ int main(int, char**) {
   RUN_TEST(test_lunch_in_after_out);
   RUN_TEST(test_late_lunch_return);
   RUN_TEST(test_check_out_at_5pm_weekday);
-  RUN_TEST(test_no_checkout_before_459);
+  RUN_TEST(test_locked_between_2pm_and_5pm);
+  RUN_TEST(test_locked_at_459pm);
+  RUN_TEST(test_lunch_return_beats_lock);
   RUN_TEST(test_friday_checkout_at_2pm);
   RUN_TEST(test_no_double_checkout);
   return UNITY_END();
