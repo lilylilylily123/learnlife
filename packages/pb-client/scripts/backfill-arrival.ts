@@ -67,8 +67,15 @@ async function main() {
     for (const rec of items) {
       totalScanned++;
 
-      // Skip if already migrated. `arrival` being set is the canonical marker.
-      if (rec.arrival !== null && rec.arrival !== undefined) {
+      // Skip if already migrated. PB defaults a newly-added select field to
+      // "" (empty string) for existing rows, so treat null/undefined/"" as
+      // "not yet migrated" — the canonical marker is one of the three valid
+      // arrival enum values.
+      const isMigrated =
+        rec.arrival === "present" ||
+        rec.arrival === "late" ||
+        rec.arrival === "absent";
+      if (isMigrated) {
         totalSkipped++;
         continue;
       }
