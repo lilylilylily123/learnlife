@@ -42,6 +42,7 @@ export default function ChatModal() {
   const participantName = params.participantName ?? "Chat";
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [inputText, setInputText] = useState("");
   const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList<Message>>(null);
@@ -56,15 +57,18 @@ export default function ChatModal() {
     if (!conversationId || !user?.id) return;
 
     let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
     (async () => {
       const fetched = await fetchMessages(conversationId);
+      if (cancelled) return;
       setMessages(fetched);
+      setHasLoaded(true);
       scrollToBottom();
 
       markMessagesRead(conversationId, user.id);
 
-      unsubscribe = subscribeToMessages(conversationId, (newMessage) => {
+      const unsub = await subscribeToMessages(conversationId, (newMessage) => {
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMessage.id)) return prev;
           return [...prev, newMessage];
@@ -75,9 +79,15 @@ export default function ChatModal() {
           markMessagesRead(conversationId, user.id);
         }
       });
+      if (cancelled) {
+        unsub();
+        return;
+      }
+      unsubscribe = unsub;
     })();
 
     return () => {
+      cancelled = true;
       unsubscribe?.();
     };
   }, [conversationId, user?.id, scrollToBottom]);
@@ -159,12 +169,14 @@ export default function ChatModal() {
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            <View style={s.emptyContainer}>
-              <Text style={s.emptyText}>No messages yet</Text>
-              <Text style={s.emptySubtext}>
-                Send a message to start the conversation
-              </Text>
-            </View>
+            hasLoaded ? (
+              <View style={s.emptyContainer}>
+                <Text style={s.emptyText}>No messages yet</Text>
+                <Text style={s.emptySubtext}>
+                  Send a message to start the conversation
+                </Text>
+              </View>
+            ) : null
           }
         />
 

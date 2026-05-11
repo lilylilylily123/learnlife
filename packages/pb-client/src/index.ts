@@ -20,6 +20,8 @@ export type {
   Conversation,
   Message,
   Invite,
+  EventRsvp,
+  RsvpStatus,
 } from "./types";
 
 // Queries
@@ -29,6 +31,10 @@ export * as attendance from "./queries/attendance";
 export * as calendar from "./queries/calendar";
 export * as messages from "./queries/messages";
 export * as invites from "./queries/invites";
+export * as rsvp from "./queries/rsvp";
+
+// Re-exported query types
+export type { MessageableUser } from "./queries/messages";
 
 // Utils
 export { withRetry } from "./utils/retry";

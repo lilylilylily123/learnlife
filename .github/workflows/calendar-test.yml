@@ -9,6 +9,8 @@ on:
       - "packages/**"
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/calendar-test.yml"
   pull_request:
     branches:
       - main
@@ -17,6 +19,8 @@ on:
       - "packages/**"
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/calendar-test.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -30,22 +34,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: lts/*
+          node-version: 22
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
         run: pnpm --filter ll_calendar lint

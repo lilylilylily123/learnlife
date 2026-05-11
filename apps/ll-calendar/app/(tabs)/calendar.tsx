@@ -17,6 +17,7 @@ import {
   expandEvents,
   fetchCalendarEvents,
 } from "@/lib/pocketbase";
+import { dateKeyToOccurrenceDate } from "@learnlife/shared";
 import { Colors, Fonts } from "@/constants/theme";
 
 const MONTHS = [
@@ -44,32 +45,33 @@ export default function CalendarScreen() {
     `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}`
   );
   const [events, setEvents] = useState<Record<string, CalEvent[]>>({});
-  const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
-  // Reload whenever the screen comes into focus (e.g. after creating an event)
+  // Reload whenever the screen comes into focus (e.g. after creating an event).
+  // Keep the previously rendered grid visible during the refetch — only show
+  // the spinner on first load with no cached data.
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
       let cancelled = false;
       (async () => {
-        setLoading(true);
         try {
           const records = await fetchCalendarEvents();
-          console.log("[calendar] fetched", records.length, "records", JSON.stringify(records.map(r => ({ id: r.id, title: r.title, programs: r.programs }))));
           if (!cancelled) {
             const expanded = expandEvents(records, displayYear, displayMonth);
-            console.log("[calendar] expanded keys:", Object.keys(expanded), "for", displayYear, displayMonth);
             setEvents(expanded);
           }
         } catch (e: any) {
           if (!cancelled) console.error("[calendar] Failed to load events", e?.message);
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) setHasLoaded(true);
         }
       })();
       return () => { cancelled = true; };
     }, [displayYear, displayMonth, user?.id])
   );
+
+  const loading = !hasLoaded && Object.keys(events).length === 0;
 
   const cells = useMemo(() => {
     const daysInMonth = getDaysInMonth(displayYear, displayMonth);
@@ -210,7 +212,15 @@ export default function CalendarScreen() {
             <Pressable
               key={ev.id}
               style={s.eventCard}
-              onPress={() =>
+              onPress={() => {
+                // For RSVPs we need the canonical "YYYY-MM-DD" occurrence
+                // date so recurring events get one row per occurrence.
+                // One-off events use the empty string (mapped to null
+                // server-side) so all RSVPs collapse onto a single row.
+                const isRecurring = ev.id !== ev.recordId;
+                const occurrenceDate = isRecurring
+                  ? (dateKeyToOccurrenceDate(selectedDate) ?? "")
+                  : "";
                 router.push({
                   pathname: "/(modals)/event-detail",
                   params: {
@@ -219,9 +229,11 @@ export default function CalendarScreen() {
                     emoji: ev.emoji,
                     color: ev.color,
                     recordId: ev.recordId,
+                    createdBy: ev.createdBy,
+                    occurrenceDate,
                   },
-                })
-              }
+                });
+              }}
             >
               <View style={[s.eventAccent, { backgroundColor: ev.color }]} />
               <View style={s.eventBody}>

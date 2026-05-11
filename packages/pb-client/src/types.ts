@@ -71,6 +71,11 @@ export interface CalRecord {
   recurrence_end: string;
   created_by: string; // FK to users
   programs?: string[]; // ["chmk", "cre", "exp"] — if set, visible to learners in any of these programs
+  // ── RSVP (events only; classes leave these unset) ──────────────────────
+  rsvp_enabled?: boolean;
+  capacity?: number | null; // null/0 = unlimited
+  rsvp_deadline?: string | null; // ISO; null = no deadline
+  allow_waitlist?: boolean;
 }
 
 export interface CalEvent {
@@ -80,6 +85,7 @@ export interface CalEvent {
   time: string; // "09:00 AM - 10:30 AM"
   emoji: string;
   color: string;
+  createdBy: string; // FK to users — used for client-side edit/delete permission checks
 }
 
 export interface CreateCalEntryPayload {
@@ -94,6 +100,33 @@ export interface CreateCalEntryPayload {
   recurrence_end: string;
   created_by: string;
   programs?: string[]; // ["chmk", "cre", "exp"] — if set, visible to learners in any of these programs
+  rsvp_enabled?: boolean;
+  capacity?: number | null;
+  rsvp_deadline?: string | null;
+  allow_waitlist?: boolean;
+}
+
+export type RsvpStatus = "going" | "not_going" | "waitlisted";
+
+/**
+ * One user's RSVP for a single calendar event occurrence. Recurring events
+ * have one row per (event, occurrence_date, user) — see queries/rsvp.ts.
+ */
+export interface EventRsvp {
+  id: string;
+  event: string; // FK to calendar
+  occurrence_date: string | null; // "YYYY-MM-DD" for recurring; null for one-off
+  user: string; // FK to users
+  status: RsvpStatus;
+  position: number | null; // waitlist ordinal; null for going/not_going
+  responded_at: string;
+  collectionId: string;
+  collectionName: string;
+  created: string;
+  updated: string;
+  expand?: {
+    user?: { id: string; name: string; username: string; avatar: string };
+  };
 }
 
 export interface Conversation {

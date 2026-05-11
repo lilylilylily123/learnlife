@@ -34,6 +34,7 @@ export function expandEvents(
       time: formatTimeRange(rec.start, rec.end),
       emoji: rec.emoji ?? "",
       color: rec.color,
+      createdBy: rec.created_by,
     };
 
     // A record is treated as weekly if it declares recurrence="weekly" OR
