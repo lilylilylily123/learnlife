@@ -1,4 +1,4 @@
-import type { AttendanceStatus, ProgramCode } from "./constants";
+import type { ArrivalStatus, AttendanceStatus, ProgramCode } from "./constants";
 
 export type UserRole = "learner" | "lg" | "admin";
 
@@ -45,14 +45,30 @@ export interface AttendanceRecord {
   lunch_out: string | null; // legacy
   lunch_in: string | null; // legacy
   lunch_events: LunchEvent[] | null;
+  // Legacy combined enum — kept in sync with arrival + justified by every
+  // writer so that existing PB queries and reports keep working until callers
+  // migrate to the split fields.
   status: AttendanceStatus | null;
   lunch_status: AttendanceStatus | null;
+  // The fact of arrival, independent of any later justification.
+  arrival: ArrivalStatus | null;
+  // True when a guide has accepted a reason for a late or absent arrival.
+  // present + justified is meaningless (you can't justify being on time) so
+  // callers should only set justified=true when arrival is "late" or "absent".
+  justified: boolean;
+  // Optional free-text reason the guide captured for the justification.
+  justification_reason: string | null;
+  // User FK + timestamp of the most recent justified=true flip. Retained as a
+  // historical breadcrumb even when justified is later toggled back to false.
+  justified_by: string | null;
+  justified_at: string | null;
   collectionId: string;
   collectionName: string;
   created: string;
   updated: string;
   expand?: {
     learner?: Learner;
+    justified_by?: User;
   };
 }
 

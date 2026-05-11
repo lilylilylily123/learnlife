@@ -54,7 +54,8 @@ export interface CheckInResult {
   type: "check_in" | "lunch_event" | "late_lunch_return" | "check_out" | "no_action";
   learnerName: string;
   program: string;
-  status?: string; // e.g. "present", "late" — only set for check_in actions
+  status?: string;   // e.g. "present", "late" — only set for check_in actions
+  arrival?: string;  // "present" | "late" — only set for check_in actions
 }
 
 /**
@@ -126,8 +127,11 @@ export async function checkLearnerIn(NFC_ID: string, options?: CheckInOptions): 
       type: action.type,
       learnerName: learner.name,
       program: learner.program || "",
-      // `status` is only present on check_in actions; other action types won't have it.
-      ...(action.type === "check_in" && { status: action.fields.status }),
+      // `status` and `arrival` are only present on check_in actions.
+      ...(action.type === "check_in" && {
+        status: action.fields.status,
+        arrival: action.fields.arrival,
+      }),
     };
   } catch (err) {
     debug.error(`[checkLearnerIn] Failed to update ${learner.name}:`, err);

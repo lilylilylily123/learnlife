@@ -14,7 +14,12 @@ export {
 export { expandEvents } from "./calendar";
 
 // Attendance state machine
-export { computeCheckInAction } from "./attendance";
+export {
+  computeCheckInAction,
+  deriveStatus,
+  splitStatus,
+  findLearnersToMarkAbsent,
+} from "./attendance";
 export type { AttendanceState, CheckInAction } from "./attendance";
 
 // Attendance aggregation

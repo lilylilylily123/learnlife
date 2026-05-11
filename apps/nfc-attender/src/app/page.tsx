@@ -14,16 +14,25 @@ import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
 import { AttenderD } from "./components/AttenderD";
+import { JustificationModal } from "./components/JustificationModal";
 import type { Student } from "./types";
+import { deriveStatus, findLearnersToMarkAbsent } from "@learnlife/shared";
+import {
+  TIME_THRESHOLDS,
+  type ArrivalStatus,
+  type AttendanceStatus,
+} from "@learnlife/pb-client";
 
 // Diff two attendance row snapshots and return the ActionType that occurred,
 // or null if no meaningful change. Used to synthesise Live Activity entries
 // from PocketBase realtime events so any scanner (local USB reader OR the
-// standalone ESP32 firmware) populates the feed.
+// standalone ESP32 firmware) populates the feed. The "auto_absent" branch
+// catches sweep-generated writes where arrival flips to "absent" with no
+// time_in — distinct from a guide pressing the A button.
 function inferAttendanceAction(
   prev: any,
   next: any,
-): "check_in" | "check_out" | "lunch_event" | "late_lunch_return" | null {
+): "check_in" | "check_out" | "lunch_event" | "late_lunch_return" | "auto_absent" | null {
   if (!prev?.time_in && next?.time_in) return "check_in";
   if (!prev?.time_out && next?.time_out) return "check_out";
   const prevEvents: any[] = Array.isArray(prev?.lunch_events) ? prev.lunch_events : [];
@@ -35,8 +44,25 @@ function inferAttendanceAction(
     }
     return "lunch_event";
   }
+  if (
+    prev?.arrival !== "absent" &&
+    next?.arrival === "absent" &&
+    !next?.time_in
+  ) {
+    return "auto_absent";
+  }
   return null;
 }
+
+// Map a legacy 5-enum status (the value the P/L/A/JL/JA buttons emit) to the
+// canonical split-field pair. Clicking a button writes the corresponding pair.
+const STATUS_BUTTON_MAP: Record<AttendanceStatus, { arrival: ArrivalStatus; justified: boolean }> = {
+  present: { arrival: "present", justified: false },
+  late: { arrival: "late", justified: false },
+  absent: { arrival: "absent", justified: false },
+  jLate: { arrival: "late", justified: true },
+  jAbsent: { arrival: "absent", justified: true },
+};
 
 export default function AttendancePage() {
   // Auth / app state
@@ -73,6 +99,13 @@ export default function AttendancePage() {
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
 
+  // Justification modal — opens when a guide clicks the "add reason" icon next
+  // to a justified status. Stores the learner whose reason we're editing.
+  const [justifyingLearnerId, setJustifyingLearnerId] = useState<string | null>(null);
+  // Lift the error out of the modal's local state so a failed save doesn't
+  // close the modal and lose the user's input (review #2).
+  const [justifyError, setJustifyError] = useState<string | null>(null);
+
   // Update auth state after mount to avoid hydration mismatch.
   // Treat learner-role accounts as logged out — nfc-attender is a guide tool.
   useEffect(() => {
@@ -99,6 +132,11 @@ export default function AttendancePage() {
         lunch_events: attendance.lunch_events || null,
         status: attendance.status || null,
         lunch_status: attendance.lunch_status || null,
+        arrival: attendance.arrival ?? null,
+        justified: Boolean(attendance.justified),
+        justification_reason: attendance.justification_reason ?? null,
+        justified_by: attendance.justified_by ?? null,
+        justified_at: attendance.justified_at ?? null,
         attendanceId: attendance.id || null,
       } as Student & { attendanceId: string | null };
     });
@@ -265,6 +303,85 @@ export default function AttendancePage() {
     };
   }, [isLoggedIn]);
 
+  // ── Auto-absent sweep ────────────────────────────────────────────────────
+  // Server-side PB cron isn't available in this hosting setup, so the dashboard
+  // itself runs the sweep on a 1-minute timer while open. The sweep is
+  // idempotent (findLearnersToMarkAbsent skips anyone who already has a
+  // recorded state) and gated to once-per-day via lastSweptDateRef — but only
+  // after every write succeeded. A partial failure leaves the ref unchanged
+  // so the next tick retries the laggards (review #6).
+  const lastSweptDateRef = useRef<string | null>(null);
+
+  const runAbsentSweep = useCallback(async () => {
+    // Only sweep when we're looking at *today* — historical view modes must
+    // never trigger a write against the real-time dashboard's date.
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (viewDate !== todayStr) return;
+    if (lastSweptDateRef.current === todayStr) return;
+
+    const now = testMode && testTime ? testTime : new Date();
+    const records = Object.values(attendanceMapRef.current) as any[];
+    const learners = studentsRef.current.map((s) => ({ id: s.id }));
+
+    const toMark = findLearnersToMarkAbsent(records, learners, now);
+
+    // Compute "past the cutoff" using the threshold constants (review #5).
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    const pastCutoff =
+      hour > TIME_THRESHOLDS.ABSENT_HOUR ||
+      (hour === TIME_THRESHOLDS.ABSENT_HOUR && minute >= TIME_THRESHOLDS.ABSENT_MINUTE);
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+
+    if (toMark.length === 0) {
+      // Nothing to do; only "close the day" when we're past the cutoff on a
+      // weekday — otherwise leave the ref unchanged so the next tick retries.
+      if (pastCutoff && !isWeekend) {
+        lastSweptDateRef.current = todayStr;
+      }
+      return;
+    }
+
+    console.log(`[auto-absent] marking ${toMark.length} learner(s) absent for ${todayStr}`);
+    let okCount = 0;
+    const failedIds: string[] = [];
+    for (const learnerId of toMark) {
+      try {
+        await pbClient.batchUpdateAttendance({
+          learnerId,
+          date: todayStr,
+          fields: {
+            arrival: "absent",
+            justified: false,
+            status: "absent",
+          },
+        });
+        okCount++;
+      } catch (err) {
+        failedIds.push(learnerId);
+        console.error(`[auto-absent] failed for ${learnerId}:`, err);
+      }
+    }
+    console.log(`[auto-absent] ${okCount}/${toMark.length} succeeded`);
+    // Only close the day when every learner was written successfully — a
+    // partial failure means the next tick should retry the laggards.
+    if (failedIds.length === 0) {
+      lastSweptDateRef.current = todayStr;
+    } else {
+      console.warn(`[auto-absent] will retry next tick for: ${failedIds.join(", ")}`);
+    }
+  }, [viewDate, testMode, testTime]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    // Fire once on mount (so a dashboard opened after noon catches up
+    // immediately) and then every minute.
+    const tick = () => { runAbsentSweep().catch(() => {}); };
+    tick();
+    const interval = setInterval(tick, 60_000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn, runAbsentSweep]);
+
   // Update attendance field via PocketBase
   const updateAttendance = useCallback(
     async (
@@ -295,19 +412,79 @@ export default function AttendancePage() {
       field: "status" | "lunch_status" = "status",
       toggle: boolean = true,
     ) => {
-      const previousValue = attendanceMap[id]?.[field];
-      const newValue = toggle && previousValue === status ? "" : status;
+      // Lunch status keeps the legacy single-enum model — only morning status
+      // gets the split arrival/justified treatment.
+      if (field === "lunch_status") {
+        const prevLunch = attendanceMap[id]?.lunch_status;
+        const newLunch = toggle && prevLunch === status ? "" : status;
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], lunch_status: newLunch || null },
+        }));
+        try {
+          await pbClient.batchUpdateAttendance({
+            learnerId: id,
+            date: viewDate,
+            fields: { lunch_status: newLunch },
+          });
+        } catch (err) {
+          console.error("Failed to save lunch status", err);
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [id]: { ...prev[id], lunch_status: prevLunch },
+          }));
+        }
+        return;
+      }
 
+      const target = STATUS_BUTTON_MAP[status as AttendanceStatus];
+      if (!target) {
+        console.warn(`handleSetStatus: unknown status "${status}"`);
+        return;
+      }
+
+      const prevRecord = attendanceMap[id] || {};
+      const prevArrival = (prevRecord.arrival ?? null) as ArrivalStatus | null;
+      const prevJustified = Boolean(prevRecord.justified);
+      const prevStatus = prevRecord.status || null;
+
+      // Toggle: clicking the button that exactly matches the current state
+      // clears the day. Anything else applies the button's target pair.
+      const matches = prevArrival === target.arrival && prevJustified === target.justified;
+      const next = toggle && matches
+        ? { arrival: null as ArrivalStatus | null, justified: false }
+        : target;
+
+      const nextStatus = deriveStatus(next.arrival, next.justified);
+
+      // Optimistic UI update.
       setAttendanceMap((prev) => ({
         ...prev,
-        [id]: { ...prev[id], [field]: newValue || null },
+        [id]: {
+          ...prev[id],
+          arrival: next.arrival,
+          justified: next.justified,
+          status: nextStatus,
+        },
       }));
+
+      // Only set justified_by / justified_at when we're flipping it on.
+      const userId = pb.authStore.record?.id;
+      const patch: Record<string, unknown> = {
+        arrival: next.arrival,
+        justified: next.justified,
+        status: nextStatus,
+      };
+      if (next.justified && !prevJustified) {
+        patch.justified_by = userId || null;
+        patch.justified_at = new Date().toISOString();
+      }
 
       try {
         await pbClient.batchUpdateAttendance({
           learnerId: id,
           date: viewDate,
-          fields: { [field]: newValue },
+          fields: patch,
         });
       } catch (err: any) {
         if (err?.status === 429) {
@@ -316,7 +493,7 @@ export default function AttendancePage() {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
               date: viewDate,
-              fields: { [field]: newValue },
+              fields: patch,
             });
             return;
           } catch (retryErr) {
@@ -324,9 +501,15 @@ export default function AttendancePage() {
           }
         }
         console.error("Failed to save status", err);
+        // Roll back the optimistic update on failure.
         setAttendanceMap((prev) => ({
           ...prev,
-          [id]: { ...prev[id], [field]: previousValue },
+          [id]: {
+            ...prev[id],
+            arrival: prevArrival,
+            justified: prevJustified,
+            status: prevStatus,
+          },
         }));
       }
     },
@@ -363,26 +546,65 @@ export default function AttendancePage() {
       try {
         if (action === "morning-in") {
           if (time_in) return;
+          // Single atomic write — set time_in + arrival + (derived) status in
+          // one PB call so the realtime subscription never observes a record
+          // with time_in present but arrival/status still null.
           const lateTime = new Date(
-            now.getFullYear(), now.getMonth(), now.getDate(), 10, 1, 0, 0,
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            TIME_THRESHOLDS.LATE_HOUR,
+            TIME_THRESHOLDS.LATE_MINUTE,
+            0,
+            0,
           );
           const isLate = now.getTime() >= lateTime.getTime();
-          const status = isLate ? "late" : "present";
+          const arrival: ArrivalStatus = isLate ? "late" : "present";
+          // Preserve any prior justification — see state-machine for the
+          // same invariant when an NFC scan beats a pre-marked jAbsent.
+          const wasJustified =
+            attendance.justified === true ||
+            attendance.status === "jLate" ||
+            attendance.status === "jAbsent";
+          const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
           const timestamp = now.toISOString();
+
           setAttendanceMap((prev) => ({
             ...prev,
-            [id]: { ...prev[id], time_in: timestamp, status },
+            [id]: {
+              ...prev[id],
+              time_in: timestamp,
+              arrival,
+              justified: wasJustified,
+              status,
+            },
           }));
-          const result = await updateAttendance(id, "time_in", { timestamp });
-          if (!result.wrote) {
+
+          try {
+            await pbClient.batchUpdateAttendance({
+              learnerId: id,
+              date: viewDate,
+              fields: {
+                time_in: timestamp,
+                arrival,
+                justified: wasJustified,
+                status,
+              },
+            });
+            pushActivityEvent(id, "morning-in", status);
+          } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], time_in: undefined, status: undefined },
+              [id]: {
+                ...prev[id],
+                time_in: null,
+                arrival: attendance.arrival ?? null,
+                justified: Boolean(attendance.justified),
+                status: attendance.status ?? null,
+              },
             }));
-            return;
+            throw err;
           }
-          await handleSetStatus(id, status, "status", false);
-          pushActivityEvent(id, "morning-in", status);
         } else if (action === "lunch-out" || action === "lunch-in") {
           if (!time_in) return;
           const lastEvent =
@@ -396,22 +618,45 @@ export default function AttendancePage() {
           if (eventType !== nextEventType) return;
           const newEvent = { type: eventType, time: now.toISOString() };
           const updatedEvents = [...lunchEventsArray, newEvent];
+
+          // Compute lunch_status atomically when returning from lunch.
+          const lunchPatch: Record<string, unknown> = {
+            lunch_events: JSON.stringify(updatedEvents),
+          };
+          let computedLunchStatus: AttendanceStatus | null = null;
+          if (eventType === "in") {
+            const lunchLateTime = new Date(
+              now.getFullYear(),
+              now.getMonth(),
+              now.getDate(),
+              TIME_THRESHOLDS.LUNCH_LATE_HOUR,
+              TIME_THRESHOLDS.LUNCH_LATE_MINUTE,
+              0,
+              0,
+            );
+            computedLunchStatus =
+              now.getTime() >= lunchLateTime.getTime() ? "late" : "present";
+            lunchPatch.lunch_status = computedLunchStatus;
+          }
+
           setAttendanceMap((prev) => ({
             ...prev,
-            [id]: { ...prev[id], lunch_events: updatedEvents },
+            [id]: {
+              ...prev[id],
+              lunch_events: updatedEvents,
+              ...(computedLunchStatus
+                ? { lunch_status: computedLunchStatus }
+                : {}),
+            },
           }));
           try {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
               date: viewDate,
-              fields: { lunch_events: JSON.stringify(updatedEvents) },
+              fields: lunchPatch,
             });
             if (eventType === "in") {
-              const lunchLateTime = new Date(now);
-              lunchLateTime.setHours(14, 1, 0, 0);
-              const lunchStatus = now >= lunchLateTime ? "late" : "present";
-              await handleSetStatus(id, lunchStatus, "lunch_status", false);
-              pushActivityEvent(id, "lunch-in", lunchStatus);
+              pushActivityEvent(id, "lunch-in", computedLunchStatus ?? undefined);
             } else {
               pushActivityEvent(id, "lunch-out");
             }
@@ -419,7 +664,11 @@ export default function AttendancePage() {
           } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], lunch_events: lunchEventsArray },
+              [id]: {
+                ...prev[id],
+                lunch_events: lunchEventsArray,
+                lunch_status: attendance.lunch_status ?? null,
+              },
             }));
             throw err;
           }
@@ -431,12 +680,16 @@ export default function AttendancePage() {
             [id]: { ...prev[id], time_out: timestamp },
           }));
           try {
-            await updateAttendance(id, "time_out", { timestamp });
+            await pbClient.batchUpdateAttendance({
+              learnerId: id,
+              date: viewDate,
+              fields: { time_out: timestamp },
+            });
             pushActivityEvent(id, "day-out");
           } catch (err) {
             setAttendanceMap((prev) => ({
               ...prev,
-              [id]: { ...prev[id], time_out: undefined },
+              [id]: { ...prev[id], time_out: null },
             }));
             throw err;
           }
@@ -447,8 +700,6 @@ export default function AttendancePage() {
     },
     [
       attendanceMap,
-      updateAttendance,
-      handleSetStatus,
       testMode,
       testTime,
       viewDate,
@@ -534,6 +785,39 @@ export default function AttendancePage() {
     await createLearner(name, email, program, dob, nfcUid);
   }
 
+  // Persist a justification reason. Only closes the modal on success — a
+  // network blip surfaces inline so the user doesn't lose their typed reason
+  // (review #2).
+  const handleSaveJustificationReason = useCallback(
+    async (reason: string) => {
+      if (!justifyingLearnerId) return;
+      const record = attendanceMap[justifyingLearnerId];
+      if (!record?.id) {
+        setJustifyError("No attendance record yet — mark the day with a status first.");
+        return;
+      }
+      const userId = pb.authStore.record?.id || "";
+      setJustifyError(null);
+      try {
+        const updated = await pbClient.justifyAttendance({
+          attendanceId: record.id,
+          justified: Boolean(record.justified),
+          reason,
+          userId,
+        });
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [justifyingLearnerId]: { ...prev[justifyingLearnerId], ...updated },
+        }));
+        setJustifyingLearnerId(null);
+      } catch (err: any) {
+        console.error("Failed to save reason:", err);
+        setJustifyError(err?.message || "Failed to save — please try again.");
+      }
+    },
+    [justifyingLearnerId, attendanceMap],
+  );
+
   if (!isLoggedIn) {
     return <Account />;
   }
@@ -579,6 +863,10 @@ export default function AttendancePage() {
         onCommentUpdate={handleCommentUpdate}
         onTimeEdit={handleTimeEdit}
         onReset={handleReset}
+        onOpenJustification={(id: string) => {
+          setJustifyError(null);
+          setJustifyingLearnerId(id);
+        }}
       />
 
       {testMode && (
@@ -612,6 +900,33 @@ export default function AttendancePage() {
         onCreate={handleCreateLearner}
         uid={uid}
       />
+
+      {/* Justification reason modal. justifiedByName resolves the user FK
+          via the currently-logged-in user (matches the common case where the
+          guide who applies it is also the guide reading it back). */}
+      {justifyingLearnerId && (() => {
+        const rec = attendanceMap[justifyingLearnerId];
+        const learner = students.find((s) => s.id === justifyingLearnerId);
+        const me = pb.authStore.record as { id?: string; name?: string } | null;
+        const justifiedByName =
+          rec?.expand?.justified_by?.name ||
+          (rec?.justified_by && me?.id === rec.justified_by ? me?.name : null) ||
+          null;
+        return (
+          <JustificationModal
+            learnerName={(learner as any)?.name || "Learner"}
+            currentReason={rec?.justification_reason || ""}
+            justifiedByName={justifiedByName}
+            justifiedAt={rec?.justified_at || null}
+            error={justifyError}
+            onSave={handleSaveJustificationReason}
+            onClose={() => {
+              setJustifyingLearnerId(null);
+              setJustifyError(null);
+            }}
+          />
+        );
+      })()}
     </>
   );
 }

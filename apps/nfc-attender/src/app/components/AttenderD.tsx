@@ -60,6 +60,9 @@ interface AttenderDProps {
     timeStr: string,
   ) => Promise<void>;
   onReset: (id: string) => void;
+  // Opens the justification reason modal for a learner. Only rendered next
+  // to status when the day is currently marked justified.
+  onOpenJustification?: (id: string) => void;
 }
 
 const STATUS_OPTIONS: ReadonlyArray<{
@@ -112,13 +115,22 @@ const STATUS_OPTIONS: ReadonlyArray<{
 export function StatusEditor({
   value,
   lunchValue,
+  justified,
+  hasReason,
   onChange,
   onLunchChange,
+  onOpenReason,
 }: {
   value: string | undefined;
   lunchValue?: string;
+  // When true, render the 📝 reason icon next to the status badge.
+  justified?: boolean;
+  // Whether a justification_reason has already been recorded — used to tint
+  // the icon (filled blue = note present, neutral gray = empty).
+  hasReason?: boolean;
   onChange: (v: string) => void;
   onLunchChange?: (v: string) => void;
+  onOpenReason?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -145,7 +157,12 @@ export function StatusEditor({
     <div
       className="relative"
       ref={ref}
-      style={{ justifySelf: "start", display: "inline-block" }}
+      style={{
+        justifySelf: "start",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}
     >
       <button
         onClick={() => setOpen((o) => !o)}
@@ -188,6 +205,33 @@ export function StatusEditor({
           </span>
         )}
       </button>
+      {justified && onOpenReason && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenReason();
+          }}
+          title={hasReason ? "Edit justification reason" : "Add justification reason"}
+          className="cursor-pointer"
+          style={{
+            width: 22,
+            height: 22,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 11,
+            background: hasReason
+              ? "color-mix(in srgb, var(--ll-accent) 18%, transparent)"
+              : "transparent",
+            color: hasReason ? "var(--ll-ink)" : "var(--ll-muted)",
+            border: `1px ${hasReason ? "solid" : "dashed"} var(--ll-divider)`,
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >
+          📝
+        </button>
+      )}
       {open && (
         <div
           className="absolute z-30"
@@ -732,6 +776,7 @@ export function AttenderD(props: AttenderDProps) {
     onCommentUpdate,
     onTimeEdit,
     onReset,
+    onOpenJustification,
   } = props;
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -1528,9 +1573,16 @@ export function AttenderD(props: AttenderDProps) {
                         <StatusEditor
                           value={s.status}
                           lunchValue={s.lunch_status}
+                          justified={Boolean(s.justified)}
+                          hasReason={Boolean(s.justification_reason)}
                           onChange={(v) => onStatusChange(s.id, v, "status")}
                           onLunchChange={(v) =>
                             onStatusChange(s.id, v, "lunch_status")
+                          }
+                          onOpenReason={
+                            onOpenJustification
+                              ? () => onOpenJustification(s.id)
+                              : undefined
                           }
                         />
                         <div

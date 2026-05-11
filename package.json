@@ -17,5 +17,8 @@
   "engines": {
     "node": ">=20",
     "pnpm": ">=10"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   }
 }

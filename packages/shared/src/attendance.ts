@@ -1,6 +1,54 @@
 import { TIME_THRESHOLDS } from "@learnlife/pb-client";
-import type { AttendanceRecord, LunchEvent, AttendanceStatus } from "@learnlife/pb-client";
+import type {
+  ArrivalStatus,
+  AttendanceRecord,
+  AttendanceStatus,
+  Learner,
+  LunchEvent,
+} from "@learnlife/pb-client";
 import { parsePBDate, todayDateStr } from "./date-utils";
+
+/**
+ * MUST STAY IN SYNC WITH packages/pb-client/src/queries/attendance.ts:deriveStatus
+ *
+ * Map the split (arrival, justified) representation back to the legacy
+ * combined `status` enum that older queries and reports still read. There is
+ * no "jPresent" concept — being on time is never justified — so present
+ * always maps to "present" regardless of the justified flag.
+ *
+ * A copy lives in @learnlife/pb-client because that package can't depend on
+ * @learnlife/shared at runtime without creating a circular workspace dep
+ * (shared imports TIME_THRESHOLDS from pb-client). When you change one,
+ * change the other and re-run the test suite in both packages.
+ */
+export function deriveStatus(
+  arrival: ArrivalStatus | null,
+  justified: boolean,
+): AttendanceStatus | null {
+  if (arrival === null) return null;
+  if (arrival === "present") return "present";
+  if (!justified) return arrival;
+  return arrival === "late" ? "jLate" : "jAbsent";
+}
+
+/**
+ * Inverse of deriveStatus: decode the legacy enum back into the split fields.
+ * Used by the backfill migration and by aggregation code that needs to
+ * fall back to the legacy `status` column when arrival has not been
+ * populated yet.
+ */
+export function splitStatus(
+  status: AttendanceStatus | null,
+): { arrival: ArrivalStatus | null; justified: boolean } {
+  switch (status) {
+    case "present": return { arrival: "present", justified: false };
+    case "late": return { arrival: "late", justified: false };
+    case "absent": return { arrival: "absent", justified: false };
+    case "jLate": return { arrival: "late", justified: true };
+    case "jAbsent": return { arrival: "absent", justified: true };
+    default: return { arrival: null, justified: false };
+  }
+}
 
 /**
  * Snapshot of a learner's attendance record passed into the state machine.
@@ -29,7 +77,18 @@ export interface AttendanceState {
  *  - no_action        All expected events have already been recorded
  */
 export type CheckInAction =
-  | { type: "check_in"; fields: { time_in: string; status: AttendanceStatus } }
+  | {
+      type: "check_in";
+      // `arrival` is the source of truth; `status` is written alongside it
+      // so legacy consumers keep working. A learner who was auto-marked
+      // absent at noon and then scans in will have arrival flipped back to
+      // present/late here — they showed up, so absent no longer holds.
+      fields: {
+        time_in: string;
+        arrival: ArrivalStatus;
+        status: AttendanceStatus;
+      };
+    }
   | { type: "lunch_event"; fields: { lunch_events: string; lunch_status?: AttendanceStatus } }
   | { type: "late_lunch_return"; fields: { lunch_events: string; lunch_status: "late" } }
   | {
@@ -79,12 +138,19 @@ export function computeCheckInAction(
       0,
       0,
     );
-    const status: AttendanceStatus =
+    const arrival: ArrivalStatus =
       now.getTime() >= lateTime.getTime() ? "late" : "present";
+
+    // Preserve any prior justification: if a guide had marked the learner
+    // absent-but-justified before they actually showed up, we still want
+    // their late arrival to inherit the excused flag.
+    const wasJustified =
+      state.status === "jLate" || state.status === "jAbsent";
+    const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
 
     return {
       type: "check_in",
-      fields: { time_in: now.toISOString(), status },
+      fields: { time_in: now.toISOString(), arrival, status },
     };
   }
 
@@ -184,6 +250,65 @@ export function computeCheckInAction(
 
   // ── Fallback: nothing left to record ─────────────────────────────────────
   return { type: "no_action", reason: "All check-ins complete for today" };
+}
+
+// ── Auto-absent sweep ────────────────────────────────────────────────────────
+
+/**
+ * Determine which learners should be auto-marked absent for the day.
+ *
+ * Inputs:
+ *   - `records`     all attendance records for today (one or zero per learner)
+ *   - `learners`    every learner the dashboard cares about
+ *   - `now`         current time (test-mode injectable)
+ *
+ * Rules:
+ *   1. Do nothing before the ABSENT cutoff (noon by default).
+ *   2. Skip weekends (no school).
+ *   3. A learner is a candidate iff they have no `time_in` for today AND no
+ *      `arrival` has been recorded yet. The `arrival` check makes the sweep
+ *      idempotent — re-running it never overwrites a guide's manual call,
+ *      and it never re-marks someone who is already absent.
+ *   4. Fallback for records created before the migration: if `arrival` is
+ *      null but the legacy `status` is set, treat that as "guide already
+ *      handled this" and skip.
+ *
+ * Returns the learner IDs that should be flipped to arrival="absent". Caller
+ * is responsible for actually writing the attendance updates.
+ */
+export function findLearnersToMarkAbsent(
+  records: AttendanceRecord[],
+  learners: Pick<Learner, "id">[],
+  now: Date,
+): string[] {
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const past =
+    hour > TIME_THRESHOLDS.ABSENT_HOUR ||
+    (hour === TIME_THRESHOLDS.ABSENT_HOUR && minute >= TIME_THRESHOLDS.ABSENT_MINUTE);
+  if (!past) return [];
+
+  // Sun=0, Sat=6 — skip both. Schools that hold weekend sessions would need
+  // a calendar/exception system; out of scope here.
+  const day = now.getDay();
+  if (day === 0 || day === 6) return [];
+
+  // Index records by learner for O(1) lookup.
+  const byLearner = new Map<string, AttendanceRecord>();
+  for (const r of records) byLearner.set(r.learner, r);
+
+  const out: string[] = [];
+  for (const learner of learners) {
+    const rec = byLearner.get(learner.id);
+    if (rec) {
+      // Skip if any state is already recorded for the day — never overwrite.
+      if (rec.time_in) continue;
+      if (rec.arrival !== null && rec.arrival !== undefined) continue;
+      if (rec.status) continue; // legacy fallback
+    }
+    out.push(learner.id);
+  }
+  return out;
 }
 
 // ── Summary / aggregation helpers ────────────────────────────────────────────
@@ -294,12 +419,22 @@ export function summarizeAttendance(
   const today = options.today ?? todayDateStr();
 
   for (const r of records) {
-    switch (r.status) {
-      case "present": present++; break;
-      case "late": late++; break;
-      case "absent": absent++; break;
-      case "jLate": jLate++; break;
-      case "jAbsent": jAbsent++; break;
+    // Prefer the split (arrival + justified) representation when present;
+    // fall back to the legacy status enum so records that haven't been
+    // touched since the migration are still counted correctly.
+    const arrival = r.arrival ?? null;
+    if (arrival !== null) {
+      if (arrival === "present") present++;
+      else if (arrival === "late") (r.justified ? jLate++ : late++);
+      else if (arrival === "absent") (r.justified ? jAbsent++ : absent++);
+    } else {
+      switch (r.status) {
+        case "present": present++; break;
+        case "late": late++; break;
+        case "absent": absent++; break;
+        case "jLate": jLate++; break;
+        case "jAbsent": jAbsent++; break;
+      }
     }
     const inMin = minutesOfDay(r.time_in);
     if (inMin !== null) { checkInSum += inMin; checkInCount++; }

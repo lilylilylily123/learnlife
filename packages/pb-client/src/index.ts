@@ -3,8 +3,19 @@ export { createPBClient } from "./client";
 export type { PBClientOptions } from "./client";
 
 // Constants
-export { PB_URL, PROGRAM_CODES, ALLOWED_STATUSES, TIME_THRESHOLDS } from "./constants";
-export type { ProgramCode, ProgramName, AttendanceStatus } from "./constants";
+export {
+  PB_URL,
+  PROGRAM_CODES,
+  ALLOWED_STATUSES,
+  ALLOWED_ARRIVALS,
+  TIME_THRESHOLDS,
+} from "./constants";
+export type {
+  ProgramCode,
+  ProgramName,
+  AttendanceStatus,
+  ArrivalStatus,
+} from "./constants";
 
 // Types
 export type {

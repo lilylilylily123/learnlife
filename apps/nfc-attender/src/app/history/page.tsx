@@ -3,7 +3,12 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
-import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
+import type {
+  ArrivalStatus,
+  AttendanceRecord,
+  Learner,
+} from "@learnlife/pb-client";
+import { deriveStatus, splitStatus, summarizeAttendance } from "@learnlife/shared";
 import {
   HEADING,
   KICKER,
@@ -92,7 +97,9 @@ export default function HistoryPage() {
     time_out: "",
     lunch_out: "",
     lunch_in: "",
-    status: "",
+    arrival: "" as ArrivalStatus | "",
+    justified: false,
+    justification_reason: "",
     lunch_status: "",
   });
 
@@ -215,13 +222,19 @@ export default function HistoryPage() {
 
   const startEditing = (row: RosterRow) => {
     setEditingRow(row);
+    // Prefer the split fields; fall back to decoding the legacy enum for
+    // records that haven't been touched since the migration.
+    const rec = row.record;
+    const fallback = splitStatus(rec?.status ?? null);
     setEditForm({
-      time_in: formatTimeForInput(row.record?.time_in),
-      time_out: formatTimeForInput(row.record?.time_out),
-      lunch_out: formatTimeForInput(getLunchOut(row.record)),
-      lunch_in: formatTimeForInput(getLunchIn(row.record)),
-      status: row.record?.status || "",
-      lunch_status: row.record?.lunch_status || "",
+      time_in: formatTimeForInput(rec?.time_in),
+      time_out: formatTimeForInput(rec?.time_out),
+      lunch_out: formatTimeForInput(getLunchOut(rec)),
+      lunch_in: formatTimeForInput(getLunchIn(rec)),
+      arrival: (rec?.arrival ?? fallback.arrival ?? "") as ArrivalStatus | "",
+      justified: Boolean(rec?.justified ?? fallback.justified),
+      justification_reason: rec?.justification_reason ?? "",
+      lunch_status: rec?.lunch_status || "",
     });
   };
 
@@ -232,7 +245,9 @@ export default function HistoryPage() {
       time_out: "",
       lunch_out: "",
       lunch_in: "",
-      status: "",
+      arrival: "",
+      justified: false,
+      justification_reason: "",
       lunch_status: "",
     });
   };
@@ -241,7 +256,7 @@ export default function HistoryPage() {
     if (!editingRow) return;
     try {
       const dateBase = selectedDate;
-      const fields: Record<string, string> = {};
+      const fields: Record<string, unknown> = {};
 
       const timeFields = ["time_in", "time_out"] as const;
       for (const field of timeFields) {
@@ -252,6 +267,22 @@ export default function HistoryPage() {
           dt.setHours(hours, minutes, 0, 0);
           fields[field] = dt.toISOString();
         }
+      }
+
+      // The edit modal collapses lunch_events into a single out/in pair. If a
+      // record had more than one lunch trip, saving here would discard the
+      // extras — startEditing already only loads first-out / last-in so the
+      // UI doesn't show the collapse. We warn the user before clobbering.
+      const existingLunchEvents = editingRow.record?.lunch_events ?? [];
+      if (
+        existingLunchEvents.length > 2 &&
+        (editForm.lunch_out || editForm.lunch_in)
+      ) {
+        const ok = confirm(
+          `This learner had ${existingLunchEvents.length} lunch events recorded. ` +
+            `Saving here will overwrite them with just one out + one in pair. Continue?`,
+        );
+        if (!ok) return;
       }
 
       const lunchEvents: Array<{ type: "out" | "in"; time: string }> = [];
@@ -271,7 +302,26 @@ export default function HistoryPage() {
         fields.lunch_events = JSON.stringify(lunchEvents);
       }
 
-      if (editForm.status) fields.status = editForm.status;
+      // Split-status fields. Status is derived so the legacy enum stays in
+      // sync. justified is only meaningful when arrival is late or absent.
+      const arrival = (editForm.arrival || null) as ArrivalStatus | null;
+      const justified =
+        editForm.justified && (arrival === "late" || arrival === "absent");
+      fields.arrival = arrival;
+      fields.justified = justified;
+      fields.status = deriveStatus(arrival, justified);
+
+      // Audit trail: capture justified_by/at on the flip-to-true.
+      const wasJustified =
+        editingRow.record?.justified ??
+        splitStatus(editingRow.record?.status ?? null).justified;
+      if (justified && !wasJustified) {
+        fields.justified_by = pb.authStore.record?.id || null;
+        fields.justified_at = new Date().toISOString();
+      }
+      // Always write whatever's in the reason box (allows clearing to "").
+      fields.justification_reason = editForm.justification_reason || null;
+
       if (editForm.lunch_status) fields.lunch_status = editForm.lunch_status;
 
       // batchUpdateAttendance upserts — creates a record for absent learners.
@@ -302,27 +352,28 @@ export default function HistoryPage() {
   };
 
   // ── Counts (now over the full roster) ─────────────────────────────────
+  // Delegates to summarizeAttendance() so the count logic stays in one place
+  // and benefits from the same arrival+justified-with-status-fallback that
+  // the reports page uses. Records with no row are counted as `missing` here
+  // (the shared helper has no concept of roster-vs-records).
   const counts = useMemo(() => {
     const total = filteredRows.length;
-    let present = 0,
-      late = 0,
-      absent = 0,
-      jLate = 0,
-      jAbsent = 0,
-      missing = 0;
+    const presentRecords: AttendanceRecord[] = [];
+    let missing = 0;
     for (const { record } of filteredRows) {
-      if (!record) {
-        missing += 1;
-        continue;
-      }
-      const s = record.status;
-      if (s === "present") present += 1;
-      else if (s === "late") late += 1;
-      else if (s === "absent") absent += 1;
-      else if (s === "jLate") jLate += 1;
-      else if (s === "jAbsent") jAbsent += 1;
+      if (!record) missing += 1;
+      else presentRecords.push(record);
     }
-    return { total, present, late, absent, jLate, jAbsent, missing };
+    const s = summarizeAttendance(presentRecords);
+    return {
+      total,
+      present: s.present,
+      late: s.late,
+      absent: s.absent,
+      jLate: s.jLate,
+      jAbsent: s.jAbsent,
+      missing,
+    };
   }, [filteredRows]);
 
   const dateLabel = new Date(selectedDate + "T00:00:00").toLocaleDateString(
@@ -622,11 +673,17 @@ export default function HistoryPage() {
                   className="w-full"
                 />
               </Field>
-              <Field label="Status">
+              <Field label="Arrival">
                 <InkSelect
-                  value={editForm.status}
+                  value={editForm.arrival}
                   onChange={(e) =>
-                    setEditForm({ ...editForm, status: e.target.value })
+                    setEditForm({
+                      ...editForm,
+                      arrival: e.target.value as ArrivalStatus | "",
+                      // present can never be "justified"
+                      justified:
+                        e.target.value === "present" ? false : editForm.justified,
+                    })
                   }
                   className="w-full"
                 >
@@ -634,8 +691,6 @@ export default function HistoryPage() {
                   <option value="present">Present</option>
                   <option value="late">Late</option>
                   <option value="absent">Absent</option>
-                  <option value="jLate">Justified late</option>
-                  <option value="jAbsent">Justified absent</option>
                 </InkSelect>
               </Field>
               <Field label="Lunch out">
@@ -685,6 +740,90 @@ export default function HistoryPage() {
                 />
               </Field>
             </div>
+
+            {/* Justification: meaningful only when arrival is late or absent.
+                Captures excused / reason / audit. */}
+            {(editForm.arrival === "late" || editForm.arrival === "absent") && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  background: "color-mix(in srgb, var(--ll-accent) 8%, transparent)",
+                  border: "1px solid var(--ll-divider)",
+                }}
+              >
+                <label
+                  className="flex items-center cursor-pointer"
+                  style={{ gap: 8 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={editForm.justified}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, justified: e.target.checked })
+                    }
+                    style={{ width: 16, height: 16, cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>
+                    Justified ({editForm.arrival === "late" ? "excused late" : "excused absence"})
+                  </span>
+                </label>
+                <textarea
+                  value={editForm.justification_reason}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      justification_reason: e.target.value,
+                    })
+                  }
+                  placeholder="Reason (optional) — e.g. doctor appointment"
+                  rows={2}
+                  disabled={!editForm.justified}
+                  style={{
+                    marginTop: 8,
+                    width: "100%",
+                    padding: "6px 10px",
+                    fontSize: 13,
+                    fontFamily: "var(--font-body)",
+                    border: "1px solid var(--ll-divider)",
+                    background: "var(--ll-surface)",
+                    opacity: editForm.justified ? 1 : 0.5,
+                    resize: "vertical",
+                  }}
+                />
+                {editingRow.record?.justified_at && (
+                  <div style={{ ...KICKER, marginTop: 6, fontSize: 10 }}>
+                    Last justified{" "}
+                    {new Date(editingRow.record.justified_at).toLocaleString([], {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Warning when the edit modal would collapse multi-trip lunch
+                events into a single out/in pair (review #9). */}
+            {editingRow.record &&
+              (editingRow.record.lunch_events?.length ?? 0) > 2 && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "8px 10px",
+                    background: "color-mix(in srgb, var(--ll-warm) 14%, transparent)",
+                    border: "1px solid var(--ll-warm)",
+                    fontSize: 12,
+                    color: "var(--ll-warm-ink)",
+                  }}
+                >
+                  ⚠️ This learner had{" "}
+                  {Math.ceil((editingRow.record.lunch_events?.length ?? 0) / 2)} lunch
+                  trip(s). Saving here will collapse them into one out/in pair.
+                </div>
+              )}
 
             <div className="flex justify-end mt-6" style={{ gap: 6 }}>
               <Pill size="sm" onClick={cancelEditing}>

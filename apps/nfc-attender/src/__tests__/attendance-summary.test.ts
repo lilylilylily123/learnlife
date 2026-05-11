@@ -23,6 +23,11 @@ function makeRecord(overrides: Partial<AttendanceRecord>): AttendanceRecord {
     lunch_events: null,
     status: null,
     lunch_status: null,
+    arrival: null,
+    justified: false,
+    justification_reason: null,
+    justified_by: null,
+    justified_at: null,
     collectionId: "attendance",
     collectionName: "attendance",
     created: "2026-04-20 00:00:00.000Z",
@@ -57,6 +62,37 @@ describe("summarizeAttendance", () => {
     expect(s.late).toBe(1);
     expect(s.absent).toBe(1);
     expect(s.attendancePct).toBe(75); // (2 + 1) / 4
+  });
+
+  it("sources counts from arrival + justified when present", () => {
+    // Two on-time, one late-unjustified, one absent-justified, one late-justified.
+    const recs = [
+      makeRecord({ arrival: "present", justified: false }),
+      makeRecord({ arrival: "present", justified: false }),
+      makeRecord({ arrival: "late", justified: false }),
+      makeRecord({ arrival: "absent", justified: true }),
+      makeRecord({ arrival: "late", justified: true }),
+    ];
+    const s = summarizeAttendance(recs);
+    expect(s.present).toBe(2);
+    expect(s.late).toBe(1);
+    expect(s.jLate).toBe(1);
+    expect(s.jAbsent).toBe(1);
+    expect(s.absent).toBe(0);
+    // attendancePct = (present + late + jLate) / (daysTracked - jAbsent)
+    //               = 4 / 4 = 100 — jAbsent is excused, not held against.
+    expect(s.attendancePct).toBe(100);
+  });
+
+  it("falls back to legacy status when arrival has not been migrated yet", () => {
+    // Pre-migration record: arrival is null, only status is set.
+    const recs = [
+      makeRecord({ arrival: null, status: "jLate" }),
+      makeRecord({ arrival: null, status: "absent" }),
+    ];
+    const s = summarizeAttendance(recs);
+    expect(s.jLate).toBe(1);
+    expect(s.absent).toBe(1);
   });
 
   it("averages check-in and check-out times across records with data", () => {
