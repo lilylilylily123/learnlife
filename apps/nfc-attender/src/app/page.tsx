@@ -18,6 +18,28 @@ import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
 import type { Student } from "./types";
 
+// Diff two attendance row snapshots and return the ActionType that occurred,
+// or null if no meaningful change. Mirrors the state-machine action keys used
+// by ActivityFeed's ACTION_CONFIG (check_in, check_out, lunch_event,
+// late_lunch_return).
+function inferAttendanceAction(
+  prev: any,
+  next: any,
+): "check_in" | "check_out" | "lunch_event" | "late_lunch_return" | null {
+  if (!prev?.time_in && next?.time_in) return "check_in";
+  if (!prev?.time_out && next?.time_out) return "check_out";
+  const prevEvents: any[] = Array.isArray(prev?.lunch_events) ? prev.lunch_events : [];
+  const nextEvents: any[] = Array.isArray(next?.lunch_events) ? next.lunch_events : [];
+  if (nextEvents.length > prevEvents.length) {
+    const last = nextEvents[nextEvents.length - 1];
+    if (last?.type === "in" && next.lunch_status === "late") {
+      return "late_lunch_return";
+    }
+    return "lunch_event";
+  }
+  return null;
+}
+
 export default function AttendancePage() {
   // Auth / app state
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -145,28 +167,17 @@ export default function AttendancePage() {
     }
   }, [isLoading, learner, fetchAttendance, isLoggedIn]);
 
-  // Push NFC scan results into the activity feed
-  useEffect(() => {
-    if (lastAction && lastAction.type !== "no_action") {
-      setActivityEvents((prev) => [
-        ...prev.slice(-49),
-        {
-          id: `${Date.now()}-${lastAction.learnerName}`,
-          learnerName: lastAction.learnerName,
-          program: lastAction.program,
-          actionType: lastAction.type,
-          timestamp: new Date(),
-          status: lastAction.status,
-        },
-      ]);
-    }
-  }, [lastAction]);
-
-  // Keep refs to the latest fetch functions for stable PocketBase subscriptions
+  // Keep refs to the latest fetch functions + state snapshots so the
+  // PocketBase realtime subscription can diff against current state without
+  // resubscribing on every render.
   const fetchLearnersRef = useRef(fetchLearners);
   const fetchAttendanceRef = useRef(fetchAttendance);
+  const attendanceMapRef = useRef(attendanceMap);
+  const studentsRef = useRef(students);
   useEffect(() => { fetchLearnersRef.current = fetchLearners; }, [fetchLearners]);
   useEffect(() => { fetchAttendanceRef.current = fetchAttendance; }, [fetchAttendance]);
+  useEffect(() => { attendanceMapRef.current = attendanceMap; }, [attendanceMap]);
+  useEffect(() => { studentsRef.current = students; }, [students]);
 
   // Subscribe to real-time PocketBase changes once per login session
   useEffect(() => {
@@ -185,9 +196,36 @@ export default function AttendancePage() {
         });
       const unsubAttendance = await pb
         .collection("attendance")
-        .subscribe("*", () => {
+        .subscribe("*", (e) => {
           if (attendanceTimer) clearTimeout(attendanceTimer);
           attendanceTimer = setTimeout(() => fetchAttendanceRef.current(), 1000);
+
+          // Synthesise a Live Activity entry for every scan that lands in PB,
+          // regardless of which device wrote it. Local USB-reader scans flow
+          // through here too (with a small RTT), so this is the single source
+          // of truth for the feed; the desktop kiosk no longer needs the
+          // lastAction-based path it used to use.
+          if (e.action !== "create" && e.action !== "update") return;
+          const rec = e.record as any;
+          const learnerId = rec?.learner;
+          if (!learnerId) return;
+          const prev = attendanceMapRef.current[learnerId] ?? {};
+          const actionType = inferAttendanceAction(prev, rec);
+          if (!actionType) return;
+          const student = studentsRef.current.find((s) => s.id === learnerId);
+          const name = (student as any)?.name ?? learnerId;
+          const program = ((student as any)?.program as string) ?? "";
+          setActivityEvents((arr) => [
+            ...arr.slice(-49),
+            {
+              id: `${rec.id}-${actionType}-${Date.now()}`,
+              learnerName: name,
+              program,
+              actionType,
+              timestamp: new Date(),
+              status: rec.status ?? undefined,
+            },
+          ]);
         });
 
       if (cancelled) {
