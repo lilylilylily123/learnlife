@@ -66,6 +66,7 @@ interface LearnerListViewProps {
     field: "time_in" | "time_out",
     timeStr: string,
   ) => Promise<void>;
+  onOpenJustification: (id: string) => void;
 }
 
 export function LearnerListView({
@@ -75,6 +76,7 @@ export function LearnerListView({
   onCheckAction,
   onCommentUpdate,
   onTimeEdit,
+  onOpenJustification,
 }: LearnerListViewProps) {
   // Local editing state — only relevant to this view
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -131,7 +133,7 @@ export function LearnerListView({
             </div>
 
             {/* Morning Status */}
-            <div className="flex gap-1">
+            <div className="flex items-center gap-1">
               {(
                 [
                   { key: "present", label: "P", activeClass: "bg-green-200 text-green-900", hoverClass: "hover:bg-green-50" },
@@ -154,6 +156,20 @@ export function LearnerListView({
                   {label}
                 </button>
               ))}
+              {/* Reason note icon — only relevant once the day is justified. */}
+              {s.justified && (
+                <button
+                  onClick={() => onOpenJustification(s.id)}
+                  title={s.justification_reason ? `Reason: ${s.justification_reason}` : "Add reason"}
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] cursor-pointer transition ${
+                    s.justification_reason
+                      ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                      : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  }`}
+                >
+                  📝
+                </button>
+              )}
             </div>
 
             {/* Check-in */}

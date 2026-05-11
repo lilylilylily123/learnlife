@@ -12,6 +12,7 @@ interface LearnerCardProps {
   onCheckAction: (id: string, action: string) => void;
   onCommentUpdate?: (id: string, comment: string) => Promise<void>; // callback to update comments
   onReset?: (id: string) => void; // optional reset handler for test mode
+  onOpenJustification?: (id: string) => void; // opens the reason modal
   testTime?: Date | null; // optional override time for testing
   testMode?: boolean; // whether test mode is enabled
 }
@@ -103,6 +104,7 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
   onCheckAction,
   onCommentUpdate,
   onReset,
+  onOpenJustification,
   testTime,
   testMode,
 }) => {
@@ -167,7 +169,7 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
       {/* Status */}
       <div className="w-full flex flex-col items-center mt-2">
         <div className="text-xs text-gray-900 font-medium">Status</div>
-        <div className="mt-2">
+        <div className="mt-2 flex items-center gap-1">
           <div className="inline-flex rounded-full bg-gray-100 p-0.5 transition-all duration-200 items-center">
             <button
               onClick={() => onStatusChange(s.id, "present")}
@@ -200,6 +202,21 @@ export const LearnerCard: React.FC<LearnerCardProps> = ({
               JA
             </button>
           </div>
+          {/* Reason note icon — shown once the day is marked justified.
+              Tinted differently when a reason is already on file vs. empty. */}
+          {s.justified && onOpenJustification && (
+            <button
+              onClick={() => onOpenJustification(s.id)}
+              title={s.justification_reason ? `Reason: ${s.justification_reason}` : "Add reason"}
+              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs cursor-pointer transition ${
+                s.justification_reason
+                  ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              }`}
+            >
+              📝
+            </button>
+          )}
         </div>
       </div>
 

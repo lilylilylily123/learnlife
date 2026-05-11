@@ -1,5 +1,19 @@
 import type PocketBase from "pocketbase";
 import type { AttendanceRecord } from "../types";
+import type { ArrivalStatus, AttendanceStatus } from "../constants";
+
+// Re-derive the legacy combined status enum from the split (arrival, justified)
+// representation. Duplicated from @learnlife/shared so this package stays free
+// of cross-package runtime dependencies; both implementations must agree.
+function deriveStatus(
+  arrival: ArrivalStatus | null,
+  justified: boolean,
+): AttendanceStatus | null {
+  if (arrival === null) return null;
+  if (arrival === "present") return "present";
+  if (!justified) return arrival;
+  return arrival === "late" ? "jLate" : "jAbsent";
+}
 
 /** Parameters accepted by listAttendance. All are optional — defaults to today's records. */
 export interface ListAttendanceParams {
@@ -127,7 +141,13 @@ export async function getAttendance(
  */
 export async function batchUpdateAttendance(
   pb: PocketBase,
-  params: { learnerId: string; date?: string; fields?: Record<string, string> },
+  params: {
+    learnerId: string;
+    date?: string;
+    // Widened from Record<string,string> to support booleans / nulls for the
+    // split arrival + justified model. PB accepts any JSON value here.
+    fields?: Record<string, unknown>;
+  },
 ): Promise<{ attendance: AttendanceRecord; existing: AttendanceRecord; created: boolean }> {
   const { learnerId, fields } = params;
   const date = params.date || todayStr();
@@ -151,11 +171,87 @@ export async function batchUpdateAttendance(
   const existing = { ...attendance };
 
   if (fields && Object.keys(fields).length > 0) {
-    const updated = await pb.collection("attendance").update(attendance.id, fields);
+    const patch = withDerivedStatus(existing, fields);
+    const updated = await pb.collection("attendance").update(attendance.id, patch);
     attendance = updated as unknown as AttendanceRecord;
   }
 
   return { attendance, existing, created };
+}
+
+/**
+ * If the caller is updating `arrival` or `justified` without also explicitly
+ * setting `status`, derive `status` from the resulting pair and include it in
+ * the patch. This keeps the legacy enum in sync so older queries and reports
+ * keep returning correct results during the migration window.
+ */
+function withDerivedStatus(
+  existing: AttendanceRecord,
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  const touchesArrival = "arrival" in fields;
+  const touchesJustified = "justified" in fields;
+  if (!touchesArrival && !touchesJustified) return fields;
+  if ("status" in fields) return fields;
+
+  // Coerce the raw fields value into the canonical (ArrivalStatus | null)
+  // shape. The Record<string, unknown> input means we can't trust the type;
+  // both "" and null are accepted as "clear" sentinels.
+  const rawArrival = touchesArrival ? fields.arrival : existing.arrival;
+  const nextArrival: ArrivalStatus | null =
+    rawArrival === "present" || rawArrival === "late" || rawArrival === "absent"
+      ? rawArrival
+      : null;
+  const nextJustified = touchesJustified
+    ? Boolean(fields.justified)
+    : Boolean(existing.justified);
+  return {
+    ...fields,
+    status: deriveStatus(nextArrival, nextJustified),
+  };
+}
+
+/**
+ * Apply or revoke a justification on an existing attendance record.
+ *
+ *  - Flipping justified=true:  records justified_by + justified_at and stores
+ *                              the optional reason; status is re-derived from
+ *                              arrival + justified.
+ *  - Flipping justified=false: clears the active justified flag but leaves
+ *                              `justified_by` / `justified_at` in place as a
+ *                              historical breadcrumb of who applied it last.
+ *                              The reason is left intact for the same reason —
+ *                              callers can clear it explicitly via `reason: ""`.
+ */
+export async function justifyAttendance(
+  pb: PocketBase,
+  args: {
+    attendanceId: string;
+    justified: boolean;
+    reason?: string | null;
+    userId: string;
+  },
+): Promise<AttendanceRecord> {
+  const { attendanceId, justified, reason, userId } = args;
+
+  const current = (await pb.collection("attendance").getOne(attendanceId)) as unknown as AttendanceRecord;
+
+  const patch: Record<string, unknown> = { justified };
+
+  if (justified) {
+    patch.justified_by = userId;
+    patch.justified_at = new Date().toISOString();
+  }
+
+  if (reason !== undefined) {
+    patch.justification_reason = reason ?? null;
+  }
+
+  // Keep the legacy `status` enum aligned with the new (arrival, justified) pair.
+  patch.status = deriveStatus(current.arrival ?? null, justified);
+
+  const updated = await pb.collection("attendance").update(attendanceId, patch);
+  return updated as unknown as AttendanceRecord;
 }
 
 /**
@@ -181,6 +277,11 @@ export async function resetAttendance(
       lunch_events: null,
       status: null,
       lunch_status: null,
+      arrival: null,
+      justified: false,
+      justification_reason: null,
+      // Intentionally NOT clearing justified_by / justified_at — they live on
+      // as a breadcrumb so a later audit can still see who handled the day.
     }, { expand: "learner" });
 
     return { status: "reset", attendance: updated as unknown as AttendanceRecord };

@@ -28,6 +28,7 @@ interface LearnerGridProps {
   onCheckAction: (id: string, action: string) => void;
   onCommentUpdate: (id: string, comment: string) => Promise<void>;
   onReset: (id: string) => void;
+  onOpenJustification: (id: string) => void;
 }
 
 export function LearnerGrid({
@@ -39,6 +40,7 @@ export function LearnerGrid({
   onCheckAction,
   onCommentUpdate,
   onReset,
+  onOpenJustification,
 }: LearnerGridProps) {
   return (
     <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
@@ -55,6 +57,7 @@ export function LearnerGrid({
           }
           onCommentUpdate={onCommentUpdate}
           onReset={onReset}
+          onOpenJustification={onOpenJustification}
           testTime={testMode ? testTime : undefined}
           testMode={testMode}
         />

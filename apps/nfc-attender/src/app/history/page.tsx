@@ -3,7 +3,8 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import * as pbClient from "@/lib/pb-client";
 import { pb } from "@/app/pb";
-import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
+import type { ArrivalStatus, AttendanceRecord, Learner } from "@learnlife/pb-client";
+import { deriveStatus, splitStatus } from "@learnlife/shared";
 
 const STATUS_CLASSES: Record<string, string> = {
   present: "bg-green-100 text-green-800",
@@ -36,7 +37,9 @@ export default function HistoryPage() {
     time_out: "",
     lunch_out: "",
     lunch_in: "",
-    status: "",
+    arrival: "" as ArrivalStatus | "",
+    justified: false,
+    justification_reason: "",
     lunch_status: "",
   });
 
@@ -128,12 +131,17 @@ export default function HistoryPage() {
 
   const startEditing = (record: AttendanceRecord) => {
     setEditingRecord(record);
+    // Prefer the split fields; fall back to decoding the legacy enum for
+    // records that haven't been touched since the migration.
+    const fallback = splitStatus(record.status);
     setEditForm({
       time_in: formatTimeForInput(record.time_in),
       time_out: formatTimeForInput(record.time_out),
       lunch_out: formatTimeForInput(getLunchOut(record)),
       lunch_in: formatTimeForInput(getLunchIn(record)),
-      status: record.status || "",
+      arrival: (record.arrival ?? fallback.arrival ?? "") as ArrivalStatus | "",
+      justified: record.justified ?? fallback.justified,
+      justification_reason: record.justification_reason ?? "",
       lunch_status: record.lunch_status || "",
     });
   };
@@ -145,7 +153,9 @@ export default function HistoryPage() {
       time_out: "",
       lunch_out: "",
       lunch_in: "",
-      status: "",
+      arrival: "",
+      justified: false,
+      justification_reason: "",
       lunch_status: "",
     });
   };
@@ -155,7 +165,7 @@ export default function HistoryPage() {
 
     try {
       const dateBase = selectedDate;
-      const updates: Array<{ field: string; value?: string; timestamp?: string }> = [];
+      const fields: Record<string, unknown> = {};
 
       const timeFields = ["time_in", "time_out"] as const;
       for (const field of timeFields) {
@@ -164,7 +174,7 @@ export default function HistoryPage() {
           const [hours, minutes] = timeVal.split(":").map(Number);
           const dt = new Date(dateBase);
           dt.setHours(hours, minutes, 0, 0);
-          updates.push({ field, timestamp: dt.toISOString() });
+          fields[field] = dt.toISOString();
         }
       }
 
@@ -182,16 +192,30 @@ export default function HistoryPage() {
         lunchEvents.push({ type: "in", time: dt.toISOString() });
       }
       if (lunchEvents.length > 0) {
-        updates.push({ field: "lunch_events", value: JSON.stringify(lunchEvents) });
+        fields.lunch_events = JSON.stringify(lunchEvents);
       }
 
-      if (editForm.status) updates.push({ field: "status", value: editForm.status });
-      if (editForm.lunch_status) updates.push({ field: "lunch_status", value: editForm.lunch_status });
+      // Split-status fields. Status is derived so the legacy enum stays in
+      // sync. If arrival is cleared (""), we explicitly write null instead of
+      // an empty string so PB stores it correctly.
+      const arrival = (editForm.arrival || null) as ArrivalStatus | null;
+      const justified = editForm.justified && arrival !== "present" && arrival !== null;
+      fields.arrival = arrival;
+      fields.justified = justified;
+      fields.status = deriveStatus(arrival, justified);
 
-      const fields: Record<string, string> = {};
-      for (const update of updates) {
-        fields[update.field] = update.timestamp || update.value || "";
+      // Track who applied the justification if it's a fresh flip-to-true.
+      const wasJustified = editingRecord.justified ?? splitStatus(editingRecord.status).justified;
+      if (justified && !wasJustified) {
+        fields.justified_by = pb.authStore.model?.id || null;
+        fields.justified_at = new Date().toISOString();
       }
+
+      // Reason — write whatever is in the form (allows clearing to "").
+      fields.justification_reason = editForm.justification_reason || null;
+
+      if (editForm.lunch_status) fields.lunch_status = editForm.lunch_status;
+
       await pbClient.batchUpdateAttendance({
         learnerId: editingRecord.learner,
         date: selectedDate,
@@ -417,21 +441,65 @@ export default function HistoryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Arrival</label>
                     <select
-                      value={editForm.status}
-                      onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                      value={editForm.arrival}
+                      onChange={(e) =>
+                        setEditForm({
+                          ...editForm,
+                          arrival: e.target.value as ArrivalStatus | "",
+                          // present can never be "justified"
+                          justified: e.target.value === "present" ? false : editForm.justified,
+                        })
+                      }
                       className="w-full px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-sm"
                     >
                       <option value="">— None —</option>
                       <option value="present">Present</option>
                       <option value="late">Late</option>
                       <option value="absent">Absent</option>
-                      <option value="jLate">Justified Late</option>
-                      <option value="jAbsent">Justified Absent</option>
                     </select>
                   </div>
                 </div>
+
+                {/* Justification: meaningful only when arrival is late or absent. */}
+                {(editForm.arrival === "late" || editForm.arrival === "absent") && (
+                  <div className="bg-blue-50 rounded-xl p-3 space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={editForm.justified}
+                        onChange={(e) =>
+                          setEditForm({ ...editForm, justified: e.target.checked })
+                        }
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                      Justified ({editForm.arrival === "late" ? "excused late" : "excused absence"})
+                    </label>
+                    <textarea
+                      value={editForm.justification_reason}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, justification_reason: e.target.value })
+                      }
+                      placeholder="Reason (optional) — e.g. doctor appointment"
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl resize-none"
+                      disabled={!editForm.justified}
+                    />
+                    {editingRecord.justified_at && (
+                      <div className="text-xs text-gray-500">
+                        Last justified{" "}
+                        {new Date(editingRecord.justified_at).toLocaleString([], {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        {editingRecord.justified_by ? ` by ${editingRecord.justified_by}` : ""}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>

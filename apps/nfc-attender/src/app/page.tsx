@@ -13,19 +13,26 @@ import { TestModePanel } from "./components/TestModePanel";
 import { AttendanceFilterPills } from "./components/AttendanceFilterPills";
 import { LearnerGrid } from "./components/LearnerGrid";
 import { LearnerListView } from "./components/LearnerListView";
+import { JustificationModal } from "./components/JustificationModal";
 import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
 import type { Student } from "./types";
+import {
+  deriveStatus,
+  findLearnersToMarkAbsent,
+} from "@learnlife/shared";
+import type { ArrivalStatus, AttendanceStatus } from "@learnlife/pb-client";
 
 // Diff two attendance row snapshots and return the ActionType that occurred,
 // or null if no meaningful change. Mirrors the state-machine action keys used
 // by ActivityFeed's ACTION_CONFIG (check_in, check_out, lunch_event,
-// late_lunch_return).
+// late_lunch_return). Also catches the sweep's auto_absent transition where
+// arrival flips to "absent" without any time_in being written.
 function inferAttendanceAction(
   prev: any,
   next: any,
-): "check_in" | "check_out" | "lunch_event" | "late_lunch_return" | null {
+): "check_in" | "check_out" | "lunch_event" | "late_lunch_return" | "auto_absent" | null {
   if (!prev?.time_in && next?.time_in) return "check_in";
   if (!prev?.time_out && next?.time_out) return "check_out";
   const prevEvents: any[] = Array.isArray(prev?.lunch_events) ? prev.lunch_events : [];
@@ -37,8 +44,27 @@ function inferAttendanceAction(
     }
     return "lunch_event";
   }
+  // Auto-absent sweep: arrival flips to "absent" with no time_in. Distinct
+  // from a guide clicking A manually so the activity feed can label it.
+  if (
+    prev?.arrival !== "absent" &&
+    next?.arrival === "absent" &&
+    !next?.time_in
+  ) {
+    return "auto_absent";
+  }
   return null;
 }
+
+// Map a status button label (the legacy 5-enum) to the canonical split-field
+// representation. Clicking P/L/A/JL/JA writes the corresponding pair below.
+const STATUS_BUTTON_MAP: Record<AttendanceStatus, { arrival: ArrivalStatus; justified: boolean }> = {
+  present: { arrival: "present", justified: false },
+  late: { arrival: "late", justified: false },
+  absent: { arrival: "absent", justified: false },
+  jLate: { arrival: "late", justified: true },
+  jAbsent: { arrival: "absent", justified: true },
+};
 
 export default function AttendancePage() {
   // Auth / app state
@@ -76,6 +102,10 @@ export default function AttendancePage() {
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
 
+  // Justification modal — opens when a guide clicks the "add note" icon next
+  // to a justified status. Stores the learner whose reason we're editing.
+  const [justifyingLearnerId, setJustifyingLearnerId] = useState<string | null>(null);
+
   // Update auth state after mount to avoid hydration mismatch
   useEffect(() => {
     setIsLoggedIn(pb.authStore.isValid);
@@ -99,6 +129,11 @@ export default function AttendancePage() {
         lunch_events: attendance.lunch_events || null,
         status: attendance.status || null,
         lunch_status: attendance.lunch_status || null,
+        arrival: attendance.arrival ?? null,
+        justified: Boolean(attendance.justified),
+        justification_reason: attendance.justification_reason ?? null,
+        justified_by: attendance.justified_by ?? null,
+        justified_at: attendance.justified_at ?? null,
         attendanceId: attendance.id || null,
       } as Student & { attendanceId: string | null };
     });
@@ -251,6 +286,66 @@ export default function AttendancePage() {
     };
   }, [isLoggedIn]);
 
+  // ── Auto-absent sweep ────────────────────────────────────────────────────
+  // Server-side PB cron is unreliable in this hosting setup, so the dashboard
+  // itself runs the sweep on a 1-minute timer while open. The sweep is
+  // idempotent (findLearnersToMarkAbsent skips anyone who already has a
+  // recorded state) and gated to once-per-day via lastSweptDateRef. Front-desk
+  // dashboards are open all school day, so this fires reliably in practice.
+  const lastSweptDateRef = useRef<string | null>(null);
+
+  const runAbsentSweep = useCallback(async () => {
+    // Only sweep when we're looking at *today* — historical view modes must
+    // never trigger a write against the real-time dashboard's date.
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (viewDate !== todayStr) return;
+    if (lastSweptDateRef.current === todayStr) return;
+
+    const now = testMode && testTime ? testTime : new Date();
+    const records = Object.values(attendanceMapRef.current) as any[];
+    const learners = studentsRef.current.map((s) => ({ id: s.id }));
+
+    const toMark = findLearnersToMarkAbsent(records, learners, now);
+    if (toMark.length === 0) {
+      // Pre-noon or weekend: don't claim the day as swept; try again later.
+      const hour = now.getHours();
+      const past = hour >= 12;
+      if (past && now.getDay() !== 0 && now.getDay() !== 6) {
+        lastSweptDateRef.current = todayStr;
+      }
+      return;
+    }
+
+    console.log(`[auto-absent] marking ${toMark.length} learner(s) absent for ${todayStr}`);
+    for (const learnerId of toMark) {
+      try {
+        await pbClient.batchUpdateAttendance({
+          learnerId,
+          date: todayStr,
+          fields: {
+            arrival: "absent",
+            justified: false,
+            status: "absent",
+          },
+        });
+      } catch (err) {
+        console.error(`[auto-absent] failed for ${learnerId}:`, err);
+      }
+    }
+    lastSweptDateRef.current = todayStr;
+    // Realtime subscription will pick up the writes and refresh the UI.
+  }, [viewDate, testMode, testTime]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    // Fire once on mount (so a dashboard opened after noon catches up
+    // immediately) and then every minute.
+    const tick = () => { runAbsentSweep().catch(() => {}); };
+    tick();
+    const interval = setInterval(tick, 60_000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn, runAbsentSweep]);
+
   // Update attendance field via PocketBase
   const updateAttendance = useCallback(
     async (
@@ -281,19 +376,79 @@ export default function AttendancePage() {
       field: "status" | "lunch_status" = "status",
       toggle: boolean = true,
     ) => {
-      const previousValue = attendanceMap[id]?.[field];
-      const newValue = toggle && previousValue === status ? "" : status;
+      // Lunch status stays on the legacy single-enum model — only morning
+      // status gets the split arrival/justified treatment.
+      if (field === "lunch_status") {
+        const prevLunch = attendanceMap[id]?.lunch_status;
+        const newLunch = toggle && prevLunch === status ? "" : status;
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], lunch_status: newLunch || null },
+        }));
+        try {
+          await pbClient.batchUpdateAttendance({
+            learnerId: id,
+            date: viewDate,
+            fields: { lunch_status: newLunch },
+          });
+        } catch (err) {
+          console.error("Failed to save lunch status", err);
+          setAttendanceMap((prev) => ({
+            ...prev,
+            [id]: { ...prev[id], lunch_status: prevLunch },
+          }));
+        }
+        return;
+      }
 
+      const target = STATUS_BUTTON_MAP[status as AttendanceStatus];
+      if (!target) {
+        console.warn(`handleSetStatus: unknown status "${status}"`);
+        return;
+      }
+
+      const prevRecord = attendanceMap[id] || {};
+      const prevArrival = (prevRecord.arrival ?? null) as ArrivalStatus | null;
+      const prevJustified = Boolean(prevRecord.justified);
+      const prevStatus = prevRecord.status || null;
+
+      // Toggle: clicking the button that exactly matches the current state
+      // clears the day. Anything else applies the button's target pair.
+      const matches = prevArrival === target.arrival && prevJustified === target.justified;
+      const next = toggle && matches
+        ? { arrival: null as ArrivalStatus | null, justified: false }
+        : target;
+
+      const nextStatus = deriveStatus(next.arrival, next.justified);
+
+      // Optimistic UI update.
       setAttendanceMap((prev) => ({
         ...prev,
-        [id]: { ...prev[id], [field]: newValue || null },
+        [id]: {
+          ...prev[id],
+          arrival: next.arrival,
+          justified: next.justified,
+          status: nextStatus,
+        },
       }));
+
+      // Only set justified_by / justified_at when we're flipping it on.
+      const userId = pb.authStore.model?.id;
+      const patch: Record<string, unknown> = {
+        arrival: next.arrival,
+        justified: next.justified,
+        status: nextStatus,
+      };
+      if (next.justified && !prevJustified) {
+        patch.justified_by = userId || null;
+        patch.justified_at = new Date().toISOString();
+      }
 
       try {
         await pbClient.batchUpdateAttendance({
           learnerId: id,
           date: viewDate,
-          fields: { [field]: newValue },
+          fields: patch,
         });
       } catch (err: any) {
         if (err?.status === 429) {
@@ -302,7 +457,7 @@ export default function AttendancePage() {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
               date: viewDate,
-              fields: { [field]: newValue },
+              fields: patch,
             });
             return;
           } catch (retryErr) {
@@ -310,9 +465,15 @@ export default function AttendancePage() {
           }
         }
         console.error("Failed to save status", err);
+        // Roll back the optimistic update on failure.
         setAttendanceMap((prev) => ({
           ...prev,
-          [id]: { ...prev[id], [field]: previousValue },
+          [id]: {
+            ...prev[id],
+            arrival: prevArrival,
+            justified: prevJustified,
+            status: prevStatus,
+          },
         }));
       }
     },
@@ -520,6 +681,37 @@ export default function AttendancePage() {
     await createLearner(name, email, program, dob, nfcUid);
   }
 
+  // Persist a justification reason for the currently-modal-edited learner.
+  // Uses the dedicated justifyAttendance helper so justified_by/_at land too.
+  const handleSaveJustificationReason = useCallback(
+    async (reason: string) => {
+      if (!justifyingLearnerId) return;
+      const record = attendanceMap[justifyingLearnerId];
+      if (!record?.id) {
+        console.warn("No attendance record to attach reason to");
+        return;
+      }
+      const userId = pb.authStore.model?.id || "";
+      try {
+        const updated = await pbClient.justifyAttendance({
+          attendanceId: record.id,
+          justified: Boolean(record.justified),
+          reason,
+          userId,
+        });
+        setAttendanceMap((prev) => ({
+          ...prev,
+          [justifyingLearnerId]: { ...prev[justifyingLearnerId], ...updated },
+        }));
+      } catch (err) {
+        console.error("Failed to save reason:", err);
+      } finally {
+        setJustifyingLearnerId(null);
+      }
+    },
+    [justifyingLearnerId, attendanceMap],
+  );
+
   if (!isLoggedIn) {
     return <Account />;
   }
@@ -724,6 +916,7 @@ export default function AttendancePage() {
             onCheckAction={handleCheckAction}
             onCommentUpdate={handleCommentUpdate}
             onReset={handleReset}
+            onOpenJustification={(id) => setJustifyingLearnerId(id)}
           />
         ) : (
           <LearnerListView
@@ -733,6 +926,7 @@ export default function AttendancePage() {
             onCheckAction={handleCheckAction}
             onCommentUpdate={handleCommentUpdate}
             onTimeEdit={handleTimeEdit}
+            onOpenJustification={(id) => setJustifyingLearnerId(id)}
           />
         )}
 
@@ -819,6 +1013,22 @@ export default function AttendancePage() {
         onCreate={handleCreateLearner}
         uid={uid}
       />
+
+      {/* Justification reason modal */}
+      {justifyingLearnerId && (() => {
+        const rec = attendanceMap[justifyingLearnerId];
+        const learner = students.find((s) => s.id === justifyingLearnerId);
+        return (
+          <JustificationModal
+            learnerName={(learner as any)?.name || "Learner"}
+            currentReason={rec?.justification_reason || ""}
+            justifiedBy={rec?.justified_by || null}
+            justifiedAt={rec?.justified_at || null}
+            onSave={handleSaveJustificationReason}
+            onClose={() => setJustifyingLearnerId(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

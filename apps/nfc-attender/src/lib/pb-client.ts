@@ -11,6 +11,7 @@ export type {
   LunchEvent,
   AttendanceRecord,
   AttendanceStatus,
+  ArrivalStatus,
 } from "@learnlife/pb-client";
 
 export type LearnersListParams = learnersQ.ListLearnersParams;
@@ -56,13 +57,22 @@ export function getAttendance(learnerId: string, date?: string) {
 export function batchUpdateAttendance(params: {
   learnerId: string;
   date?: string;
-  fields?: Record<string, string>;
+  fields?: Record<string, unknown>;
 }) {
   return attendanceQ.batchUpdateAttendance(pb, params);
 }
 
 export function resetAttendance(learnerId: string, date?: string) {
   return attendanceQ.resetAttendance(pb, learnerId, date);
+}
+
+export function justifyAttendance(args: {
+  attendanceId: string;
+  justified: boolean;
+  reason?: string | null;
+  userId: string;
+}) {
+  return attendanceQ.justifyAttendance(pb, args);
 }
 
 // ── App-specific single-field update ─────────────────────────────────────────

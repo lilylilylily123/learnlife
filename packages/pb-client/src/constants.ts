@@ -12,6 +12,12 @@ export type ProgramName = keyof typeof PROGRAM_CODES;
 export const ALLOWED_STATUSES = ["present", "late", "absent", "jLate", "jAbsent"] as const;
 export type AttendanceStatus = (typeof ALLOWED_STATUSES)[number];
 
+// Arrival is the "fact" half of the split status model: did the learner show
+// up on time, late, or not at all? Justification is tracked separately so the
+// underlying arrival fact survives a guide marking the day excused.
+export const ALLOWED_ARRIVALS = ["present", "late", "absent"] as const;
+export type ArrivalStatus = (typeof ALLOWED_ARRIVALS)[number];
+
 export const TIME_THRESHOLDS = {
   LATE_HOUR: 10,
   LATE_MINUTE: 1,
@@ -23,4 +29,8 @@ export const TIME_THRESHOLDS = {
   CHECKOUT_MINUTE: 59,
   FRIDAY_CHECKOUT_HOUR: 14,
   FRIDAY_CHECKOUT_MINUTE: 0,
+  // Auto-absent cutoff: any active learner without a check-in by this time on a
+  // weekday is flipped to arrival=absent by the dashboard's sweep timer.
+  ABSENT_HOUR: 12,
+  ABSENT_MINUTE: 0,
 } as const;
