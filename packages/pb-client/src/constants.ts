@@ -31,6 +31,6 @@ export const TIME_THRESHOLDS = {
   FRIDAY_CHECKOUT_MINUTE: 0,
   // Auto-absent cutoff: any active learner without a check-in by this time on a
   // weekday is flipped to arrival=absent by the dashboard's sweep timer.
-  ABSENT_HOUR: 12,
-  ABSENT_MINUTE: 0,
+  ABSENT_HOUR: 10,
+  ABSENT_MINUTE: 30,
 } as const;

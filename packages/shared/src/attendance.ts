@@ -81,8 +81,8 @@ export type CheckInAction =
       type: "check_in";
       // `arrival` is the source of truth; `status` is written alongside it
       // so legacy consumers keep working. A learner who was auto-marked
-      // absent at noon and then scans in will have arrival flipped back to
-      // present/late here — they showed up, so absent no longer holds.
+      // absent by the cutoff sweep and then scans in will have arrival flipped
+      // back to present/late here — they showed up, so absent no longer holds.
       fields: {
         time_in: string;
         arrival: ArrivalStatus;
