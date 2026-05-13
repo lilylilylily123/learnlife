@@ -423,6 +423,13 @@ export default function HistoryPage() {
           </Pill>
           <Pill
             size="sm"
+            onClick={() => downloadDailyCsv(learners, records, selectedDate)}
+            title="Export this day as CSV"
+          >
+            ↓ Export CSV
+          </Pill>
+          <Pill
+            size="sm"
             variant="accent"
             onClick={() => router.push("/history/admin")}
           >
@@ -880,6 +887,99 @@ const GROUP_TONE: Record<
     sub: "no check-in",
   },
 };
+
+// ─── CSV export ─────────────────────────────────────────────
+//
+// One row per learner for the selected day. Includes raw timestamps so the
+// CSV is useful for downstream analysis (vs. just the visible summary).
+// Trailing "out" lunch events without a matching "in" mean the learner never
+// returned — we surface that as an explicit "(no return)" so downstream
+// readers can spot it without parsing the JSON column.
+function downloadDailyCsv(
+  learners: Learner[],
+  records: AttendanceRecord[],
+  date: string,
+): void {
+  const byLearner = new Map<string, AttendanceRecord>();
+  for (const r of records) byLearner.set(r.learner, r);
+
+  const header = [
+    "Learner",
+    "Email",
+    "Program",
+    "Status",
+    "Justified",
+    "Check-in",
+    "Check-out",
+    "Lunch events",
+    "Lunch status",
+    "Justification reason",
+    "Justified by",
+    "Justified at",
+  ];
+  const rows: string[] = [header.join(",")];
+  const sorted = [...learners].sort((a, b) =>
+    (a.name || "").localeCompare(b.name || ""),
+  );
+  for (const learner of sorted) {
+    const rec = byLearner.get(learner.id);
+    rows.push(
+      [
+        csvCell(learner.name || ""),
+        csvCell(learner.email || ""),
+        csvCell(learner.program ? PROGRAM_LABEL[learner.program] ?? learner.program : ""),
+        csvCell(rec?.status || ""),
+        rec?.justified ? "yes" : "",
+        csvCell(formatIsoTime(rec?.time_in)),
+        csvCell(formatIsoTime(rec?.time_out)),
+        csvCell(formatLunchEvents(rec)),
+        csvCell(rec?.lunch_status || ""),
+        csvCell(rec?.justification_reason || ""),
+        csvCell(rec?.justified_by || ""),
+        csvCell(rec?.justified_at || ""),
+      ].join(","),
+    );
+  }
+  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `attendance-${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(val: string): string {
+  if (/[",\n]/.test(val)) return `"${val.replace(/"/g, '""')}"`;
+  return val;
+}
+
+function formatIsoTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso.replace(" ", "T"));
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatLunchEvents(rec: AttendanceRecord | undefined): string {
+  if (!rec) return "";
+  const events = Array.isArray(rec.lunch_events) ? rec.lunch_events : [];
+  if (events.length === 0) {
+    // Fall back to legacy single-pair fields.
+    const out = formatIsoTime(rec.lunch_out);
+    const back = formatIsoTime(rec.lunch_in);
+    if (!out && !back) return "";
+    return `out ${out || "?"} → in ${back || "(no return)"}`;
+  }
+  const parts: string[] = [];
+  for (const ev of events) {
+    parts.push(`${ev.type} ${formatIsoTime(ev.time)}`);
+  }
+  if (events[events.length - 1].type === "out") parts.push("(no return)");
+  return parts.join(" · ");
+}
 
 function StoryView({
   rows,
