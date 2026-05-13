@@ -24,3 +24,28 @@ export function getCurrentUser(pb: PocketBase) {
 export async function requestPasswordReset(pb: PocketBase, email: string) {
   await pb.collection("users").requestPasswordReset(email);
 }
+
+/**
+ * Change the current user's password while they are signed in.
+ *
+ * PocketBase requires `oldPassword` alongside `password`/`passwordConfirm` for
+ * authenticated password changes — without it the update is rejected. On
+ * success PB invalidates other sessions; we re-authenticate so the local
+ * session keeps working.
+ */
+export async function changePassword(
+  pb: PocketBase,
+  args: { oldPassword: string; newPassword: string },
+): Promise<void> {
+  const user = pb.authStore.record;
+  if (!user?.id || !user?.email) {
+    throw new Error("Not signed in.");
+  }
+  await pb.collection("users").update(user.id, {
+    oldPassword: args.oldPassword,
+    password: args.newPassword,
+    passwordConfirm: args.newPassword,
+  });
+  // PB rotates the token; re-auth so subsequent requests succeed.
+  await pb.collection("users").authWithPassword(user.email, args.newPassword);
+}

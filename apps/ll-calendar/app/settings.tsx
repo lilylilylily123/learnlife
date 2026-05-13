@@ -101,6 +101,15 @@ export default function SettingsScreen() {
         <View style={s.group}>
           <Pressable
             style={s.row}
+            onPress={() => router.push("/change-password")}
+          >
+            <MaterialIcons name="lock" size={20} color={Colors.textPrimary} />
+            <Text style={s.rowLabel}>Change password</Text>
+            <MaterialIcons name="chevron-right" size={20} color={Colors.muted} />
+          </Pressable>
+          <View style={s.rowDivider} />
+          <Pressable
+            style={s.row}
             onPress={handlePasswordReset}
             disabled={resetting}
           >
@@ -230,5 +239,10 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: Colors.textPrimary,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: Colors.divider,
+    marginLeft: 48,
   },
 });
