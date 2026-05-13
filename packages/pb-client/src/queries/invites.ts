@@ -70,9 +70,6 @@ export async function listInvites(
  *
  * Returns the invite record if the code is valid, unused, and not expired.
  * Returns null if the invite cannot be found or the filter conditions are not met.
- *
- * The diagnostic fallback query (lines below) logs extra info to help debug
- * expiry/used-flag mismatches during development — remove before production.
  */
 export async function lookupInvite(
   pb: PocketBase,
