@@ -14,6 +14,7 @@ import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
 import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
 import { AttenderD } from "./components/AttenderD";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { JustificationModal } from "./components/JustificationModal";
 import type { Student } from "./types";
 import { deriveStatus, findLearnersToMarkAbsent } from "@learnlife/shared";
@@ -98,6 +99,11 @@ export default function AttendancePage() {
   // Raw data
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
+  // Initial-fetch lifecycle for skeletons + retry banner. `hasLoadedOnce`
+  // flips after the first successful learners+attendance fetch so subsequent
+  // refreshes don't reintroduce the placeholders.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Justification modal — opens when a guide clicks the "add reason" icon next
   // to a justified status. Stores the learner whose reason we're editing.
@@ -155,7 +161,9 @@ export default function AttendancePage() {
     attendanceCounts,
   } = useAttendanceFilters(studentsWithAttendance);
 
-  // Fetch learners
+  // Fetch learners. Errors are captured into `fetchError` so the dashboard
+  // surfaces a retry banner — silently logging would leave the user staring
+  // at a perpetually-empty list.
   const fetchLearners = useCallback(async () => {
     try {
       const result = await pbClient.listLearners({
@@ -167,8 +175,15 @@ export default function AttendancePage() {
       setStudents(result.items as unknown as RecordModel[]);
       setTotalItems(result.totalItems);
       setTotalPages(result.totalPages);
+      return true;
     } catch (error) {
       console.error("Error fetching learners:", error);
+      setFetchError(
+        error instanceof Error
+          ? `Couldn't load learners: ${error.message}`
+          : "Couldn't load learners.",
+      );
+      return false;
     }
   }, [page, perPage, debouncedSearch, programFilter]);
 
@@ -184,17 +199,39 @@ export default function AttendancePage() {
         map[record.learner] = record;
       }
       setAttendanceMap(map);
+      return true;
     } catch (error) {
       console.error("Error fetching attendance:", error);
+      setFetchError(
+        error instanceof Error
+          ? `Couldn't load attendance: ${error.message}`
+          : "Couldn't load attendance.",
+      );
+      return false;
     }
   }, [viewDate]);
 
+  // Wrapper used by the retry banner — clears the error optimistically, runs
+  // both fetches, and only flips `hasLoadedOnce` once both succeed so the
+  // skeleton stays visible during a recovery attempt.
+  const retryFetch = useCallback(async () => {
+    setFetchError(null);
+    const [a, b] = await Promise.all([fetchLearners(), fetchAttendance()]);
+    if (a && b) setHasLoadedOnce(true);
+  }, [fetchLearners, fetchAttendance]);
+
   // Initial data fetch
   useEffect(() => {
-    if (isLoggedIn) {
-      fetchLearners();
-      fetchAttendance();
-    }
+    if (!isLoggedIn) return;
+    let cancelled = false;
+    (async () => {
+      const [a, b] = await Promise.all([fetchLearners(), fetchAttendance()]);
+      if (cancelled) return;
+      if (a && b) setHasLoadedOnce(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [fetchLearners, fetchAttendance, isLoggedIn]);
 
   // Refresh attendance after NFC scan completes
@@ -826,6 +863,7 @@ export default function AttendancePage() {
     <>
       <UpdateNotification />
 
+      <ErrorBoundary label="dashboard">
       <AttenderD
         appVersion={appVersion}
         viewDate={viewDate}
@@ -867,7 +905,11 @@ export default function AttendancePage() {
           setJustifyError(null);
           setJustifyingLearnerId(id);
         }}
+        isInitialLoading={!hasLoadedOnce && !fetchError}
+        fetchError={fetchError}
+        onRetryFetch={retryFetch}
       />
+      </ErrorBoundary>
 
       {testMode && (
         <div

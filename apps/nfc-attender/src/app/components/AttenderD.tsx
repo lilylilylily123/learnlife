@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, RotateCw } from "lucide-react";
 import type { Student, AttendanceFilterKey, AttendanceCounts } from "../types";
 import type { ActivityEvent } from "./ActivityFeed";
 import {
@@ -14,6 +15,7 @@ import {
   LMark,
   type ScanState,
 } from "./ll-ui";
+import { LearnerRowsSkeleton, LearnerWallSkeleton } from "./LoadingSkeleton";
 
 interface AttenderDProps {
   appVersion: string;
@@ -37,6 +39,15 @@ interface AttenderDProps {
   totalPages: number;
   setPage: (n: number) => void;
   setPerPage: (n: number) => void;
+
+  // Initial-fetch flag: true on first data load, swaps the rows for skeletons.
+  // Stays false after the first successful fetch so subsequent refreshes don't
+  // flash the placeholders.
+  isInitialLoading?: boolean;
+  // Surfaced when learner/attendance fetches fail; if set, the dashboard shows
+  // a retry banner. `onRetryFetch` is required when this is non-null.
+  fetchError?: string | null;
+  onRetryFetch?: () => void;
 
   activityEvents: ActivityEvent[];
 
@@ -777,6 +788,9 @@ export function AttenderD(props: AttenderDProps) {
     onTimeEdit,
     onReset,
     onOpenJustification,
+    isInitialLoading,
+    fetchError,
+    onRetryFetch,
   } = props;
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -868,6 +882,9 @@ export function AttenderD(props: AttenderDProps) {
       className="flex flex-col h-screen w-screen overflow-hidden ll-attender"
       style={{ background: "var(--ll-bg)", color: "var(--ll-ink)" }}
     >
+      {fetchError && onRetryFetch && (
+        <FetchErrorBanner message={fetchError} onRetry={onRetryFetch} />
+      )}
       {/* ─── BIG top bar ───────────────────────────────────── */}
       <header
         className="flex items-stretch shrink-0"
@@ -1489,7 +1506,9 @@ export function AttenderD(props: AttenderDProps) {
 
               {/* Rows */}
               <div className="flex-1 overflow-y-auto">
-                {filtered.length === 0 ? (
+                {isInitialLoading ? (
+                  <LearnerRowsSkeleton />
+                ) : filtered.length === 0 ? (
                   <div
                     className="text-center"
                     style={{
@@ -1729,7 +1748,7 @@ export function AttenderD(props: AttenderDProps) {
               </div>
             </>
           ) : viewMode === "wall" ? (
-            <WallView filtered={filtered} uid={uid} />
+            <WallView filtered={filtered} uid={uid} isInitialLoading={isInitialLoading} />
           ) : (
             <ScanView
               latest={recentScans[0] || null}
@@ -1929,15 +1948,72 @@ export function AttenderD(props: AttenderDProps) {
   );
 }
 
+// ─── Fetch error banner ─────────────────────────────────────
+// Pinned to the top of the dashboard when initial fetch fails. Stays visible
+// until a successful retry clears `fetchError` upstream.
+function FetchErrorBanner({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 shrink-0"
+      style={{
+        padding: "10px 28px",
+        background: "var(--ll-warm)",
+        color: "var(--ll-warm-ink)",
+        borderBottom: "1.5px solid var(--ll-ink)",
+        fontSize: 13,
+      }}
+    >
+      <AlertTriangle size={16} />
+      <span style={{ flex: 1, fontWeight: 600 }}>{message}</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex items-center gap-1.5 cursor-pointer"
+        style={{
+          background: "var(--ll-ink)",
+          color: "var(--ll-bg)",
+          padding: "6px 12px",
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 700,
+        }}
+      >
+        <RotateCw size={13} />
+        Retry
+      </button>
+    </div>
+  );
+}
+
 // ─── Wall view ──────────────────────────────────────────────
 
 function WallView({
   filtered,
   uid,
+  isInitialLoading,
 }: {
   filtered: Student[];
   uid: string;
+  isInitialLoading?: boolean;
 }) {
+  if (isInitialLoading) {
+    return (
+      <div
+        style={{
+          padding: "16px 28px",
+        }}
+      >
+        <LearnerWallSkeleton />
+      </div>
+    );
+  }
   return (
     <div
       className="flex-1 overflow-y-auto"

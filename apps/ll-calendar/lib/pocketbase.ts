@@ -91,6 +91,10 @@ export async function requestPasswordReset(email: string) {
   return auth.requestPasswordReset(pb, email);
 }
 
+export async function changePassword(oldPassword: string, newPassword: string) {
+  return auth.changePassword(pb, { oldPassword, newPassword });
+}
+
 // Learners — bound to singleton
 export async function listLearners(params?: { search?: string; program?: string }) {
   return learnersQ.listLearners(pb, params);
