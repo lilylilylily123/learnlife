@@ -37,12 +37,20 @@ export async function fetchMessages(
 }
 
 /**
- * Send a message and update the conversation's last-message metadata in one go.
+ * Send a message and update the conversation's last-message metadata.
  *
- * NOTE: these are two separate PocketBase writes. If the second (conversation
- * update) fails, the message will still exist but the conversation list will
- * show stale preview text. Consider wrapping in a PocketBase transaction or
- * a server-side hook if atomicity becomes important.
+ * These are two separate PocketBase writes — PB doesn't expose transactions
+ * to clients, so we can't make them atomic without a server-side hook. The
+ * message create is the source of truth: as long as it succeeds, the caller
+ * sees a sent message. The conversation update is best-effort denormalisation
+ * for the inbox list, and the inbox already self-heals on next fetch
+ * (`fetchConversations` re-sorts by `last_message_at`, but if the row is
+ * stale the list will lag by one send).
+ *
+ * If the conversation update fails we log a warning rather than throwing —
+ * throwing would surface "send failed" to the user when the message is
+ * actually delivered. Callers that need a stronger guarantee should add a
+ * PB hook on `messages` to mirror these fields server-side.
  */
 export async function sendMessage(
   pb: PocketBase,
@@ -59,11 +67,22 @@ export async function sendMessage(
   });
 
   // Denormalise conversation metadata for efficient list rendering.
-  await pb.collection("conversations").update(conversationId, {
-    last_message: body,
-    last_message_at: new Date().toISOString(),
-    last_sender: senderId,
-  });
+  // Best-effort: if this fails the message still exists; the inbox will
+  // recover next time the conversation gets a successful update.
+  try {
+    await pb.collection("conversations").update(conversationId, {
+      last_message: body,
+      last_message_at: message.created || new Date().toISOString(),
+      last_sender: senderId,
+    });
+  } catch (err) {
+    console.warn(
+      "[messages] conversation metadata update failed; message",
+      message.id,
+      "is sent but inbox preview may be stale:",
+      err,
+    );
+  }
 
   return message;
 }
