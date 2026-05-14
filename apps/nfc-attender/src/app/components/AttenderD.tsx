@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, RotateCw } from "lucide-react";
 import type { Student, AttendanceFilterKey, AttendanceCounts } from "../types";
 import type { ActivityEvent } from "./ActivityFeed";
@@ -11,11 +12,11 @@ import {
   StatusPill,
   StatusBadge,
   Avatar,
-  BigStat,
   LMark,
   type ScanState,
 } from "./ll-ui";
 import { LearnerRowsSkeleton, LearnerWallSkeleton } from "./LoadingSkeleton";
+import { RowOverflowMenu } from "./attender/RowOverflowMenu";
 
 interface AttenderDProps {
   appVersion: string;
@@ -51,7 +52,6 @@ interface AttenderDProps {
 
   activityEvents: ActivityEvent[];
 
-  onShowActivityFeed: () => void;
   onShowAddLearner: () => void;
   onShowHistory: () => void;
   onLogout: () => void;
@@ -198,7 +198,7 @@ export function StatusEditor({
               display: "inline-block",
             }}
           >
-            Set
+            Set status
           </span>
         )}
         {lunchValue && (
@@ -225,22 +225,23 @@ export function StatusEditor({
           title={hasReason ? "Edit justification reason" : "Add justification reason"}
           className="cursor-pointer"
           style={{
-            width: 22,
-            height: 22,
             display: "inline-flex",
             alignItems: "center",
-            justifyContent: "center",
-            fontSize: 11,
+            padding: "3px 7px",
+            fontFamily: "var(--font-mono)",
+            fontSize: 9.5,
+            fontWeight: 700,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
             background: hasReason
               ? "color-mix(in srgb, var(--ll-accent) 18%, transparent)"
               : "transparent",
             color: hasReason ? "var(--ll-ink)" : "var(--ll-muted)",
             border: `1px ${hasReason ? "solid" : "dashed"} var(--ll-divider)`,
-            padding: 0,
-            lineHeight: 1,
+            lineHeight: 1.1,
           }}
         >
-          📝
+          {hasReason ? "Edit reason" : "Add reason"}
         </button>
       )}
       {open && (
@@ -301,7 +302,7 @@ export function StatusEditor({
               }}
               title="Click again to clear (toggle)"
             >
-              Clear morning
+              Clear
             </button>
           )}
           {onLunchChange && (
@@ -348,7 +349,7 @@ export function StatusEditor({
                   }}
                   title="Click again to clear (toggle)"
                 >
-                  Clear lunch
+                  Clear
                 </button>
               )}
             </>
@@ -649,17 +650,6 @@ function formatTimeShort(val?: string | null) {
   });
 }
 
-function getPresenceState(s: Student): ScanState {
-  if (s.time_out) return "out";
-  if (s.time_in) {
-    const events = s.lunch_events || [];
-    if (events.length > 0 && events[events.length - 1].type === "out")
-      return "lunch";
-    return "in";
-  }
-  return "absent";
-}
-
 interface WallTone {
   bg: string;
   fg: string;
@@ -744,15 +734,6 @@ function shortCardNum(id: string) {
   return `#A-${tail || "000"}`;
 }
 
-function formatTimeAgo(d: Date) {
-  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h ago`;
-}
-
 // ─── Main component ────────────────────────────────────────
 
 export function AttenderD(props: AttenderDProps) {
@@ -777,7 +758,6 @@ export function AttenderD(props: AttenderDProps) {
     setPage,
     setPerPage,
     activityEvents,
-    onShowActivityFeed,
     onShowAddLearner,
     onShowHistory,
     onLogout,
@@ -795,7 +775,8 @@ export function AttenderD(props: AttenderDProps) {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<"table" | "wall" | "scan">("table");
+  const [viewMode, setViewMode] = useState<"table" | "wall">("table");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [editingTimeKey, setEditingTimeKey] = useState<string | null>(null);
   const [timeEditValue, setTimeEditValue] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -824,19 +805,10 @@ export function AttenderD(props: AttenderDProps) {
     if (next.size !== selectedIds.size) setSelectedIds(next);
   }, [filtered, selectedIds]);
 
-  const counts = useMemo(
-    () => ({
-      in: attendanceCounts.here,
-      lunch: attendanceCounts.lunch,
-      out: attendanceCounts.out,
-      absent: attendanceCounts.absent + attendanceCounts.away,
-      late: attendanceCounts.late + attendanceCounts.jLate,
-    }),
-    [attendanceCounts],
-  );
-  const total = attendanceCounts.all || filtered.length || 1;
-  const pct = (n: number) => Math.round((n / total) * 100);
-  const checkedIn = attendanceCounts.here + attendanceCounts.late;
+  const totalRoster = attendanceCounts.all || filtered.length || 1;
+  // Hero: everyone physically on site = present + late (excludes those at lunch and checked out).
+  const onSite = attendanceCounts.here + attendanceCounts.late;
+  const checkedIn = onSite;
   const onTimePct =
     checkedIn === 0
       ? 0
@@ -916,56 +888,34 @@ export function AttenderD(props: AttenderDProps) {
           </div>
         </div>
 
-        <div className="flex-1 flex items-center" style={{ gap: 28 }}>
-          <BigStat
-            n={counts.in}
-            label={`IN · ${pct(counts.in)}%`}
-            sub={`of ${total}`}
-            tone="accent"
-          />
-          <BigStat
-            n={counts.lunch}
-            label={`LUNCH · ${pct(counts.lunch)}%`}
-            sub={
-              counts.lunch > 0
-                ? `${counts.lunch} away`
-                : "all back"
-            }
-            tone="lime"
-          />
-          <BigStat
-            n={counts.out}
-            label={`OUT · ${pct(counts.out)}%`}
-            sub="checked out"
-          />
-          <BigStat
-            n={counts.absent}
-            label={`ABSENT · ${pct(counts.absent)}%`}
-            sub={
-              counts.absent > 0
-                ? `${counts.absent} unaccounted`
-                : "everyone here"
-            }
-            tone="warm"
-          />
-          <div
-            className="self-stretch"
-            style={{ width: 1, background: "var(--ll-divider)" }}
-          />
-          <BigStat
-            n={`${onTimePct}%`}
-            label="ON TIME"
-            sub={
-              checkedIn > 0
-                ? `${attendanceCounts.here} of ${checkedIn}`
-                : "—"
-            }
-          />
-          <BigStat
-            n={counts.late}
-            label="LATE"
-            sub={counts.late > 0 ? "after 10:01" : "all on time"}
-          />
+        <div className="flex-1 flex items-center" style={{ gap: 18 }}>
+          <div className="flex items-baseline" style={{ gap: 14 }}>
+            <div
+              style={{
+                ...HEADING,
+                fontSize: 56,
+                lineHeight: 1,
+                color: "var(--ll-accent)",
+              }}
+            >
+              {onSite}
+            </div>
+            <div>
+              <Kicker style={{ fontSize: 11.5 }}>IN · on site</Kicker>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--ll-muted)",
+                  letterSpacing: "0.04em",
+                  marginTop: 4,
+                }}
+              >
+                of {totalRoster}
+                {checkedIn > 0 ? ` · ${onTimePct}% on time` : ""}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
@@ -1198,23 +1148,20 @@ export function AttenderD(props: AttenderDProps) {
           >
             Wall
           </Pill>
-          <Pill
-            active={viewMode === "scan"}
-            onClick={() => setViewMode("scan")}
-          >
-            Scan
-          </Pill>
 
           <div className="flex-1" />
 
           <Kicker>Tools</Kicker>
           <Pill
-            onClick={onShowActivityFeed}
-            active={activityEvents.length > 0}
+            onClick={() => setSidebarOpen((v) => !v)}
+            active={sidebarOpen}
+            title={sidebarOpen ? "Hide live scans" : "Show live scans"}
           >
-            ● Live
-            {activityEvents.length > 0 ? ` · ${activityEvents.length}` : ""}
+            ● Live{activityEvents.length > 0 ? ` · ${activityEvents.length}` : ""}
           </Pill>
+          <Link href="/kiosk" style={{ textDecoration: "none" }}>
+            <Pill>Kiosk →</Pill>
+          </Link>
           <Pill variant="accent" onClick={onShowHistory}>
             History →
           </Pill>
@@ -1226,7 +1173,39 @@ export function AttenderD(props: AttenderDProps) {
 
       {/* ─── Body: split scan stream + main view ───────────── */}
       <div className="flex-1 flex overflow-hidden">
-        {/* LEFT — Live scan stream */}
+        {/* LEFT — Collapsed rail (when closed) */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="cursor-pointer flex flex-col items-center shrink-0"
+            title="Show live scans"
+            aria-label="Show live scans"
+            style={{
+              width: 36,
+              borderRight: "1px solid var(--ll-divider)",
+              background: "var(--ll-surface)",
+              gap: 10,
+              padding: "16px 0",
+            }}
+          >
+            <span
+              style={{
+                ...KICKER,
+                writingMode: "vertical-rl",
+                transform: "rotate(180deg)",
+                color: "var(--ll-muted)",
+                fontSize: 10,
+              }}
+            >
+              Live scans
+              {activityEvents.length > 0 ? ` · ${activityEvents.length}` : ""}
+            </span>
+            <span style={{ color: "var(--ll-muted)", fontSize: 14 }}>›</span>
+          </button>
+        )}
+
+        {/* LEFT — Live scan stream (expanded) */}
+        {sidebarOpen && (
         <aside
           className="flex flex-col overflow-hidden shrink-0"
           style={{
@@ -1243,14 +1222,32 @@ export function AttenderD(props: AttenderDProps) {
             }}
           >
             <Kicker>Live scans</Kicker>
-            <span
-              style={{
-                ...KICKER,
-                color: "var(--ll-muted)",
-              }}
-            >
-              {recentScans.length} today
-            </span>
+            <div className="flex items-center" style={{ gap: 10 }}>
+              <span
+                style={{
+                  ...KICKER,
+                  color: "var(--ll-muted)",
+                }}
+              >
+                {recentScans.length} today
+              </span>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="cursor-pointer"
+                title="Hide live scans"
+                aria-label="Hide live scans"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--ll-muted)",
+                  fontSize: 14,
+                  lineHeight: 1,
+                  padding: 0,
+                }}
+              >
+                ‹
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {recentScans.length === 0 ? (
@@ -1386,6 +1383,7 @@ export function AttenderD(props: AttenderDProps) {
             </button>
           </div>
         </aside>
+        )}
 
         {/* RIGHT — actionable table */}
         <section className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -1418,7 +1416,7 @@ export function AttenderD(props: AttenderDProps) {
                   for (const id of selectedIds) onCheckAction(id, "morning-in");
                 }}
               >
-                ↻ Mark present
+                Check in
               </button>
               <button
                 className="cursor-pointer ll-bulk"
@@ -1426,7 +1424,7 @@ export function AttenderD(props: AttenderDProps) {
                   for (const id of selectedIds) onCheckAction(id, "day-out");
                 }}
               >
-                ⏏ Check out
+                Check out
               </button>
               <button
                 className="cursor-pointer ll-bulk"
@@ -1436,7 +1434,7 @@ export function AttenderD(props: AttenderDProps) {
                 }}
                 title="Mark all selected as Absent"
               >
-                ⊘ Mark absent
+                Mark absent
               </button>
               <button
                 className="cursor-pointer ll-bulk"
@@ -1446,23 +1444,14 @@ export function AttenderD(props: AttenderDProps) {
                 }}
                 title="Mark all selected as Justified absent"
               >
-                ⊘ J·Absent
-              </button>
-              <button
-                className="cursor-pointer ll-bulk"
-                onClick={() => {
-                  for (const id of selectedIds) onReset(id);
-                  setSelectedIds(new Set());
-                }}
-              >
-                ↺ Reset
+                Mark justified absent
               </button>
               <button
                 className="cursor-pointer ll-bulk"
                 style={{ opacity: 0.7 }}
                 onClick={() => setSelectedIds(new Set())}
               >
-                ✕ Clear
+                Deselect all
               </button>
             </div>
           )}
@@ -1474,7 +1463,7 @@ export function AttenderD(props: AttenderDProps) {
                 className="grid items-center shrink-0"
                 style={{
                   gridTemplateColumns:
-                    "32px 44px minmax(0,1.4fr) minmax(0,1fr) 120px 100px 100px 130px",
+                    "32px 44px minmax(0,1.4fr) 180px 120px 56px",
                   padding: "11px 28px",
                   borderBottom: "1px solid var(--ll-divider)",
                   background: "var(--ll-surface)",
@@ -1497,11 +1486,9 @@ export function AttenderD(props: AttenderDProps) {
                 </button>
                 <div></div>
                 <div>Learner ↓</div>
-                <div>Program</div>
                 <div>Status</div>
-                <div>Check-in</div>
-                <div>Last scan</div>
-                <div className="text-right">Actions</div>
+                <div className="text-right">Action</div>
+                <div></div>
               </div>
 
               {/* Rows */}
@@ -1523,16 +1510,35 @@ export function AttenderD(props: AttenderDProps) {
                   </div>
                 ) : (
                   filtered.map((s, i) => {
-                    const state = getPresenceState(s);
                     const selected = selectedIds.has(s.id);
                     const isCurrent = !!uid && s.NFC_ID === uid;
+                    const editingIn = editingTimeKey === `${s.id}:time_in`;
+                    const editingOut = editingTimeKey === `${s.id}:time_out`;
+                    const programLabel =
+                      PROGRAM_LABEL[s.program || ""] || s.program || "—";
+                    const startTimeEdit = (
+                      field: "time_in" | "time_out",
+                    ) => {
+                      setEditingTimeKey(`${s.id}:${field}`);
+                      const val = s[field];
+                      if (val) {
+                        const d = new Date(val);
+                        setTimeEditValue(
+                          `${String(d.getHours()).padStart(2, "0")}:${String(
+                            d.getMinutes(),
+                          ).padStart(2, "0")}`,
+                        );
+                      } else {
+                        setTimeEditValue("");
+                      }
+                    };
                     return (
                       <div
                         key={s.id}
                         className="grid items-center ll-row"
                         style={{
                           gridTemplateColumns:
-                            "32px 44px minmax(0,1.4fr) minmax(0,1fr) 100px 100px 100px 130px",
+                            "32px 44px minmax(0,1.4fr) 180px 120px 56px",
                           padding: "10px 28px",
                           borderBottom: "1px solid var(--ll-divider)",
                           fontSize: 14,
@@ -1569,6 +1575,7 @@ export function AttenderD(props: AttenderDProps) {
                             {s.name}
                           </div>
                           <div
+                            className="truncate"
                             style={{
                               fontFamily: "var(--font-mono)",
                               fontSize: 10.5,
@@ -1577,169 +1584,151 @@ export function AttenderD(props: AttenderDProps) {
                               marginTop: 2,
                             }}
                           >
-                            {shortCardNum(s.id)}
+                            {programLabel} · {shortCardNum(s.id)}
                           </div>
                         </div>
-                        <div
-                          className="truncate pr-3"
-                          style={{
-                            fontSize: 13,
-                            color: "var(--ll-muted)",
-                          }}
-                        >
-                          {PROGRAM_LABEL[s.program || ""] || s.program || "—"}
-                        </div>
-                        <StatusEditor
-                          value={s.status}
-                          lunchValue={s.lunch_status}
-                          justified={Boolean(s.justified)}
-                          hasReason={Boolean(s.justification_reason)}
-                          onChange={(v) => onStatusChange(s.id, v, "status")}
-                          onLunchChange={(v) =>
-                            onStatusChange(s.id, v, "lunch_status")
-                          }
-                          onOpenReason={
-                            onOpenJustification
-                              ? () => onOpenJustification(s.id)
-                              : undefined
-                          }
-                        />
-                        <div
-                          style={{
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 12.5,
-                          }}
-                        >
-                          {editingTimeKey === `${s.id}:time_in` ? (
+                        <div className="flex flex-col" style={{ gap: 3 }}>
+                          <StatusEditor
+                            value={s.status}
+                            lunchValue={s.lunch_status}
+                            justified={Boolean(s.justified)}
+                            hasReason={Boolean(s.justification_reason)}
+                            onChange={(v) => onStatusChange(s.id, v, "status")}
+                            onLunchChange={(v) =>
+                              onStatusChange(s.id, v, "lunch_status")
+                            }
+                            onOpenReason={
+                              onOpenJustification
+                                ? () => onOpenJustification(s.id)
+                                : undefined
+                            }
+                          />
+                          {(s.time_in || s.time_out) && (
+                            <div
+                              style={{
+                                fontFamily: "var(--font-mono)",
+                                fontSize: 10.5,
+                                letterSpacing: "0.04em",
+                                color: "var(--ll-muted)",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              {s.time_in ? `In ${formatTimeShort(s.time_in)}` : ""}
+                              {s.time_in && s.time_out ? " · " : ""}
+                              {s.time_out ? `Out ${formatTimeShort(s.time_out)}` : ""}
+                            </div>
+                          )}
+                          {(editingIn || editingOut) && (
                             <input
                               type="time"
                               value={timeEditValue}
                               onChange={(e) => setTimeEditValue(e.target.value)}
                               onBlur={async () => {
-                                if (timeEditValue)
-                                  await onTimeEdit(
-                                    s.id,
-                                    "time_in",
-                                    timeEditValue,
-                                  );
+                                if (timeEditValue && editingTimeKey) {
+                                  const field = editingTimeKey.endsWith("time_out")
+                                    ? "time_out"
+                                    : "time_in";
+                                  await onTimeEdit(s.id, field, timeEditValue);
+                                }
                                 setEditingTimeKey(null);
                               }}
                               onKeyDown={async (e) => {
-                                if (e.key === "Enter" && timeEditValue) {
-                                  await onTimeEdit(
-                                    s.id,
-                                    "time_in",
-                                    timeEditValue,
-                                  );
+                                if (e.key === "Enter" && timeEditValue && editingTimeKey) {
+                                  const field = editingTimeKey.endsWith("time_out")
+                                    ? "time_out"
+                                    : "time_in";
+                                  await onTimeEdit(s.id, field, timeEditValue);
                                   setEditingTimeKey(null);
                                 }
                                 if (e.key === "Escape") setEditingTimeKey(null);
                               }}
-                              className="w-20 outline-none"
+                              className="w-24 outline-none"
                               style={{
                                 background: "var(--ll-surface)",
                                 border: "1.5px solid var(--ll-ink)",
-                                padding: "1px 4px",
+                                padding: "2px 6px",
                                 fontFamily: "var(--font-mono)",
                                 fontSize: 11,
+                                marginTop: 4,
                               }}
                               autoFocus
                             />
-                          ) : (
-                            <button
-                              className="cursor-pointer ll-time"
-                              onClick={() => {
-                                setEditingTimeKey(`${s.id}:time_in`);
-                                if (s.time_in) {
-                                  const d = new Date(s.time_in);
-                                  setTimeEditValue(
-                                    `${String(d.getHours()).padStart(2, "0")}:${String(
-                                      d.getMinutes(),
-                                    ).padStart(2, "0")}`,
-                                  );
-                                } else {
-                                  setTimeEditValue("");
-                                }
-                              }}
-                              style={{
-                                color: s.time_in
-                                  ? "var(--ll-ink)"
-                                  : "var(--ll-muted)",
-                              }}
-                              title="Click to edit"
-                            >
-                              {formatTimeShort(s.time_in)}
-                            </button>
                           )}
                         </div>
-                        <ScanHistoryCell student={s} />
-                        <div
-                          className="flex justify-end items-center"
-                          style={{ gap: 6, color: "var(--ll-muted)" }}
-                        >
+                        <div className="flex justify-end items-center" style={{ gap: 6 }}>
                           {!s.time_in ? (
                             <button
                               onClick={() => onCheckAction(s.id, "morning-in")}
-                              className="cursor-pointer ll-mini"
+                              className="cursor-pointer"
                               style={{
                                 background: "var(--ll-accent)",
                                 color: "var(--ll-accent-ink)",
                                 border: "1px solid var(--ll-ink-2)",
+                                padding: "6px 12px",
+                                fontFamily: "var(--font-mono)",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                letterSpacing: "0.06em",
+                                textTransform: "uppercase",
+                                lineHeight: 1.1,
                               }}
                               title="Check in now"
                             >
-                              + In
+                              Check in
                             </button>
                           ) : !s.time_out ? (
                             <button
                               onClick={() => onCheckAction(s.id, "day-out")}
-                              className="cursor-pointer ll-mini"
+                              className="cursor-pointer"
                               style={{
                                 background: "transparent",
                                 color: "var(--ll-ink)",
-                                border: "1px solid var(--ll-ink-2)",
+                                border: "1px solid var(--ll-ink)",
+                                padding: "6px 12px",
+                                fontFamily: "var(--font-mono)",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                letterSpacing: "0.06em",
+                                textTransform: "uppercase",
+                                lineHeight: 1.1,
                               }}
-                              title="Check out"
+                              title="Check out now"
                             >
-                              Out
+                              Check out
                             </button>
                           ) : (
                             <span
                               style={{
                                 fontFamily: "var(--font-mono)",
-                                fontSize: 9.5,
+                                fontSize: 10,
                                 color: "var(--ll-muted)",
-                                letterSpacing: "0.06em",
-                                padding: "3px 7px",
+                                letterSpacing: "0.08em",
+                                fontWeight: 700,
+                                textTransform: "uppercase",
+                                padding: "5px 10px",
+                                border: "1px dashed var(--ll-divider)",
                               }}
                             >
-                              done
+                              Done
                             </span>
                           )}
-                          <button
-                            onClick={() => onReset(s.id)}
-                            className="cursor-pointer ll-icon"
-                            title="Reset attendance"
-                            aria-label="Reset"
-                          >
-                            ↻
-                          </button>
-                          <button
-                            onClick={() => {
+                        </div>
+                        <div className="flex justify-end">
+                          <RowOverflowMenu
+                            student={s}
+                            onEditTimeIn={() => startTimeEdit("time_in")}
+                            onEditTimeOut={() => startTimeEdit("time_out")}
+                            onEditNote={() => {
                               setEditingCommentId(s.id);
                               setCommentValue(s.comments || "");
                             }}
-                            className="cursor-pointer ll-icon"
-                            title={s.comments || "Add comment"}
-                            aria-label="Comment"
-                            style={{
-                              color: s.comments
-                                ? "var(--ll-accent)"
-                                : "var(--ll-muted)",
-                            }}
-                          >
-                            {s.comments ? "✎" : "+"}
-                          </button>
+                            onEditReason={
+                              onOpenJustification && s.justified
+                                ? () => onOpenJustification(s.id)
+                                : undefined
+                            }
+                            onReset={() => onReset(s.id)}
+                          />
                         </div>
                       </div>
                     );
@@ -1747,14 +1736,8 @@ export function AttenderD(props: AttenderDProps) {
                 )}
               </div>
             </>
-          ) : viewMode === "wall" ? (
-            <WallView filtered={filtered} uid={uid} isInitialLoading={isInitialLoading} />
           ) : (
-            <ScanView
-              latest={recentScans[0] || null}
-              uid={uid}
-              exists={exists}
-            />
+            <WallView filtered={filtered} uid={uid} isInitialLoading={isInitialLoading} />
           )}
 
           {/* Pagination footer */}
@@ -2082,108 +2065,3 @@ function WallView({
   );
 }
 
-// ─── Scan view ──────────────────────────────────────────────
-
-function ScanView({
-  latest,
-  uid,
-  exists,
-}: {
-  latest: ActivityEvent | null;
-  uid: string;
-  exists: boolean;
-}) {
-  return (
-    <div
-      className="flex-1 flex flex-col items-center justify-center text-center"
-      style={{
-        background: "var(--ll-bg)",
-        gap: 18,
-        padding: "40px 32px",
-      }}
-    >
-      {latest ? (
-        <>
-          <Kicker>
-            ✓ {latest.actionType === "morning-in" ? "Checked in" : latest.actionType.replaceAll("-", " ")}
-            {" · "}
-            {formatTimeAgo(latest.timestamp)}
-          </Kicker>
-          <Avatar name={latest.learnerName} size={132} />
-          <div>
-            <div
-              style={{
-                ...HEADING,
-                fontSize: 44,
-                lineHeight: 1.05,
-                letterSpacing: "-0.025em",
-              }}
-            >
-              {latest.learnerName}
-            </div>
-            <div
-              className="mt-2"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 13,
-                color: "var(--ll-muted)",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-              }}
-            >
-              {PROGRAM_LABEL[latest.program] || latest.program || "—"}
-            </div>
-          </div>
-          <StatusPill
-            state={
-              latest.actionType === "day-out"
-                ? "out"
-                : latest.actionType === "lunch-out"
-                  ? "lunch"
-                  : "in"
-            }
-          />
-        </>
-      ) : (
-        <>
-          <Kicker>Waiting for scan</Kicker>
-          <div
-            style={{
-              width: 132,
-              height: 132,
-              borderRadius: 999,
-              border: `2px dashed ${uid && !exists ? "var(--ll-warm)" : "var(--ll-divider)"}`,
-              animation: "ll-pulse 2s ease-in-out infinite",
-            }}
-          />
-          <div
-            style={{
-              ...HEADING,
-              fontWeight: 500,
-              fontSize: 30,
-              color: "var(--ll-muted)",
-            }}
-          >
-            {uid
-              ? exists
-                ? "Resolving learner…"
-                : "Card not registered"
-              : "Tap a card to begin"}
-          </div>
-          {uid && (
-            <div
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 11,
-                color: "var(--ll-muted)",
-                letterSpacing: "0.04em",
-              }}
-            >
-              {uid}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}

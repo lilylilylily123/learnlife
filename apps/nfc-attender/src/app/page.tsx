@@ -7,17 +7,19 @@ import { createLearner } from "./utils/utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { useNfcLearner } from "./hooks/useNfcLearner";
 import { useAttendanceFilters } from "./hooks/useAttendanceFilters";
+import { useIsPrivileged } from "./hooks/useIsPrivileged";
+import { useAutoAbsentSweep } from "./hooks/useAutoAbsentSweep";
 import Account from "./components/Account";
 import CreateLearnerModal from "./components/CreateLearnerModal";
 import { TestModePanel } from "./components/TestModePanel";
 import * as pbClient from "@/lib/pb-client";
 import { UpdateNotification } from "./components/UpdateNotification";
-import { ActivityFeed, type ActivityEvent } from "./components/ActivityFeed";
+import type { ActivityEvent } from "./components/ActivityFeed";
 import { AttenderD } from "./components/AttenderD";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { JustificationModal } from "./components/JustificationModal";
 import type { Student } from "./types";
-import { deriveStatus, findLearnersToMarkAbsent } from "@learnlife/shared";
+import { deriveStatus } from "@learnlife/shared";
 import {
   TIME_THRESHOLDS,
   type ArrivalStatus,
@@ -67,7 +69,7 @@ const STATUS_BUTTON_MAP: Record<AttendanceStatus, { arrival: ArrivalStatus; just
 
 export default function AttendancePage() {
   // Auth / app state
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const isLoggedIn = useIsPrivileged();
   const [showModal, setShowModal] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
   const router = useRouter();
@@ -86,8 +88,7 @@ export default function AttendancePage() {
   const { uid, learner, exists, isLoading, simulateScan } =
     useNfcLearner(nfcOptions);
 
-  // Activity feed
-  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  // Activity feed (rendered inline by AttenderD's collapsible sidebar)
   const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
 
   // Pagination
@@ -112,17 +113,8 @@ export default function AttendancePage() {
   // close the modal and lose the user's input (review #2).
   const [justifyError, setJustifyError] = useState<string | null>(null);
 
-  // Update auth state after mount to avoid hydration mismatch.
-  // Treat learner-role accounts as logged out — nfc-attender is a guide tool.
   useEffect(() => {
-    const isPrivileged = () => {
-      const role = (pb.authStore.record as { role?: string } | null)?.role;
-      return pb.authStore.isValid && (role === "admin" || role === "lg");
-    };
-    setIsLoggedIn(isPrivileged());
-    const unsubscribe = pb.authStore.onChange(() => setIsLoggedIn(isPrivileged()));
     getVersion().then(setAppVersion).catch(() => {});
-    return () => unsubscribe();
   }, []);
 
   // Filters hook (needs studentsWithAttendance; we use a two-pass pattern below)
@@ -340,84 +332,7 @@ export default function AttendancePage() {
     };
   }, [isLoggedIn]);
 
-  // ── Auto-absent sweep ────────────────────────────────────────────────────
-  // Server-side PB cron isn't available in this hosting setup, so the dashboard
-  // itself runs the sweep on a 1-minute timer while open. The sweep is
-  // idempotent (findLearnersToMarkAbsent skips anyone who already has a
-  // recorded state) and gated to once-per-day via lastSweptDateRef — but only
-  // after every write succeeded. A partial failure leaves the ref unchanged
-  // so the next tick retries the laggards (review #6).
-  const lastSweptDateRef = useRef<string | null>(null);
-
-  const runAbsentSweep = useCallback(async () => {
-    // Only sweep when we're looking at *today* — historical view modes must
-    // never trigger a write against the real-time dashboard's date.
-    const todayStr = new Date().toISOString().split("T")[0];
-    if (viewDate !== todayStr) return;
-    if (lastSweptDateRef.current === todayStr) return;
-
-    const now = testMode && testTime ? testTime : new Date();
-    const records = Object.values(attendanceMapRef.current) as any[];
-    const learners = studentsRef.current.map((s) => ({ id: s.id }));
-
-    const toMark = findLearnersToMarkAbsent(records, learners, now);
-
-    // Compute "past the cutoff" using the threshold constants (review #5).
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const pastCutoff =
-      hour > TIME_THRESHOLDS.ABSENT_HOUR ||
-      (hour === TIME_THRESHOLDS.ABSENT_HOUR && minute >= TIME_THRESHOLDS.ABSENT_MINUTE);
-    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
-
-    if (toMark.length === 0) {
-      // Nothing to do; only "close the day" when we're past the cutoff on a
-      // weekday — otherwise leave the ref unchanged so the next tick retries.
-      if (pastCutoff && !isWeekend) {
-        lastSweptDateRef.current = todayStr;
-      }
-      return;
-    }
-
-    console.log(`[auto-absent] marking ${toMark.length} learner(s) absent for ${todayStr}`);
-    let okCount = 0;
-    const failedIds: string[] = [];
-    for (const learnerId of toMark) {
-      try {
-        await pbClient.batchUpdateAttendance({
-          learnerId,
-          date: todayStr,
-          fields: {
-            arrival: "absent",
-            justified: false,
-            status: "absent",
-          },
-        });
-        okCount++;
-      } catch (err) {
-        failedIds.push(learnerId);
-        console.error(`[auto-absent] failed for ${learnerId}:`, err);
-      }
-    }
-    console.log(`[auto-absent] ${okCount}/${toMark.length} succeeded`);
-    // Only close the day when every learner was written successfully — a
-    // partial failure means the next tick should retry the laggards.
-    if (failedIds.length === 0) {
-      lastSweptDateRef.current = todayStr;
-    } else {
-      console.warn(`[auto-absent] will retry next tick for: ${failedIds.join(", ")}`);
-    }
-  }, [viewDate, testMode, testTime]);
-
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    // Fire once on mount (so a dashboard opened after noon catches up
-    // immediately) and then every minute.
-    const tick = () => { runAbsentSweep().catch(() => {}); };
-    tick();
-    const interval = setInterval(tick, 60_000);
-    return () => clearInterval(interval);
-  }, [isLoggedIn, runAbsentSweep]);
+  useAutoAbsentSweep({ enabled: isLoggedIn, viewDate, testMode, testTime });
 
   // Update attendance field via PocketBase
   const updateAttendance = useCallback(
@@ -885,7 +800,6 @@ export default function AttendancePage() {
         setPage={setPage}
         setPerPage={setPerPage}
         activityEvents={activityEvents}
-        onShowActivityFeed={() => setShowActivityFeed((v) => !v)}
         onShowAddLearner={() => setShowModal(true)}
         onShowHistory={() => router.push("/history")}
         onLogout={() => pb.authStore.clear()}
@@ -927,13 +841,6 @@ export default function AttendancePage() {
             simulateScan={simulateScan}
           />
         </div>
-      )}
-
-      {showActivityFeed && (
-        <ActivityFeed
-          events={activityEvents}
-          onClose={() => setShowActivityFeed(false)}
-        />
       )}
 
       <CreateLearnerModal

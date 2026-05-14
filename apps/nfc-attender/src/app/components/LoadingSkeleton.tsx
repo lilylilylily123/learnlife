@@ -18,7 +18,7 @@ export function LearnerRowsSkeleton({ count = 6 }: { count?: number }) {
           className="grid items-center"
           style={{
             gridTemplateColumns:
-              "32px 44px minmax(0,1.4fr) minmax(0,1fr) 100px 100px 100px 130px",
+              "32px 44px minmax(0,1.4fr) 180px 120px 56px",
             padding: "10px 28px",
             borderBottom: "1px solid var(--ll-divider)",
             opacity: 0.7,
@@ -27,12 +27,12 @@ export function LearnerRowsSkeleton({ count = 6 }: { count?: number }) {
           <SkeletonBlock width={16} height={16} radius={4} />
           <SkeletonBlock width={32} height={32} radius={999} />
           <SkeletonBlock height={14} />
-          <SkeletonBlock height={12} widthPct="60%" />
-          <SkeletonBlock height={12} widthPct="50%" />
-          <SkeletonBlock height={12} widthPct="50%" />
-          <SkeletonBlock height={12} widthPct="40%" />
+          <SkeletonBlock height={14} widthPct="60%" />
           <div className="flex justify-end">
-            <SkeletonBlock width={90} height={26} radius={8} />
+            <SkeletonBlock width={92} height={26} radius={4} />
+          </div>
+          <div className="flex justify-end">
+            <SkeletonBlock width={20} height={20} radius={4} />
           </div>
         </div>
       ))}

@@ -38,6 +38,10 @@ export function getLearnerByNfc(nfcId: string) {
   return learnersQ.getLearnerByNfc(pb, nfcId);
 }
 
+export function getLearnerById(id: string) {
+  return learnersQ.getLearnerById(pb, id);
+}
+
 export function updateLearnerComment(learnerId: string, comment: string) {
   return learnersQ.updateLearnerComment(pb, learnerId, comment);
 }
