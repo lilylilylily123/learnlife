@@ -1,0 +1,71 @@
+LearnLife NFC Attender — Perfboard Layout (70x90mm, 0.1" pitch)
+================================================================
+
+Top-down view, looking at the component side. The board sits horizontally
+in the bottom tray with its long axis (90mm) aligned LEFT-RIGHT in the
+case. Front of the board faces the user.
+
+Origin (0,0) = front-left corner of perfboard. "FRONT" faces the user.
+Dimensions: 90mm along X (left-right), 70mm along Y (front-back).
+
+           +X (right) ─────────────────────────────────────────────────►
+                                                                    90mm
+   +Y      ┌─────────────────────────────────────────────────────────┐
+   (back)  │ ●  M2.5                                          M2.5  ●│
+   ▲       │                                                         │
+   │       │  ┌──────────────┐                  ┌──────────────────┐ │
+   │       │  │ OLED  socket │                  │  PN532 socket    │ │
+   │       │  │ (4-pin)      │                  │  (4-pin header)  │ │
+   │       │  │ I2C 0x3C     │                  │  I2C 0x24        │ │
+   │       │  │              │                  │  ~43x41mm        │ │
+   │       │  │ visible      │                  │  ↑ antenna       │ │
+   │       │  │ window       │                  │     centered     │ │
+   │       │  │ ~22x11mm     │                  │     beneath      │ │
+   │       │  └──────────────┘                  │     "TAP CARD"   │ │
+   │       │                                     │     label        │ │
+   │       │ [3V3 rail ─────────────────────────│  on the lid]     │ │
+   │       │ [GND rail ─────────────────────────└──────────────────┘ │
+   │       │ [SDA  ─ GPIO 21]                                        │
+   │       │ [SCL  ─ GPIO 22]                                        │
+   │       │                                                         │
+   │       │     ┌─────────────────────────────────────────┐         │
+   │       │     │                                         │         │
+   │       │     │   ESP32-WROOM-32 DevKitC                │         │
+   │       │     │   in 2x 19-pin female sockets           │         │
+   │       │     │   long axis along X, USB-C → BACK       │         │
+   │       │     │                                         │         │
+   │       │     │              [USB-C] ←──→ to back-wall  │         │
+   │       │     └─────────────────────────────────────────┘         │
+   │       │              ↑                                          │
+   │       │           buzzer terminals (GPIO 25 + GND)              │
+   │       │           — flying lead UP to piezo glued to lid        │
+   │       │                                                         │
+   │       │   [reset button terminals: EN + GND]                    │
+   │       │   — flying lead to right-wall mounted tactile button    │
+   │       │                                                         │
+   │       │   [USB-C power feed: VIN + GND]                         │
+   │       │   — via SPDT switch on right wall                       │
+   │       │                                                         │
+   │       │ ●  M2.5                                          M2.5  ●│
+   ▼       └─────────────────────────────────────────────────────────┘
+   (front)
+                                       70mm
+              ←─────────────────────────────────────────────────────►
+
+ESP32 USB-C must face the BACK wall (where the case has its USB cutout).
+
+Mounting holes: 3mm in from each corner, 2.8mm pilot for M2.5 self-tap.
+
+Build order:
+  1. Female header sockets first (warm-up joints).
+  2. 3.3V rail (bare 24 AWG, soldered every other column along the back).
+  3. GND rail (bare 24 AWG, soldered every other column along the back).
+  4. SDA / SCL / buzzer GPIO traces (insulated 24 AWG).
+  5. Flying leads (~80mm) for switch, button, USB-C 5V/GND.
+
+The PN532 socket is offset to the right-back of the board so its antenna
+coil sits directly beneath the "TAP CARD" label engraved on the top lid.
+The OLED is on the left-back so it sits beneath the lid's display window.
+
+Unused future expansion area: front-right of the board (room for an RGB
+LED + current-limit resistors when added in v2).

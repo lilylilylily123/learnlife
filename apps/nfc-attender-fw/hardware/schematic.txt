@@ -1,0 +1,45 @@
+LearnLife NFC Attender — Wiring Schematic (v1 production)
+=========================================================
+
+All connections are point-to-point soldered on a 70x90mm perfboard.
+Modules (ESP32, PN532, OLED) live in female 2.54mm headers, not soldered.
+
+  USB-C 5V ───[SPDT switch]───┬──→ ESP32 VIN
+                              │
+  USB-C GND ──────────────────┴──→ ESP32 GND ────┐
+                                                  │
+                                  ┌── (common GND rail along perfboard)
+                                  │
+   ESP32 GND ────────────────────┼──→ PN532 GND
+                                  ├──→ OLED  GND
+                                  └──→ Piezo (-)
+   ESP32 3V3 ── (3.3V rail) ─────┬──→ PN532 VCC
+                                  └──→ OLED  VCC
+
+   ESP32 GPIO 21 (SDA) ──┬──→ PN532 SDA  ── shared I2C bus
+                          └──→ OLED  SDA
+   ESP32 GPIO 22 (SCL) ──┬──→ PN532 SCL
+                          └──→ OLED  SCL
+
+   ESP32 GPIO 25 ───────────→ Piezo (+)
+
+   ESP32 EN ──[Tactile button momentary]── ESP32 GND   (hard reset)
+
+I2C addresses on the shared bus:
+  PN532  →  0x24   (DIP 1=ON, 2=OFF — set on the module)
+  OLED   →  0x3C   (SSD1306 default)
+
+No level shifters required:
+  - PN532 V3 is 5V-tolerant on I2C and runs from 3.3V VCC
+  - SSD1306 OLED runs at 3.3V, driven natively by ESP32 GPIO
+
+No external pull-ups required:
+  - PN532 module and OLED module both carry on-board I2C pull-ups (typ. 10k)
+
+Power budget at 5V/USB:
+  ESP32-WROOM-32   ~120 mA average, ~500 mA TX peak
+  PN532            ~50 mA polling, 150 mA during read
+  SSD1306 OLED     ~20 mA typical
+  Piezo            ~30 mA during cues
+  ─────────────────
+  Total            comfortably within a 1A USB supply
