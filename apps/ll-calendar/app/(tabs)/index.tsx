@@ -18,6 +18,7 @@ import {
 import {
   login,
   fetchCalendarEvents,
+  fetchConversations,
 } from "../../lib/pocketbase";
 import { mapLoginError } from "../../lib/errors";
 import { expandEvents, type CalEvent } from "../../lib/calendar-utils";
@@ -176,6 +177,7 @@ function DashboardMainScreen() {
   const { user, role, program } = useAuth();
   const [todayEvents, setTodayEvents] = useState<CalEvent[]>([]);
   const [hasLoadedEvents, setHasLoadedEvents] = useState(false);
+  const [unreadConvCount, setUnreadConvCount] = useState(0);
 
   const today = new Date();
   const dayName = DAY_LABELS[today.getDay()] ?? "";
@@ -189,16 +191,31 @@ function DashboardMainScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return;
+      const userId = user.id;
       let cancelled = false;
       const now = new Date();
       (async () => {
         try {
-          const records = await fetchCalendarEvents();
+          const [records, conversations] = await Promise.all([
+            fetchCalendarEvents(),
+            fetchConversations(userId).catch(() => []),
+          ]);
+          if (cancelled) return;
           const expanded = expandEvents(records, now.getFullYear(), now.getMonth());
           const key = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
-          if (!cancelled) setTodayEvents(expanded[key] ?? []);
+          setTodayEvents(expanded[key] ?? []);
+          // A conversation needs the user's attention when the other side
+          // sent the most recent message. Matches the same heuristic used
+          // by the inbox screen so the two views agree.
+          const unread = conversations.filter(
+            (c) => !!c.last_message && c.last_sender !== userId,
+          ).length;
+          setUnreadConvCount(unread);
         } catch {
-          if (!cancelled) setTodayEvents([]);
+          if (!cancelled) {
+            setTodayEvents([]);
+            setUnreadConvCount(0);
+          }
         } finally {
           if (!cancelled) setHasLoadedEvents(true);
         }
@@ -216,17 +233,30 @@ function DashboardMainScreen() {
     sub: string;
     accent: string;
     onPress?: () => void;
-  }[] = isGuide
-    ? [
-        {
-          id: "invites",
-          title: "Manage invites",
-          sub: "Create & track learner invites",
-          accent: Colors.lavender,
-          onPress: () => router.push("/(modals)/manage-invites"),
-        },
-      ]
-    : [];
+  }[] = [];
+
+  if (unreadConvCount > 0) {
+    urgentItems.push({
+      id: "unread-messages",
+      title:
+        unreadConvCount === 1
+          ? "1 conversation awaiting reply"
+          : `${unreadConvCount} conversations awaiting reply`,
+      sub: "Open inbox",
+      accent: Colors.orange,
+      onPress: () => router.push("/(tabs)/inbox"),
+    });
+  }
+
+  if (isGuide) {
+    urgentItems.push({
+      id: "invites",
+      title: "Manage invites",
+      sub: "Create & track learner invites",
+      accent: Colors.lavender,
+      onPress: () => router.push("/(modals)/manage-invites"),
+    });
+  }
 
   return (
     <SafeAreaView style={s.dashSafe}>
