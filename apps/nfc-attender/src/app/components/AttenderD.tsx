@@ -1737,7 +1737,12 @@ export function AttenderD(props: AttenderDProps) {
               </div>
             </>
           ) : (
-            <WallView filtered={filtered} uid={uid} isInitialLoading={isInitialLoading} />
+            <WallView
+              filtered={filtered}
+              uid={uid}
+              onReset={onReset}
+              isInitialLoading={isInitialLoading}
+            />
           )}
 
           {/* Pagination footer */}
@@ -1977,15 +1982,69 @@ function FetchErrorBanner({
 
 // ─── Wall view ──────────────────────────────────────────────
 
-function WallView({
+export function WallView({
   filtered,
   uid,
+  onReset,
   isInitialLoading,
 }: {
   filtered: Student[];
   uid: string;
+  // Per-learner reset handler from the parent. When provided, the Wall view
+  // exposes a multi-select mode that calls this for every selected learner
+  // in sequence. Omitting it disables bulk-reset entirely.
+  onReset?: (id: string) => void;
   isInitialLoading?: boolean;
 }) {
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const bulkEnabled = !!onReset;
+
+  // Clearing selection on mode-exit avoids the toolbar staying armed while
+  // invisible if the user toggles select mode off and on again.
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const visibleIds = filtered.map((s) => s.id);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+
+  const selectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const bulkReset = () => {
+    if (!onReset || selectedIds.size === 0) return;
+    // Reset clears today's attendance data — confirm before firing N writes
+    // the user may not have intended (especially after a slip while flipping
+    // select mode on).
+    const ok = window.confirm(
+      `Reset attendance for ${selectedIds.size} learner${
+        selectedIds.size === 1 ? "" : "s"
+      }? This clears today's check-in, lunch, and status.`,
+    );
+    if (!ok) return;
+    for (const id of selectedIds) onReset(id);
+    exitSelectMode();
+  };
+
   if (isInitialLoading) {
     return (
       <div
@@ -1997,24 +2056,82 @@ function WallView({
       </div>
     );
   }
+
   return (
     <div
-      className="flex-1 overflow-y-auto"
+      className="flex-1 overflow-y-auto relative"
       style={{ background: "var(--ll-bg)", padding: "16px 20px" }}
     >
+      {bulkEnabled && (
+        <div
+          className="flex items-center"
+          style={{ gap: 10, marginBottom: 10 }}
+        >
+          <button
+            onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+            className="cursor-pointer"
+            style={{
+              ...KICKER,
+              padding: "5px 10px",
+              border: `1px solid ${
+                selectMode ? "var(--ll-ink)" : "var(--ll-divider)"
+              }`,
+              background: selectMode ? "var(--ll-ink)" : "transparent",
+              color: selectMode ? "var(--ll-bg)" : "var(--ll-ink)",
+            }}
+          >
+            {selectMode ? "Done" : "Select"}
+          </button>
+          {selectMode && (
+            <button
+              onClick={() =>
+                allVisibleSelected ? clearSelection() : selectAllVisible()
+              }
+              className="cursor-pointer"
+              style={{
+                ...KICKER,
+                padding: "5px 10px",
+                border: "1px solid var(--ll-divider)",
+                background: "transparent",
+                color: "var(--ll-ink)",
+              }}
+            >
+              {allVisibleSelected ? "Clear all" : "Select all"}
+            </button>
+          )}
+        </div>
+      )}
+
       <div
         className="grid"
         style={{
           gap: 6,
           gridTemplateColumns: "repeat(auto-fill, minmax(108px, 1fr))",
+          paddingBottom: selectedIds.size > 0 ? 64 : 0,
         }}
       >
         {filtered.map((s) => {
           const tone = getWallTone(s);
           const isCurrent = !!uid && s.NFC_ID === uid;
+          const isSelected = selectedIds.has(s.id);
+          const handleClick = selectMode ? () => toggleSelected(s.id) : undefined;
           return (
             <div
               key={s.id}
+              onClick={handleClick}
+              role={selectMode ? "checkbox" : undefined}
+              aria-checked={selectMode ? isSelected : undefined}
+              tabIndex={selectMode ? 0 : undefined}
+              onKeyDown={
+                selectMode
+                  ? (e) => {
+                      if (e.key === " " || e.key === "Enter") {
+                        e.preventDefault();
+                        toggleSelected(s.id);
+                      }
+                    }
+                  : undefined
+              }
               style={{
                 background: tone.bg,
                 color: tone.fg,
@@ -2023,7 +2140,10 @@ function WallView({
                   : `1.5px solid ${tone.border}`,
                 padding: "7px 9px",
                 minHeight: 54,
-                boxShadow: isCurrent
+                cursor: selectMode ? "pointer" : "default",
+                boxShadow: isSelected
+                  ? `0 0 0 2px var(--ll-bg), 0 0 0 4px var(--ll-ink)`
+                  : isCurrent
                   ? `0 0 0 2px var(--ll-bg), 0 0 0 4px var(--ll-accent)`
                   : "none",
               }}
@@ -2061,6 +2181,54 @@ function WallView({
           );
         })}
       </div>
+
+      {bulkEnabled && selectedIds.size > 0 && (
+        <div
+          className="flex items-center justify-between"
+          style={{
+            position: "sticky",
+            bottom: 12,
+            marginTop: 12,
+            background: "var(--ll-ink)",
+            color: "var(--ll-bg)",
+            padding: "10px 14px",
+            gap: 12,
+            boxShadow: "0 6px 14px rgba(31,27,22,0.18)",
+          }}
+        >
+          <span style={{ ...KICKER, color: "var(--ll-bg)" }}>
+            {selectedIds.size} selected
+          </span>
+          <div className="flex" style={{ gap: 8 }}>
+            <button
+              onClick={clearSelection}
+              className="cursor-pointer"
+              style={{
+                ...KICKER,
+                padding: "5px 10px",
+                border: "1px solid var(--ll-bg)",
+                background: "transparent",
+                color: "var(--ll-bg)",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={bulkReset}
+              className="cursor-pointer"
+              style={{
+                ...KICKER,
+                padding: "5px 10px",
+                border: "1px solid var(--ll-warm)",
+                background: "var(--ll-warm)",
+                color: "var(--ll-warm-ink)",
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
