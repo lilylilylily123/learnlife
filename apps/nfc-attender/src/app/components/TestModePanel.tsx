@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import { RecordModel } from "pocketbase";
 import { KICKER, Kicker, Pill, InkInput, InkSelect } from "./ll-ui";
 
@@ -48,6 +48,51 @@ export function TestModePanel({
     d.setHours(hour, minute, 0, 0);
     setTestTime(d);
   };
+
+  // Collapsed panel still leaves Test Mode (and any demo overlay) running —
+  // it just hides the controls so the dashboard isn't blocked while demoing.
+  // A small pill stays pinned so the panel can be re-opened.
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (collapsed) {
+    return (
+      <div className="flex justify-end" style={{ pointerEvents: "auto" }}>
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className="cursor-pointer flex items-center"
+          aria-label="Show test mode panel"
+          style={{
+            gap: 8,
+            padding: "6px 12px",
+            background: "var(--ll-warm)",
+            color: "var(--ll-warm-ink)",
+            border: "1.5px solid var(--ll-warm)",
+            boxShadow: "0 4px 12px -6px rgba(31, 27, 22, 0.4)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              display: "inline-block",
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: "var(--ll-warm-ink)",
+              animation: "ll-pulse 1.5s ease-in-out infinite",
+            }}
+          />
+          Test mode{demoActive ? " · demo" : ""}
+          <span aria-hidden style={{ marginLeft: 4 }}>↑</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -103,6 +148,25 @@ export function TestModePanel({
           {testTime &&
             ` @ ${testTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
         </span>
+        <button
+          type="button"
+          onClick={() => setCollapsed(true)}
+          className="cursor-pointer"
+          aria-label="Hide test mode panel"
+          title="Hide panel (test mode stays on)"
+          style={{
+            marginLeft: 10,
+            background: "transparent",
+            border: "none",
+            color: "var(--ll-warm-ink)",
+            opacity: 0.85,
+            fontSize: 14,
+            lineHeight: 1,
+            padding: "2px 6px",
+          }}
+        >
+          ↓
+        </button>
       </div>
 
       {/* Body */}
