@@ -22,6 +22,12 @@ interface TestModePanelProps {
   setTestDate: (date: string | null) => void;
   setTestTime: (time: Date | null) => void;
   simulateScan: (uid: string) => void;
+  // Demo overlay state. When `demoActive` is true the dashboard is showing
+  // a synthesized attendance map (no PB writes). The Load/Clear buttons are
+  // wired from the parent so the overlay lifecycle stays there.
+  demoActive?: boolean;
+  onLoadDemo?: () => void;
+  onClearDemo?: () => void;
 }
 
 export function TestModePanel({
@@ -33,6 +39,9 @@ export function TestModePanel({
   setTestDate,
   setTestTime,
   simulateScan,
+  demoActive,
+  onLoadDemo,
+  onClearDemo,
 }: TestModePanelProps) {
   const setTestTimePreset = (hour: number, minute = 0) => {
     const d = new Date();
@@ -174,6 +183,52 @@ export function TestModePanel({
             {isLoading ? "Scanning…" : "Scan ↵"}
           </Pill>
         </div>
+
+        {(onLoadDemo || onClearDemo) && (
+          <div
+            className="flex flex-wrap items-center"
+            style={{
+              gap: 8,
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px dashed var(--ll-divider)",
+            }}
+          >
+            <Kicker>Demo</Kicker>
+            {demoActive ? (
+              <>
+                <span
+                  style={{
+                    ...KICKER,
+                    color: "var(--ll-warm)",
+                    border: `1px solid var(--ll-warm)`,
+                    padding: "3px 8px",
+                  }}
+                >
+                  Overlay active · no PB writes
+                </span>
+                <Pill size="sm" variant="outline" onClick={onClearDemo}>
+                  Clear demo
+                </Pill>
+              </>
+            ) : (
+              <Pill size="sm" variant="ink" onClick={onLoadDemo}>
+                Load demo data
+              </Pill>
+            )}
+            <span
+              style={{
+                ...KICKER,
+                color: "var(--ll-muted)",
+                marginLeft: 4,
+              }}
+            >
+              {demoActive
+                ? "Reset, status, and check-ins stay local."
+                : "Loads a mid-day snapshot for stage demos."}
+            </span>
+          </div>
+        )}
 
         <p
           style={{

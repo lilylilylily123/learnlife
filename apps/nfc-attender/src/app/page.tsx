@@ -20,6 +20,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { JustificationModal } from "./components/JustificationModal";
 import { toast } from "./components/Toast";
 import { KeyboardHelpOverlay } from "./components/KeyboardHelpOverlay";
+import { buildDemoAttendanceMap } from "@/lib/demo-data";
 import type { Student } from "./types";
 import { deriveStatus } from "@learnlife/shared";
 import {
@@ -102,6 +103,25 @@ export default function AttendancePage() {
   // Raw data
   const [students, setStudents] = useState<RecordModel[]>([]);
   const [attendanceMap, setAttendanceMap] = useState<Record<string, any>>({});
+  // Demo overlay (Test Mode → "Load demo"). When non-null the dashboard reads
+  // from this map instead of `attendanceMap`, and ALL write handlers route
+  // their changes here too — no PocketBase writes happen while the overlay is
+  // on. Turning Test Mode off clears the overlay automatically.
+  const [demoMap, setDemoMap] = useState<Record<string, any> | null>(null);
+  const demoActive = demoMap !== null;
+  // Wraps setAttendanceMap so handlers don't need to branch on demoActive.
+  // When demo is on we update demoMap; when off we update the real map. The
+  // updater function signature is unchanged.
+  const updateAttendanceState = useCallback(
+    (updater: (prev: Record<string, any>) => Record<string, any>) => {
+      if (demoActive) {
+        setDemoMap((prev) => updater(prev ?? {}));
+      } else {
+        setAttendanceMap(updater);
+      }
+    },
+    [demoActive],
+  );
   // Initial-fetch lifecycle for skeletons + retry banner. `hasLoadedOnce`
   // flips after the first successful learners+attendance fetch so subsequent
   // refreshes don't reintroduce the placeholders.
@@ -123,9 +143,10 @@ export default function AttendancePage() {
   }, []);
 
   // Filters hook (needs studentsWithAttendance; we use a two-pass pattern below)
+  const effectiveAttendanceMap = demoMap ?? attendanceMap;
   const studentsWithAttendance = useMemo<Student[]>(() => {
     const merged = students.map((s) => {
-      const attendance = attendanceMap[s.id] || {};
+      const attendance = effectiveAttendanceMap[s.id] || {};
       return {
         ...s,
         time_in: attendance.time_in || null,
@@ -144,7 +165,7 @@ export default function AttendancePage() {
       } as Student & { attendanceId: string | null };
     });
     return merged.sort((a, b) => a.name.localeCompare(b.name));
-  }, [students, attendanceMap]);
+  }, [students, effectiveAttendanceMap]);
 
   const {
     search,
@@ -412,12 +433,13 @@ export default function AttendancePage() {
       // Lunch status keeps the legacy single-enum model — only morning status
       // gets the split arrival/justified treatment.
       if (field === "lunch_status") {
-        const prevLunch = attendanceMap[id]?.lunch_status;
+        const prevLunch = effectiveAttendanceMap[id]?.lunch_status;
         const newLunch = toggle && prevLunch === status ? "" : status;
-        setAttendanceMap((prev) => ({
+        updateAttendanceState((prev) => ({
           ...prev,
           [id]: { ...prev[id], lunch_status: newLunch || null },
         }));
+        if (demoActive) return;
         try {
           await pbClient.batchUpdateAttendance({
             learnerId: id,
@@ -426,7 +448,7 @@ export default function AttendancePage() {
           });
         } catch (err) {
           console.error("Failed to save lunch status", err);
-          setAttendanceMap((prev) => ({
+          updateAttendanceState((prev) => ({
             ...prev,
             [id]: { ...prev[id], lunch_status: prevLunch },
           }));
@@ -440,7 +462,7 @@ export default function AttendancePage() {
         return;
       }
 
-      const prevRecord = attendanceMap[id] || {};
+      const prevRecord = effectiveAttendanceMap[id] || {};
       const prevArrival = (prevRecord.arrival ?? null) as ArrivalStatus | null;
       const prevJustified = Boolean(prevRecord.justified);
       const prevStatus = prevRecord.status || null;
@@ -455,7 +477,7 @@ export default function AttendancePage() {
       const nextStatus = deriveStatus(next.arrival, next.justified);
 
       // Optimistic UI update.
-      setAttendanceMap((prev) => ({
+      updateAttendanceState((prev) => ({
         ...prev,
         [id]: {
           ...prev[id],
@@ -464,6 +486,8 @@ export default function AttendancePage() {
           status: nextStatus,
         },
       }));
+
+      if (demoActive) return;
 
       // Only set justified_by / justified_at when we're flipping it on.
       const userId = pb.authStore.record?.id;
@@ -499,7 +523,7 @@ export default function AttendancePage() {
         }
         console.error("Failed to save status", err);
         // Roll back the optimistic update on failure.
-        setAttendanceMap((prev) => ({
+        updateAttendanceState((prev) => ({
           ...prev,
           [id]: {
             ...prev[id],
@@ -513,7 +537,7 @@ export default function AttendancePage() {
         });
       }
     },
-    [viewDate, attendanceMap],
+    [viewDate, effectiveAttendanceMap, demoActive, updateAttendanceState],
   );
 
   // Push a manual action into the activity feed
@@ -539,7 +563,7 @@ export default function AttendancePage() {
   const handleCheckAction = useCallback(
     async (id: string, action: string) => {
       const now = testMode && testTime ? testTime : new Date();
-      const attendance = attendanceMap[id] || {};
+      const attendance = effectiveAttendanceMap[id] || {};
       const { time_in, time_out, lunch_events } = attendance;
       const lunchEventsArray = lunch_events || [];
 
@@ -569,7 +593,7 @@ export default function AttendancePage() {
           const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
           const timestamp = now.toISOString();
 
-          setAttendanceMap((prev) => ({
+          updateAttendanceState((prev) => ({
             ...prev,
             [id]: {
               ...prev[id],
@@ -579,6 +603,11 @@ export default function AttendancePage() {
               status,
             },
           }));
+
+          if (demoActive) {
+            pushActivityEvent(id, "morning-in", status);
+            return;
+          }
 
           try {
             await pbClient.batchUpdateAttendance({
@@ -593,7 +622,7 @@ export default function AttendancePage() {
             });
             pushActivityEvent(id, "morning-in", status);
           } catch (err) {
-            setAttendanceMap((prev) => ({
+            updateAttendanceState((prev) => ({
               ...prev,
               [id]: {
                 ...prev[id],
@@ -639,7 +668,7 @@ export default function AttendancePage() {
             lunchPatch.lunch_status = computedLunchStatus;
           }
 
-          setAttendanceMap((prev) => ({
+          updateAttendanceState((prev) => ({
             ...prev,
             [id]: {
               ...prev[id],
@@ -649,6 +678,14 @@ export default function AttendancePage() {
                 : {}),
             },
           }));
+          if (demoActive) {
+            if (eventType === "in") {
+              pushActivityEvent(id, "lunch-in", computedLunchStatus ?? undefined);
+            } else {
+              pushActivityEvent(id, "lunch-out");
+            }
+            return;
+          }
           try {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
@@ -662,7 +699,7 @@ export default function AttendancePage() {
             }
             fetchAttendance();
           } catch (err) {
-            setAttendanceMap((prev) => ({
+            updateAttendanceState((prev) => ({
               ...prev,
               [id]: {
                 ...prev[id],
@@ -675,10 +712,14 @@ export default function AttendancePage() {
         } else if (action === "day-out") {
           if (!time_in || time_out) return;
           const timestamp = now.toISOString();
-          setAttendanceMap((prev) => ({
+          updateAttendanceState((prev) => ({
             ...prev,
             [id]: { ...prev[id], time_out: timestamp },
           }));
+          if (demoActive) {
+            pushActivityEvent(id, "day-out");
+            return;
+          }
           try {
             await pbClient.batchUpdateAttendance({
               learnerId: id,
@@ -687,7 +728,7 @@ export default function AttendancePage() {
             });
             pushActivityEvent(id, "day-out");
           } catch (err) {
-            setAttendanceMap((prev) => ({
+            updateAttendanceState((prev) => ({
               ...prev,
               [id]: { ...prev[id], time_out: null },
             }));
@@ -702,12 +743,14 @@ export default function AttendancePage() {
       }
     },
     [
-      attendanceMap,
+      effectiveAttendanceMap,
       testMode,
       testTime,
       viewDate,
       fetchAttendance,
       pushActivityEvent,
+      demoActive,
+      updateAttendanceState,
     ],
   );
 
@@ -718,6 +761,11 @@ export default function AttendancePage() {
     async (id: string) => {
       const student = students.find((s) => s.id === id);
       const name = (student as any)?.name as string | undefined;
+      if (demoActive) {
+        updateAttendanceState((prev) => ({ ...prev, [id]: { id: `demo-${id}`, learner: id } }));
+        toast.success("Attendance reset (demo)", { detail: name });
+        return;
+      }
       try {
         await pbClient.resetAttendance(id, viewDate);
         fetchAttendance();
@@ -729,23 +777,27 @@ export default function AttendancePage() {
         });
       }
     },
-    [viewDate, fetchAttendance, students],
+    [viewDate, fetchAttendance, students, demoActive, updateAttendanceState],
   );
 
   const handleCommentUpdate = useCallback(
     async (id: string, comment: string) => {
-      const previousComment = attendanceMap[id]?.comments;
-      setAttendanceMap((prev) => ({
+      const previousComment = effectiveAttendanceMap[id]?.comments;
+      updateAttendanceState((prev) => ({
         ...prev,
         [id]: { ...prev[id], comments: comment },
       }));
+      if (demoActive) {
+        toast.success(comment.trim() ? "Comment saved (demo)" : "Comment cleared (demo)");
+        return;
+      }
       try {
         await pbClient.updateLearnerComment(id, comment);
         fetchAttendance();
         toast.success(comment.trim() ? "Comment saved" : "Comment cleared");
       } catch (err) {
         console.error("Failed to update comment:", err);
-        setAttendanceMap((prev) => ({
+        updateAttendanceState((prev) => ({
           ...prev,
           [id]: { ...prev[id], comments: previousComment },
         }));
@@ -755,7 +807,7 @@ export default function AttendancePage() {
         throw err;
       }
     },
-    [fetchAttendance, attendanceMap],
+    [fetchAttendance, effectiveAttendanceMap, demoActive, updateAttendanceState],
   );
 
   const handleTimeEdit = useCallback(
@@ -769,11 +821,17 @@ export default function AttendancePage() {
       const d = new Date(`${viewDate}T00:00:00`);
       d.setHours(h, m, 0, 0);
       const timestamp = d.toISOString();
-      const previousValue = attendanceMap[learnerId]?.[field];
-      setAttendanceMap((prev) => ({
+      const previousValue = effectiveAttendanceMap[learnerId]?.[field];
+      updateAttendanceState((prev) => ({
         ...prev,
         [learnerId]: { ...prev[learnerId], [field]: timestamp },
       }));
+      if (demoActive) {
+        toast.success(
+          field === "time_in" ? "Check-in time updated (demo)" : "Check-out time updated (demo)",
+        );
+        return;
+      }
       try {
         await pbClient.batchUpdateAttendance({
           learnerId,
@@ -785,7 +843,7 @@ export default function AttendancePage() {
         );
       } catch (err) {
         console.error("Failed to update time:", err);
-        setAttendanceMap((prev) => ({
+        updateAttendanceState((prev) => ({
           ...prev,
           [learnerId]: { ...prev[learnerId], [field]: previousValue },
         }));
@@ -794,7 +852,7 @@ export default function AttendancePage() {
         });
       }
     },
-    [viewDate, attendanceMap],
+    [viewDate, effectiveAttendanceMap, demoActive, updateAttendanceState],
   );
 
   async function handleCreateLearner(
@@ -813,9 +871,22 @@ export default function AttendancePage() {
   const handleSaveJustificationReason = useCallback(
     async (reason: string) => {
       if (!justifyingLearnerId) return;
-      const record = attendanceMap[justifyingLearnerId];
+      const record = effectiveAttendanceMap[justifyingLearnerId];
       if (!record?.id) {
         setJustifyError("No attendance record yet — mark the day with a status first.");
+        return;
+      }
+      if (demoActive) {
+        updateAttendanceState((prev) => ({
+          ...prev,
+          [justifyingLearnerId]: {
+            ...prev[justifyingLearnerId],
+            justification_reason: reason,
+            justified_at: new Date().toISOString(),
+          },
+        }));
+        setJustifyingLearnerId(null);
+        toast.success("Justification reason saved (demo)");
         return;
       }
       const userId = pb.authStore.record?.id || "";
@@ -827,7 +898,7 @@ export default function AttendancePage() {
           reason,
           userId,
         });
-        setAttendanceMap((prev) => ({
+        updateAttendanceState((prev) => ({
           ...prev,
           [justifyingLearnerId]: { ...prev[justifyingLearnerId], ...updated },
         }));
@@ -838,7 +909,7 @@ export default function AttendancePage() {
         setJustifyError(err?.message || "Failed to save — please try again.");
       }
     },
-    [justifyingLearnerId, attendanceMap],
+    [justifyingLearnerId, effectiveAttendanceMap, demoActive, updateAttendanceState],
   );
 
   if (!isLoggedIn) {
@@ -880,6 +951,10 @@ export default function AttendancePage() {
           if (testMode) {
             setTestTime(null);
             setTestDate(null);
+            // Clearing the overlay when leaving test mode prevents demo state
+            // from lingering after the toggle goes away, which would otherwise
+            // leave the dashboard pinned to synthetic data with no UI to exit.
+            setDemoMap(null);
           }
         }}
         onCheckAction={handleCheckAction}
@@ -912,6 +987,18 @@ export default function AttendancePage() {
             setTestDate={setTestDate}
             setTestTime={setTestTime}
             simulateScan={simulateScan}
+            demoActive={demoActive}
+            onLoadDemo={() => {
+              const when = testTime ?? new Date();
+              setDemoMap(buildDemoAttendanceMap(students, when));
+              toast.success("Demo data loaded", {
+                detail: "Changes stay local — nothing is written to PocketBase.",
+              });
+            }}
+            onClearDemo={() => {
+              setDemoMap(null);
+              toast.info("Demo overlay cleared");
+            }}
           />
         </div>
       )}
@@ -927,7 +1014,7 @@ export default function AttendancePage() {
           via the currently-logged-in user (matches the common case where the
           guide who applies it is also the guide reading it back). */}
       {justifyingLearnerId && (() => {
-        const rec = attendanceMap[justifyingLearnerId];
+        const rec = effectiveAttendanceMap[justifyingLearnerId];
         const learner = students.find((s) => s.id === justifyingLearnerId);
         const me = pb.authStore.record as { id?: string; name?: string } | null;
         const justifiedByName =
