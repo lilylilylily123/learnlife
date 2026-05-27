@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { WallView } from "../app/components/AttenderD";
 import type { Student } from "../app/types";
@@ -26,17 +26,9 @@ const roster = [
   makeStudent({ id: "s3", name: "Hedy" }),
 ];
 
+// The bulk-reset confirm modal renders into document.body via a portal, so the
+// matchers below pick it up regardless of where the WallView itself sits.
 describe("WallView bulk-reset", () => {
-  let confirmSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-  });
-
-  afterEach(() => {
-    confirmSpy.mockRestore();
-  });
-
   it("does not expose the Select control when no onReset handler is provided", () => {
     render(<WallView filtered={roster} uid="" />);
     expect(screen.queryByText(/^Select$/i)).toBeNull();
@@ -67,7 +59,7 @@ describe("WallView bulk-reset", () => {
     expect(screen.queryByText(/selected/i)).toBeNull();
   });
 
-  it("Reset fires onReset(id) for every selected learner after confirmation", () => {
+  it("Reset opens a confirm modal and fires onReset(id) for every selected learner on confirm", () => {
     const onReset = vi.fn();
     render(<WallView filtered={roster} uid="" onReset={onReset} />);
     fireEvent.click(screen.getByText("Select"));
@@ -75,28 +67,49 @@ describe("WallView bulk-reset", () => {
     fireEvent.click(screen.getByText("Hedy"));
     fireEvent.click(screen.getByText("Reset"));
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    // Modal renders. Action shouldn't have fired yet.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onReset).not.toHaveBeenCalled();
+
+    // The dialog has two buttons labeled "Cancel" (modal) and "Reset" (confirm).
+    // The visible "Reset" inside the modal has destructive styling — use the
+    // dialog scope to pick the confirm button unambiguously.
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find(
+        (b) => b.textContent === "Reset",
+      ) as HTMLButtonElement,
+    );
+
     expect(onReset).toHaveBeenCalledTimes(2);
     expect(onReset).toHaveBeenCalledWith("s1");
     expect(onReset).toHaveBeenCalledWith("s3");
   });
 
-  it("Reset does not fire onReset when the user cancels the confirmation", () => {
-    confirmSpy.mockReturnValue(false);
+  it("Reset does not fire onReset when the user dismisses the confirm modal", () => {
     const onReset = vi.fn();
     render(<WallView filtered={roster} uid="" onReset={onReset} />);
     fireEvent.click(screen.getByText("Select"));
     fireEvent.click(screen.getByText("Ada"));
     fireEvent.click(screen.getByText("Reset"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find(
+        (b) => b.textContent === "Cancel",
+      ) as HTMLButtonElement,
+    );
     expect(onReset).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("Cancel button clears selection without firing onReset", () => {
+  it("Cancel button on the bulk action bar clears selection without firing onReset", () => {
     const onReset = vi.fn();
     render(<WallView filtered={roster} uid="" onReset={onReset} />);
     fireEvent.click(screen.getByText("Select"));
     fireEvent.click(screen.getByText("Ada"));
     expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    // The bulk-bar Cancel and the modal's Cancel both read "Cancel" — only the
+    // bulk-bar one is in the document while the modal is closed.
     fireEvent.click(screen.getByText("Cancel"));
     expect(screen.queryByText(/selected/i)).toBeNull();
     expect(onReset).not.toHaveBeenCalled();
@@ -108,6 +121,12 @@ describe("WallView bulk-reset", () => {
     fireEvent.click(screen.getByText("Select"));
     fireEvent.click(screen.getByText("Ada"));
     fireEvent.click(screen.getByText("Reset"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(
+      Array.from(dialog.querySelectorAll("button")).find(
+        (b) => b.textContent === "Reset",
+      ) as HTMLButtonElement,
+    );
     expect(screen.getByText("Select")).toBeInTheDocument();
     expect(screen.queryByText(/selected/i)).toBeNull();
   });

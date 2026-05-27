@@ -90,10 +90,10 @@ export function RowOverflowMenu({
   items.push({
     label: "Reset day",
     onPick: () => {
-      if (window.confirm(`Reset attendance for ${student.name}?`)) {
-        onReset();
-        setOpen(false);
-      }
+      // Defer the confirmation to the parent. window.confirm doesn't render in
+      // Tauri 2's WKWebView, so the original prompt silently no-op'd here.
+      onReset();
+      setOpen(false);
     },
     destructive: true,
   });
@@ -139,7 +139,7 @@ export function RowOverflowMenu({
                 if (!it.destructive) setOpen(false);
                 it.onPick();
               }}
-              className="cursor-pointer flex items-center justify-between"
+              className="cursor-pointer flex items-center justify-between ll-menu-item"
               style={{
                 gap: 12,
                 padding: "7px 10px",
