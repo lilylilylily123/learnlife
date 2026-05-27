@@ -18,6 +18,7 @@ import type { ActivityEvent } from "./components/ActivityFeed";
 import { AttenderD } from "./components/AttenderD";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { JustificationModal } from "./components/JustificationModal";
+import { toast } from "./components/Toast";
 import type { Student } from "./types";
 import { deriveStatus } from "@learnlife/shared";
 import {
@@ -463,6 +464,9 @@ export default function AttendancePage() {
             status: prevStatus,
           },
         }));
+        toast.error("Couldn't save status", {
+          detail: err?.message,
+        });
       }
     },
     [viewDate, attendanceMap],
@@ -648,6 +652,9 @@ export default function AttendancePage() {
         }
       } catch (err) {
         console.error("check action failed", err);
+        toast.error("Couldn't update attendance", {
+          detail: err instanceof Error ? err.message : undefined,
+        });
       }
     },
     [
@@ -660,16 +667,25 @@ export default function AttendancePage() {
     ],
   );
 
+  // Commits the reset. The confirm dialog lives inside AttenderD (row menu) /
+  // WallView (bulk reset) so the row menu and the wall bulk bar each prompt
+  // once, and this handler always assumes the user has already agreed.
   const handleReset = useCallback(
     async (id: string) => {
+      const student = students.find((s) => s.id === id);
+      const name = (student as any)?.name as string | undefined;
       try {
         await pbClient.resetAttendance(id, viewDate);
         fetchAttendance();
+        toast.success("Attendance reset", { detail: name });
       } catch (err) {
         console.error("Reset failed", err);
+        toast.error("Couldn't reset attendance", {
+          detail: name ?? (err instanceof Error ? err.message : undefined),
+        });
       }
     },
-    [viewDate, fetchAttendance],
+    [viewDate, fetchAttendance, students],
   );
 
   const handleCommentUpdate = useCallback(
@@ -682,12 +698,16 @@ export default function AttendancePage() {
       try {
         await pbClient.updateLearnerComment(id, comment);
         fetchAttendance();
+        toast.success(comment.trim() ? "Comment saved" : "Comment cleared");
       } catch (err) {
         console.error("Failed to update comment:", err);
         setAttendanceMap((prev) => ({
           ...prev,
           [id]: { ...prev[id], comments: previousComment },
         }));
+        toast.error("Couldn't save comment", {
+          detail: err instanceof Error ? err.message : undefined,
+        });
         throw err;
       }
     },
@@ -716,12 +736,18 @@ export default function AttendancePage() {
           date: viewDate,
           fields: { [field]: timestamp },
         });
+        toast.success(
+          field === "time_in" ? "Check-in time updated" : "Check-out time updated",
+        );
       } catch (err) {
         console.error("Failed to update time:", err);
         setAttendanceMap((prev) => ({
           ...prev,
           [learnerId]: { ...prev[learnerId], [field]: previousValue },
         }));
+        toast.error("Couldn't save time", {
+          detail: err instanceof Error ? err.message : undefined,
+        });
       }
     },
     [viewDate, attendanceMap],
@@ -762,6 +788,7 @@ export default function AttendancePage() {
           [justifyingLearnerId]: { ...prev[justifyingLearnerId], ...updated },
         }));
         setJustifyingLearnerId(null);
+        toast.success("Justification reason saved");
       } catch (err: any) {
         console.error("Failed to save reason:", err);
         setJustifyError(err?.message || "Failed to save — please try again.");

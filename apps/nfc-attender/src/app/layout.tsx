@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { ToastContainer } from "./components/Toast";
 
 const fraunces = Fraunces({
   variable: "--font-heading",
@@ -34,6 +35,7 @@ export default function RootLayout({
         className={`${fraunces.variable} ${interTight.variable} ${jetbrainsMono.variable} antialiased`}
       >
         {children}
+        <ToastContainer />
       </body>
     </html>
   );

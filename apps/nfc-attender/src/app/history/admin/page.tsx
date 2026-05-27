@@ -27,6 +27,8 @@ import {
   InkInput,
 } from "@/app/components/ll-ui";
 import { logAuditEvent } from "@/lib/audit";
+import { saveTextFile } from "@/lib/file-save";
+import { toast } from "@/app/components/Toast";
 
 const PROGRAM_LABEL: Record<ProgramCode, string> = {
   chmk: "Changemaker",
@@ -114,7 +116,7 @@ export default function AdminHistoryPage() {
   };
 
   const onExportCsv = () => {
-    downloadCsv(visibleRows, range);
+    void downloadCsv(visibleRows, range);
     // Fire-and-forget — never block the download on the audit write.
     void logAuditEvent("csv_export", {
       rowCount: visibleRows.length,
@@ -1073,7 +1075,7 @@ function DetailCell({
   );
 }
 
-function downloadCsv(rows: LearnerRow[], range: DateRange) {
+async function downloadCsv(rows: LearnerRow[], range: DateRange) {
   const header = [
     "Learner","Email","Program","Expected days","Days tracked","Missing records",
     "Present","Late","Absent","jLate","jAbsent",
@@ -1096,15 +1098,25 @@ function downloadCsv(rows: LearnerRow[], range: DateRange) {
       s.onTimePct, s.attendancePct, s.absentPct,
     ].join(","));
   }
-  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `attendance-${range.from}_to_${range.to}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  try {
+    const result = await saveTextFile({
+      defaultPath: `attendance-${range.from}_to_${range.to}.csv`,
+      content: csvRows.join("\n"),
+      mime: "text/csv;charset=utf-8",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    // result.saved is false when the user cancels the native save sheet.
+    if (result.saved) {
+      toast.success(`CSV exported · ${rows.length} learner${rows.length === 1 ? "" : "s"}`, {
+        detail: result.path,
+      });
+    }
+  } catch (err) {
+    console.error("CSV export failed", err);
+    toast.error("CSV export failed", {
+      detail: err instanceof Error ? err.message : undefined,
+    });
+  }
 }
 
 function csvCell(val: string): string {

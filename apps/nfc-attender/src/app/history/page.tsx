@@ -20,6 +20,8 @@ import {
   InkInput,
   InkSelect,
 } from "../components/ll-ui";
+import { saveTextFile } from "@/lib/file-save";
+import { toast } from "../components/Toast";
 
 const PROGRAM_LABEL: Record<string, string> = {
   exp: "Explorers",
@@ -423,7 +425,7 @@ export default function HistoryPage() {
           </Pill>
           <Pill
             size="sm"
-            onClick={() => downloadDailyCsv(learners, records, selectedDate)}
+            onClick={() => void downloadDailyCsv(learners, records, selectedDate)}
             title="Export this day as CSV"
           >
             ↓ Export CSV
@@ -895,11 +897,11 @@ const GROUP_TONE: Record<
 // Trailing "out" lunch events without a matching "in" mean the learner never
 // returned — we surface that as an explicit "(no return)" so downstream
 // readers can spot it without parsing the JSON column.
-function downloadDailyCsv(
+async function downloadDailyCsv(
   learners: Learner[],
   records: AttendanceRecord[],
   date: string,
-): void {
+): Promise<void> {
   const byLearner = new Map<string, AttendanceRecord>();
   for (const r of records) byLearner.set(r.learner, r);
 
@@ -940,15 +942,25 @@ function downloadDailyCsv(
       ].join(","),
     );
   }
-  const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `attendance-${date}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  try {
+    const result = await saveTextFile({
+      defaultPath: `attendance-${date}.csv`,
+      content: rows.join("\n"),
+      mime: "text/csv;charset=utf-8",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    // result.saved is false when the user cancels the Tauri native sheet —
+    // suppressing the toast in that case avoids "saved!" feedback for a
+    // dialog they explicitly dismissed.
+    if (result.saved) {
+      toast.success("CSV exported", { detail: result.path });
+    }
+  } catch (err) {
+    console.error("CSV export failed", err);
+    toast.error("CSV export failed", {
+      detail: err instanceof Error ? err.message : undefined,
+    });
+  }
 }
 
 function csvCell(val: string): string {
