@@ -94,12 +94,31 @@ function getServerSnapshot(): Toast[] {
   return emptySnapshot;
 }
 
+// Tracks "have we hydrated yet" via the same useSyncExternalStore trick that
+// `useIsPrivileged` uses. The server (and the first client render during
+// hydration) get `false`; React then swaps to `true` post-hydration and
+// re-renders. This is the React-blessed way to defer client-only output
+// without a hydration mismatch — a naïve `typeof document === "undefined"`
+// check renders null on the server but a portal on first client paint,
+// which Next throws a hydration error for.
+function subscribeMount(notify: () => void) {
+  // Fire once after the current tick so the snapshot transitions from
+  // unmounted → mounted asynchronously, after hydration has settled. No
+  // unsubscribe work is needed — there's nothing else that can notify.
+  Promise.resolve().then(notify);
+  return () => {};
+}
+function getMountedClient() {
+  return true;
+}
+function getMountedServer() {
+  return false;
+}
+
 export function ToastContainer() {
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  // createPortal can't run on the server. useSyncExternalStore's
-  // getServerSnapshot already returns an empty array so first-paint state
-  // matches between server and client — no hydration mismatch.
-  if (typeof document === "undefined") return null;
+  const mounted = useSyncExternalStore(subscribeMount, getMountedClient, getMountedServer);
+  if (!mounted) return null;
 
   return createPortal(
     <div
