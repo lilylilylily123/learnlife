@@ -975,7 +975,6 @@ export function AttenderD(props: AttenderDProps) {
             </div>
           </div>
           <div className="flex" style={{ gap: 6 }}>
-            <Pill size="sm">Export</Pill>
             <Pill size="sm" variant="ink" onClick={onShowAddLearner}>
               + Add learner
             </Pill>
