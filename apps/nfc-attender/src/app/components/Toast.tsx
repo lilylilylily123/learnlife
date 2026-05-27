@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, AlertTriangle, Info } from "lucide-react";
 
@@ -96,9 +96,10 @@ function getServerSnapshot(): Toast[] {
 
 export function ToastContainer() {
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
+  // createPortal can't run on the server. useSyncExternalStore's
+  // getServerSnapshot already returns an empty array so first-paint state
+  // matches between server and client — no hydration mismatch.
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <div

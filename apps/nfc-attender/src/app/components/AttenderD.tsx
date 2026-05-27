@@ -17,6 +17,7 @@ import {
 } from "./ll-ui";
 import { LearnerRowsSkeleton, LearnerWallSkeleton } from "./LoadingSkeleton";
 import { RowOverflowMenu } from "./attender/RowOverflowMenu";
+import { ConfirmModal } from "./ConfirmModal";
 
 interface AttenderDProps {
   appVersion: string;
@@ -74,6 +75,8 @@ interface AttenderDProps {
   // Opens the justification reason modal for a learner. Only rendered next
   // to status when the day is currently marked justified.
   onOpenJustification?: (id: string) => void;
+  // Opens the keyboard-shortcut help overlay (also triggered by `?`).
+  onShowHelp?: () => void;
 }
 
 const STATUS_OPTIONS: ReadonlyArray<{
@@ -768,6 +771,7 @@ export function AttenderD(props: AttenderDProps) {
     onTimeEdit,
     onReset,
     onOpenJustification,
+    onShowHelp,
     isInitialLoading,
     fetchError,
     onRetryFetch,
@@ -782,14 +786,28 @@ export function AttenderD(props: AttenderDProps) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [commentValue, setCommentValue] = useState("");
   const [commentSaving, setCommentSaving] = useState(false);
+  // Row-menu reset confirm. The menu fires onReset on the parent, which routes
+  // the request through here so we render a real React modal instead of the
+  // window.confirm dialog Tauri's WKWebView silently drops.
+  const [resetTarget, setResetTarget] = useState<Student | null>(null);
 
-  // "/" focus shortcut for search
+  // "/" focuses search, "1"/"2" switch view mode. All gated on not-typing so
+  // they don't fire while the search input or a comment textarea is focused.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") {
+      const isTyping =
+        tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+      if (e.key === "/" && !isTyping) {
         e.preventDefault();
         searchRef.current?.focus();
+      } else if (e.key === "1" && !isTyping) {
+        e.preventDefault();
+        setViewMode("table");
+      } else if (e.key === "2" && !isTyping) {
+        e.preventDefault();
+        setViewMode("wall");
       }
     };
     window.addEventListener("keydown", handler);
@@ -1168,6 +1186,15 @@ export function AttenderD(props: AttenderDProps) {
           <Pill onClick={onToggleTestMode} active={testMode}>
             {testMode ? "Test ON" : "Test"}
           </Pill>
+          {onShowHelp && (
+            <Pill
+              onClick={onShowHelp}
+              title="Keyboard shortcuts (?)"
+              aria-label="Keyboard shortcuts"
+            >
+              ?
+            </Pill>
+          )}
         </div>
       </div>
 
@@ -1727,7 +1754,7 @@ export function AttenderD(props: AttenderDProps) {
                                 ? () => onOpenJustification(s.id)
                                 : undefined
                             }
-                            onReset={() => onReset(s.id)}
+                            onReset={() => setResetTarget(s)}
                           />
                         </div>
                       </div>
@@ -1932,6 +1959,20 @@ export function AttenderD(props: AttenderDProps) {
           </div>
         </div>
       )}
+      {resetTarget && (
+        <ConfirmModal
+          title={`Reset attendance for ${resetTarget.name}?`}
+          body="This clears today's check-in, lunch, and status. The record itself is kept so audit history stays intact."
+          confirmLabel="Reset day"
+          destructive
+          onConfirm={() => {
+            const id = resetTarget.id;
+            setResetTarget(null);
+            onReset(id);
+          }}
+          onCancel={() => setResetTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2030,17 +2071,16 @@ export function WallView({
 
   const clearSelection = () => setSelectedIds(new Set());
 
-  const bulkReset = () => {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const requestBulkReset = () => {
     if (!onReset || selectedIds.size === 0) return;
-    // Reset clears today's attendance data — confirm before firing N writes
-    // the user may not have intended (especially after a slip while flipping
-    // select mode on).
-    const ok = window.confirm(
-      `Reset attendance for ${selectedIds.size} learner${
-        selectedIds.size === 1 ? "" : "s"
-      }? This clears today's check-in, lunch, and status.`,
-    );
-    if (!ok) return;
+    setConfirmOpen(true);
+  };
+
+  const confirmBulkReset = () => {
+    setConfirmOpen(false);
+    if (!onReset) return;
     for (const id of selectedIds) onReset(id);
     exitSelectMode();
   };
@@ -2214,7 +2254,7 @@ export function WallView({
               Cancel
             </button>
             <button
-              onClick={bulkReset}
+              onClick={requestBulkReset}
               className="cursor-pointer"
               style={{
                 ...KICKER,
@@ -2228,6 +2268,18 @@ export function WallView({
             </button>
           </div>
         </div>
+      )}
+      {confirmOpen && (
+        <ConfirmModal
+          title={`Reset ${selectedIds.size} learner${
+            selectedIds.size === 1 ? "" : "s"
+          }?`}
+          body="This clears today's check-in, lunch, and status for everyone selected."
+          confirmLabel="Reset"
+          destructive
+          onConfirm={confirmBulkReset}
+          onCancel={() => setConfirmOpen(false)}
+        />
       )}
     </div>
   );

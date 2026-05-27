@@ -19,6 +19,7 @@ import { AttenderD } from "./components/AttenderD";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { JustificationModal } from "./components/JustificationModal";
 import { toast } from "./components/Toast";
+import { KeyboardHelpOverlay } from "./components/KeyboardHelpOverlay";
 import type { Student } from "./types";
 import { deriveStatus } from "@learnlife/shared";
 import {
@@ -106,6 +107,9 @@ export default function AttendancePage() {
   // refreshes don't reintroduce the placeholders.
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Keyboard help overlay (`?` opens, Esc closes).
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Justification modal — opens when a guide clicks the "add reason" icon next
   // to a justified status. Stores the learner whose reason we're editing.
@@ -334,6 +338,46 @@ export default function AttendancePage() {
   }, [isLoggedIn]);
 
   useAutoAbsentSweep({ enabled: isLoggedIn, viewDate, testMode, testTime });
+
+  // Global keyboard shortcuts. The handler bails when the focus is in any
+  // text input/textarea/contenteditable so typing in the search bar or a
+  // comment textarea doesn't trigger navigations. The `?` shortcut is treated
+  // as a meta-control and fires regardless of focus — there's no realistic
+  // text-entry case where `?` should also fire navigation.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isTyping =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean(target?.isContentEditable);
+      if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+      if (isTyping) return;
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        router.push("/history");
+      } else if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        setTestMode((t) => {
+          if (t) {
+            setTestTime(null);
+            setTestDate(null);
+          }
+          return !t;
+        });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isLoggedIn, router]);
 
   // Update attendance field via PocketBase
   const updateAttendance = useCallback(
@@ -804,6 +848,7 @@ export default function AttendancePage() {
   return (
     <>
       <UpdateNotification />
+      <KeyboardHelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <ErrorBoundary label="dashboard">
       <AttenderD
@@ -846,6 +891,7 @@ export default function AttendancePage() {
           setJustifyError(null);
           setJustifyingLearnerId(id);
         }}
+        onShowHelp={() => setHelpOpen(true)}
         isInitialLoading={!hasLoadedOnce && !fetchError}
         fetchError={fetchError}
         onRetryFetch={retryFetch}
