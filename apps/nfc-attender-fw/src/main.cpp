@@ -21,6 +21,7 @@
 
 #include "attendance_adapter.h"
 #include "buzzer.h"
+#include "clock_gate.h"
 #include "config.h"
 #include "fields.h"
 #include "nfc.h"
@@ -123,6 +124,25 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
     }
     g_last_learner_id = learner->id;
 
+    // Refuse to act on an untrusted clock.
+    //
+    // There is no DS3231 in this build, so until NTP lands the ESP32 believes
+    // it is 1970-01-01. Every threshold in the state machine is time-of-day
+    // based — 10:01 decides present vs late — so acting now would silently
+    // mark everyone `present` and stamp the PocketBase rows with a 1970 date,
+    // which then has to be unpicked by hand.
+    //
+    // Being visibly unavailable for the first few seconds after power-on is
+    // much cheaper than being confidently wrong all morning. See
+    // src/clock_gate.h.
+    if (!clock_gate::may_write_attendance(time_sync::is_synced(),
+                                          time_sync::has_time_override())) {
+      Serial.printf("[proc] clock not trusted — refusing to record tap by %s\n",
+                    learner->name.c_str());
+      post_ui(ui::Event::WaitingClock, learner->name.c_str());
+      continue;
+    }
+
     auto now_local = time_sync::now_local();
     auto now_unix = time_sync::now_unix();
     const std::string today = format_yyyy_mm_dd(now_local);
@@ -198,9 +218,16 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
 // to keep PB load light (≤6 GETs/min when idle).
 constexpr int64_t kPeriodicPrefetchMs = 10000;
 
+// How often to retry NTP while online but still without a trusted clock.
+// Until this succeeds the device refuses to record attendance (clock_gate),
+// so it is effectively out of service — retry briskly, but not so fast that a
+// blocked UDP/123 (common on school networks) turns into a busy loop.
+constexpr int64_t kNtpRetryMs = 30000;
+
 [[noreturn]] void network_task(void*) {
   bool last_online = false;
   int64_t last_prefetch_ms = 0;
+  int64_t last_ntp_try_ms = 0;
   for (;;) {
     bool online = WiFi.status() == WL_CONNECTED;
     if (online != last_online) {
@@ -208,6 +235,7 @@ constexpr int64_t kPeriodicPrefetchMs = 10000;
       last_online = online;
       if (online) {
         time_sync::sync_ntp();
+        last_ntp_try_ms = millis();
         // First-online roster refresh; in phase 3 also drain on schedule.
         std::vector<pb_client::LearnerRow> items;
         if (pb_client::login() && pb_client::fetch_roster(items)) {
@@ -232,6 +260,22 @@ constexpr int64_t kPeriodicPrefetchMs = 10000;
     // Wait for a flush signal or 5s timeout, whichever comes first.
     int64_t dummy = 0;
     xQueueReceive(g_flush_signal, &dummy, pdMS_TO_TICKS(5000));
+
+    // Keep retrying NTP while the clock is untrusted. Without this the only
+    // sync attempt is the one on the offline->online edge, so a single failed
+    // sync (a slow DHCP lease, a firewall dropping UDP/123 for the first few
+    // seconds) would leave the device refusing every tap until someone power
+    // cycles it or the WiFi drops and returns.
+    if (online && !time_sync::is_synced() &&
+        static_cast<int64_t>(millis()) - last_ntp_try_ms >= kNtpRetryMs) {
+      last_ntp_try_ms = millis();
+      Serial.println("[net] clock still untrusted — retrying NTP");
+      if (time_sync::sync_ntp()) {
+        // The idle screen shows "--:--" until this point; force a repaint so
+        // the real time appears without waiting for the next tap.
+        ui::show(ui::Event::Idle);
+      }
+    }
 
     if (online && queue::size() > 0) {
       queue::drain([](const queue::PendingScan& s) {

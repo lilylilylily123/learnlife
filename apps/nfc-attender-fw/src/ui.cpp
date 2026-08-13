@@ -26,7 +26,7 @@ constexpr uint32_t kSplashMs = 1500;
 Adafruit_SSD1306 g_oled(kWidth, kHeight, &Wire, /*reset=*/-1);
 bool g_have_oled = false;
 
-enum class Mode { Boot, Idle, Action, Unknown };
+enum class Mode { Boot, Idle, Action, Unknown, WaitingClock };
 
 struct State {
   Mode mode = Mode::Boot;
@@ -53,6 +53,7 @@ const char* verdict_for(Event ev) {
     case Event::AlreadyIn:      return "Already in";
     case Event::ScanLocked:     return "Locked";
     case Event::UnknownCard:    return "Unknown card";
+    case Event::WaitingClock:   return "No clock yet";
     default:                    return "";
   }
 }
@@ -152,6 +153,18 @@ void render_idle() {
 
   draw_centered("LearnLife", 0, 1);
 
+  // Before NTP lands, the ESP32's clock reads 1970 (there is no DS3231 in
+  // this build). Showing that as a confident "01:00" would be worse than
+  // useless — a guide would have no reason to suspect anything is wrong.
+  // Show placeholders instead, so the state is legible from across the desk.
+  if (!time_sync::is_synced()) {
+    draw_centered("--:--", 18, 3);
+    draw_centered("Waiting for clock", 52, 1);
+    render_overlay();
+    g_oled.display();
+    return;
+  }
+
   char clk[8];
   format_clock(clk, sizeof(clk));
   draw_centered(clk, 18, 3);
@@ -159,6 +172,22 @@ void render_idle() {
   char date[24];
   format_date(date, sizeof(date));
   draw_centered(date, 52, 1);
+
+  render_overlay();
+  g_oled.display();
+}
+
+// Shown when a card is tapped while the clock is still untrusted. The
+// important word is "Not recorded" — the learner must know to come back,
+// because nothing was written to PocketBase.
+void render_waiting_clock() {
+  g_oled.clearDisplay();
+  g_oled.setTextColor(SSD1306_WHITE);
+
+  draw_centered("Waiting for clock", 4, 1);
+  g_oled.drawLine(0, 15, kWidth - 1, 15, SSD1306_WHITE);
+  draw_centered("NOT", 22, 2);
+  draw_centered("RECORDED", 42, 2);
 
   render_overlay();
   g_oled.display();
@@ -218,6 +247,7 @@ void redraw() {
     case Mode::Idle:    render_idle();    break;
     case Mode::Action:  render_action();  break;
     case Mode::Unknown: render_unknown(); break;
+    case Mode::WaitingClock: render_waiting_clock(); break;
   }
   g_st.dirty = false;
   g_last_redraw_ms = millis();
@@ -265,6 +295,12 @@ void show(Event ev, const char* learner_name) {
 
     case Event::UnknownCard:
       g_st.mode = Mode::Unknown;
+      g_st.mode_until_ms = millis() + kFeedbackMs;
+      g_st.queued_offline = false;
+      break;
+
+    case Event::WaitingClock:
+      g_st.mode = Mode::WaitingClock;
       g_st.mode_until_ms = millis() + kFeedbackMs;
       g_st.queued_offline = false;
       break;

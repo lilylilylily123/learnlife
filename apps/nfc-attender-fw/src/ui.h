@@ -20,6 +20,11 @@ enum class Event {
   AlreadyIn,      // already checked in, day still in progress (no checkout yet)
   ScanLocked,     // 14:00–17:00 reject (state machine returned Locked)
   UnknownCard,
+  WaitingClock,   // tapped before NTP set the clock — nothing was recorded.
+                  // Without a DS3231 the device boots believing it is 1970,
+                  // and 10:01 is the present/late boundary, so acting on an
+                  // untrusted clock would silently mis-mark everyone. See
+                  // src/clock_gate.h.
   Queued,         // appended after one of the action events when offline
   NetworkError,   // persistent indicator until cleared
 };
