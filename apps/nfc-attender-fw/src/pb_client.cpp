@@ -19,6 +19,40 @@ namespace llattender::pb_client {
 
 namespace {
 
+// ── Concurrency ──────────────────────────────────────────────────────────
+//
+// Every global below is reachable from three FreeRTOS contexts: processor_task
+// (core 1), network_task (core 0) and the Arduino loop task running the serial
+// console. std::map and std::string are not thread-safe, and both the
+// processor and network paths also write /today.json. Without this lock the
+// failure mode is heap corruption surfacing as an unexplained reboot minutes
+// later — the kind of bug that gets blamed on the power supply or the
+// enclosure.
+//
+// Recursive because it costs nothing here and removes a whole class of
+// self-deadlock if a public function ever ends up calling another one.
+SemaphoreHandle_t g_mtx = nullptr;
+
+// RAII guard. Deliberately tolerant of a null mutex: if init() was somehow not
+// called, the correct behaviour is to run unlocked exactly as before rather
+// than to hard-fault a device sitting on a school front desk.
+class Lock {
+ public:
+  Lock() : held_(false) {
+    if (g_mtx != nullptr) {
+      held_ = xSemaphoreTakeRecursive(g_mtx, portMAX_DELAY) == pdTRUE;
+    }
+  }
+  ~Lock() {
+    if (held_) xSemaphoreGiveRecursive(g_mtx);
+  }
+  Lock(const Lock&) = delete;
+  Lock& operator=(const Lock&) = delete;
+
+ private:
+  bool held_;
+};
+
 // Cached bearer token. Refreshed on every login() call. We don't persist it
 // to NVS yet — the device re-logs in on boot, which is fine in Phase 2.
 std::string g_token;
@@ -160,7 +194,16 @@ std::string read_body(HTTPClient& http) {
 
 }  // namespace
 
+void init() {
+  if (g_mtx != nullptr) return;
+  g_mtx = xSemaphoreCreateRecursiveMutex();
+  if (g_mtx == nullptr) {
+    Serial.println("[pb] FATAL: could not create state mutex");
+  }
+}
+
 bool login() {
+  Lock lk;
   // Force a re-load so a freshly-provisioned config takes effect without a
   // reboot.
   g_cfg_loaded = false;
@@ -194,6 +237,7 @@ bool login() {
 }
 
 bool prefetch_today_attendance(const std::string& date) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] prefetch_today: not logged in");
     return false;
@@ -239,6 +283,7 @@ bool prefetch_today_attendance(const std::string& date) {
 }
 
 bool fetch_roster(std::vector<LearnerRow>& out) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] fetch_roster: not logged in");
     return false;
@@ -280,6 +325,7 @@ bool fetch_roster(std::vector<LearnerRow>& out) {
 bool ensure_today_row(const std::string& learner_id,
                       const std::string& date,
                       AttendanceRow& out, bool& created) {
+  Lock lk;
   created = false;
   if (g_token.empty()) {
     Serial.println("[pb] ensure_today_row: not logged in");
@@ -347,6 +393,7 @@ bool ensure_today_row(const std::string& learner_id,
 
 void update_today_cache_after_action(const std::string& learner_id,
                                      const CheckInAction& action) {
+  Lock lk;
   auto it = g_today_rows.find(learner_id);
   if (it == g_today_rows.end()) return;  // nothing cached yet
   AttendanceRow& row = it->second;
@@ -373,10 +420,12 @@ void update_today_cache_after_action(const std::string& learner_id,
 }
 
 bool load_today_cache_from_disk(const std::string& today) {
+  Lock lk;
   return load_today_cache(today);
 }
 
 void clear_today_cache() {
+  Lock lk;
   g_today_rows.clear();
   g_today_date.clear();
   LittleFS.remove(kCachePath);
@@ -384,6 +433,7 @@ void clear_today_cache() {
 }
 
 bool patch_attendance(const std::string& id, const std::string& fields_json) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] patch_attendance: not logged in");
     return false;

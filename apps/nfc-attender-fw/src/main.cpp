@@ -381,6 +381,10 @@ void setup() {
 
   roster::init();
   queue::init();
+  // Must happen before any task starts: pb_client's token, config snapshot and
+  // today-cache are touched from processor_task, network_task AND the serial
+  // console on the Arduino loop task.
+  pb_client::init();
 
   xTaskCreatePinnedToCore(nfc_task,       "nfc",  4096, nullptr, 5, nullptr, 0);
   xTaskCreatePinnedToCore(processor_task, "proc", 8192, nullptr, 4, nullptr, 1);

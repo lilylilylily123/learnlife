@@ -36,6 +36,22 @@ struct AttendanceRow {
   std::string lunch_in_legacy;
 };
 
+// Create the mutex guarding this module's shared state. MUST be called from
+// setup() before any task starts.
+//
+// Everything in pb_client.cpp's anonymous namespace — the bearer token, the
+// config snapshot, and the today-cache — is reachable from three different
+// FreeRTOS contexts:
+//
+//   processor_task (core 1)  ensure_today_row, update_today_cache_after_action
+//   network_task   (core 0)  login, fetch_roster, prefetch, patch_attendance
+//   the Arduino loop task    the `w` and `c` serial console commands
+//
+// std::map and std::string are not thread-safe, and two of those paths also
+// write /today.json. Concurrent access corrupts the heap, which surfaces as an
+// unexplained reboot long after the fact.
+void init();
+
 // Authenticate with the device account stored in NVS. Caches the token.
 bool login();
 
