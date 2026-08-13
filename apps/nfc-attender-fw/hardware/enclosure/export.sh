@@ -52,6 +52,23 @@ fi
 echo "openscad: $(openscad --version 2>&1 | head -1)"
 mkdir -p stl
 
+# One scratch directory for --check runs, removed on exit however we leave.
+TMPWORK="$(mktemp -d)"
+trap 'rm -rf "$TMPWORK"' EXIT
+
+# Binary STL is ~5x smaller than ASCII for the same mesh, which matters
+# because these files live in git. `--export-format` is not in every OpenSCAD
+# build though — Ubuntu's apt package (used by CI) is several years behind the
+# macOS snapshot — so probe for it once rather than assuming.
+FORMAT_ARGS=()
+if openscad --export-format=binstl -o "${TMPWORK}/probe.stl" \
+     <(echo 'cube(1);') >/dev/null 2>&1; then
+  FORMAT_ARGS=(--export-format=binstl)
+else
+  echo "note: this OpenSCAD lacks --export-format; writing ASCII STL"
+fi
+rm -f "${TMPWORK}/probe.stl"
+
 # A single part was named on the command line.
 if [[ $# -gt 0 ]]; then
   PARTS=("$@")
@@ -71,7 +88,7 @@ for part in "${PARTS[@]}"; do
   fi
 
   if [[ $CHECK_ONLY -eq 1 ]]; then
-    out="$(mktemp -t "${part}").stl"
+    out="${TMPWORK}/${part}.stl"
   else
     out="stl/${part}.stl"
   fi
@@ -79,10 +96,8 @@ for part in "${PARTS[@]}"; do
   # OpenSCAD reports geometry problems (non-manifold results, degenerate
   # faces) on stderr while still exiting 0, so grep the log rather than
   # trusting the exit status alone.
-  # binstl, not the default ASCII stl: binary is roughly 5x smaller for the
-  # same mesh (these files live in git) and every slicer reads it.
   log="$(mktemp)"
-  if ! openscad --export-format=binstl -o "$out" "$src" >"$log" 2>&1; then
+  if ! openscad "${FORMAT_ARGS[@]}" -o "$out" "$src" >"$log" 2>&1; then
     echo "  FAIL    ${src}"
     sed 's/^/            /' "$log" >&2
     failed=$((failed + 1))
@@ -113,7 +128,7 @@ for part in "${PARTS[@]}"; do
   fi
 
   rm -f "$log"
-  [[ $CHECK_ONLY -eq 1 ]] && rm -f "$out"
+  # (--check output lands in TMPWORK, cleaned up by the EXIT trap)
 done
 
 echo
