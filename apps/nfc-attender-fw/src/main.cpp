@@ -189,8 +189,18 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
   }
 }
 
+// How often the network task re-pulls today's attendance cache while the
+// device is online and idle. Without this refresh, a dashboard-side change
+// (Reset day, justification, manual time edit) never reaches the firmware —
+// the local cache stays pinned to whatever value PB had on the last reconnect
+// or the last local action. 10s is a tradeoff: fast enough that a guide who
+// resets a learner and walks to the reader sees the right state, slow enough
+// to keep PB load light (≤6 GETs/min when idle).
+constexpr int64_t kPeriodicPrefetchMs = 10000;
+
 [[noreturn]] void network_task(void*) {
   bool last_online = false;
+  int64_t last_prefetch_ms = 0;
   for (;;) {
     bool online = WiFi.status() == WL_CONNECTED;
     if (online != last_online) {
@@ -214,6 +224,7 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
           if (!pb_client::load_today_cache_from_disk(date)) {
             pb_client::prefetch_today_attendance(date);
           }
+          last_prefetch_ms = millis();
         }
       }
     }
@@ -249,6 +260,14 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
         return pb_client::patch_attendance(id, s.fields_json);
       });
     }
+
+    // Periodic prefetch DISABLED — pb_response::parse_attendance_page OOMs on a
+    // 61-row response (JsonDocument copy of the body + per-row lunch_events
+    // re-serialise blows past free heap once TLS is established). Re-enable
+    // once parse_attendance_page streams from the HTTP response or pages the
+    // request. Until then, dashboard-side edits (Reset day, justifications)
+    // only reach the firmware on the next reboot or local tap.
+    (void)last_prefetch_ms;
   }
 }
 
@@ -337,11 +356,37 @@ void handle_console_line(const std::string& line) {
   if (line.empty()) return;
   if (line == "?" || line == "h" || line == "help") {
     Serial.println("[cli] commands:");
-    Serial.println("[cli]   t HH:MM [W]  override clock (W: 0=Sun..6=Sat)");
-    Serial.println("[cli]   t off        clear override");
-    Serial.println("[cli]   c            clear local today-cache");
-    Serial.println("[cli]   w            wipe PB row for last-scanned learner");
-    Serial.println("[cli]   ?            this help");
+    Serial.println("[cli]   t HH:MM [W]      override clock (W: 0=Sun..6=Sat)");
+    Serial.println("[cli]   t off            clear override");
+    Serial.println("[cli]   c                clear local today-cache");
+    Serial.println("[cli]   w                wipe PB row for last-scanned learner");
+    Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
+    Serial.println("[cli]   ?                this help");
+    return;
+  }
+  if (line.rfind("wifi ", 0) == 0) {
+    const std::string rest = line.substr(5);
+    const size_t bar = rest.find('|');
+    if (bar == std::string::npos) {
+      Serial.println("[cli] usage: wifi <ssid>|<password>");
+      return;
+    }
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    c.wifi_ssid = rest.substr(0, bar);
+    c.wifi_pw = rest.substr(bar + 1);
+    if (c.wifi_ssid.empty()) {
+      Serial.println("[cli] empty SSID — not saving");
+      return;
+    }
+    if (!llattender::config::save(c)) {
+      Serial.println("[cli] wifi save failed");
+      return;
+    }
+    Serial.printf("[cli] saved wifi creds (ssid='%s') — rebooting\n",
+                  c.wifi_ssid.c_str());
+    delay(500);
+    ESP.restart();
     return;
   }
   if (line == "c") {
