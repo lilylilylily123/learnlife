@@ -37,10 +37,11 @@ use <base.scad>
 use <lid.scad>
 use <stand.scad>
 
-show_lid   = false;
+show_lid   = true;
 show_parts = true;
 show_stand = true;     // the wedge cradle (stand_angle in params.scad)
-lid_lift   = 0;      // exploded gap, mm. 0 = closed.
+lid_lift   = 0;        // exploded gap, mm. 0 = closed;
+                       // raise to ~25 to look inside
 
 // Mirrors the derived values in base.scad / lid.scad.
 ext_x = box_ix + 2 * wall_t;

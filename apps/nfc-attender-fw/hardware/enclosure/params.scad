@@ -464,17 +464,22 @@ $fa = 1;
 $fs = 0.4;
 
 
-// ══ MAX EXTERNAL FOOTPRINT — READ BEFORE CHANGING box_ix / box_iy ════════
+// ══ EXTERNAL FOOTPRINT AND THE PRINT PLATE ══════════════════════════════
 //
-// External size is box_ix + 2*wall_t by box_iy + 2*wall_t.
-// With the defaults above that is 124.8 x 92.8 mm.
+// External size is box_ix + 2*wall_t by box_iy + 2*wall_t — 76.8 x 118.8 mm at
+// the current values.
 //
-// Two bases side by side is ~250 mm, which does NOT fit a 250 x 210 bed.
-// Rotated 90 degrees it is ~186 x 128 mm, which does. So keeping the external
-// footprint at or below ~125 x 95 mm buys you two parts per plate, which
-// halves the number of makerspace visits.
+// Narrow-and-deep turns out to plate very well. On a 250 x 210 bed:
 //
-// Four parts (2 bases + 2 lids) will NOT fit on a 250 x 210 bed in any
-// orientation. Plan on: plate A = 2 bases, plate B = 2 lids + 2 stands.
+//     2 bases side by side        159 x 119 mm    fits easily
+//     3 bases side by side        240 x 119 mm    still fits
+//     2 bases + 2 lids together   243 x 159 mm    fits (rotated)
+//     2 stands                    173 x 119 mm    fits
 //
-// CONFIRM THE ACTUAL BED SIZE before treating box_ix/box_iy as final.
+// So BOTH devices' bases and lids go on a single plate, and the stands on a
+// second. That is one print run rather than the two the old wide box needed.
+//
+// The earlier 130 x 100 layout could not manage four parts on a plate in any
+// orientation, which is a small extra reason the stacked design is better.
+//
+// CONFIRM THE ACTUAL BED SIZE before treating any of this as settled.

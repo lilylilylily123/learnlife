@@ -45,29 +45,40 @@ drops the part onto the bed on import.
 
 ## Bed size drives the footprint
 
-External size is `box_ix + 2*wall_t` × `box_iy + 2*wall_t` — **124.8 × 92.8 mm**
-at the defaults.
+External size is `box_ix + 2*wall_t` × `box_iy + 2*wall_t` — **76.8 × 118.8 mm**.
 
-Two bases side by side is ~250 mm, which does **not** fit a 250 × 210 bed.
-Rotated 90°, it's ~186 × 128 mm, which does. Keeping the external footprint at
-or below **~125 × 95 mm** buys two parts per plate and halves the number of
-makerspace visits.
+Narrow-and-deep plates well. On a 250 × 210 bed:
 
-Four parts (2 bases + 2 lids) will not fit a 250 × 210 bed in any orientation.
+| Plate | Size | |
+|---|---|---|
+| 2 bases side by side | 159 × 119 mm | fits easily |
+| 3 bases side by side | 240 × 119 mm | still fits |
+| **2 bases + 2 lids** | 243 × 159 mm | fits, rotated |
+| 2 stands | 173 × 119 mm | fits |
 
-**Confirm the real bed size before treating `box_ix`/`box_iy` as final.**
+So **both devices' bases and lids go on one plate**, and the stands on a second
+— one print run, not two. The earlier wide layout couldn't manage four parts on
+a plate in any orientation.
+
+**Confirm the real bed size before treating this as settled.**
 
 ## Suggested plates
 
-| Visit | Plate | Time |
-|---|---|---|
-| 1 | `antenna_tiles` + `coupon` | ~45 min |
-| 2 | A: 2 × `base` · B: 2 × `lid` + 2 × `stand` + retainers | ~10–14 h |
-| 3 (reserve) | Reprints — most likely just lids | |
+| Run | Parts | Rough time | Filament |
+|---|---|---|---|
+| 1 | `coupon` (+ `antenna_tiles` if wanted) | ~40–55 min | ~15 g |
+| 2 | 2 × `base` + 2 × `lid` — both devices, one plate | ~20 h | ~236 g |
+| 3 | 2 × `stand` | ~10 h | ~118 g |
 
-If the makerspace is genuinely one-shot, print **one complete device** at visit
-2 and the second only after the first assembles and works. Losing one enclosure
-to a fit error is annoying; losing two is a schedule problem.
+Run 1 must come first — it sets the five tolerance parameters everything else
+inherits, and it costs under an hour.
+
+If committing ~20 h to run 2 on unverified dimensions feels rash, print **one
+base + one lid**, assemble, and print the second set once it fits. Losing one
+enclosure to a fit error is annoying; losing two is a schedule problem.
+
+The stands are last on purpose: the device works flat, so they are the part you
+can defer or skip if the printer is busy.
 
 ## After printing
 

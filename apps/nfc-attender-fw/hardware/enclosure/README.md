@@ -69,6 +69,7 @@ Steps 1–3 are independent of each other and of the breakout.
 | `antenna_tiles.scad` | Thickness ladder for the read-through-plastic test. Standalone. |
 | `coupon.scad` | Tolerance test plate: calibration square, screw bosses, PCB pockets, lip grooves, USB slots, bridge test. |
 | `base.scad` | The tray. Holds every module; has the OLED window, USB cutout, vents. |
+| `stand.scad` | 15° wedge cradle the box drops into. Separate, so the tilt is a cheap reprint. |
 | `lid.scad` | Featureless plate. Thin over the antenna, TAP CARD label, screws down. |
 | `assembly.scad` | **Not printable.** Preview of base + lid + mock modules — look at this before booking a printer. |
 | `lib/layout_checks.scad` | Clearance asserts that run on every render. See below. |
@@ -77,9 +78,11 @@ Steps 1–3 are independent of each other and of the breakout.
 | `stl/` | Generated STLs, committed so a makerspace never needs the toolchain. |
 | `docs/measurements.md` | Caliper worksheet — fill in, then copy into `params.scad`. |
 
-Parts still to be written: `stand.scad` (the 15° wedge), `retainer.scad` (dupont
-hold-down bar), `clamp.scad` (external cable clamp). `export.sh` skips them
-until they exist.
+Parts still to be written: `retainer.scad` (a bar that stops dupont housings
+backing out of the peripheral headers) and `clamp.scad` (an external cable
+clamp, belt-and-braces over the moulded zip-tie bridge). Neither is needed for a
+working device and neither depends on the breakout board. `export.sh` skips
+them until they exist.
 
 ## The layout is checked, not eyeballed
 
@@ -238,27 +241,36 @@ the antenna panel comes out perfectly flat and at exactly `lid_t`.
 
 ## Bed size drives the footprint
 
-External size is `box_ix + 2*wall_t` × `box_iy + 2*wall_t` — 124.8 × 92.8 mm at
-the defaults.
+External size is `box_ix + 2*wall_t` × `box_iy + 2*wall_t` — **76.8 × 118.8 mm**.
 
-Two bases side by side is ~250 mm, which does **not** fit a 250 × 210 bed.
-Rotated 90°, it's ~186 × 128 mm, which does. Keeping the external footprint at
-or below **~125 × 95 mm** buys two parts per plate, halving the number of
-makerspace visits.
+Narrow-and-deep plates well. On a 250 × 210 bed:
 
-Four parts (2 bases + 2 lids) will not fit a 250 × 210 bed in any orientation.
-Plan on plate A = 2 bases, plate B = 2 lids + 2 stands.
+| Plate | Size | |
+|---|---|---|
+| 2 bases side by side | 159 × 119 mm | fits easily |
+| 3 bases side by side | 240 × 119 mm | still fits |
+| **2 bases + 2 lids** | 243 × 159 mm | fits, rotated |
+| 2 stands | 173 × 119 mm | fits |
 
-**Confirm the real bed size before treating `box_ix`/`box_iy` as final.**
+So **both devices' bases and lids go on one plate**, and the stands on a second
+— one print run, not two. The earlier wide layout couldn't manage four parts on
+a plate in any orientation, which is a small extra argument for the stacked
+design.
+
+**Confirm the real bed size before treating this as settled.**
 
 ## Print plan
 
-- **Visit 1** — `antenna_tiles` + `coupon`. One small plate, ~45 min total.
-- **Visit 2** — plate A: 2 × base. Plate B: 2 × lid + 2 × stand + retainers.
-  Roughly 10–14 h.
-- **Visit 3 (reserve)** — reprint whatever the first assembly proved wrong,
-  most likely just lids.
+| Run | Parts | Rough time |
+|---|---|---|
+| 1 | `coupon` (+ `antenna_tiles` if you want them) | ~40–55 min |
+| 2 | 2 × `base` + 2 × `lid` — both devices, one plate | ~20 h |
+| 3 | 2 × `stand` | ~10 h |
 
-If the makerspace is genuinely one-shot, print **one complete device** at visit
-2 and the second only after the first assembles and works. Losing one enclosure
-to a fit error is annoying; losing two is a schedule problem.
+Run 1 has to come first: it sets the five tolerance parameters everything else
+inherits, and it is cheap.
+
+If you'd rather not commit ~20 h to run 2 on unverified dimensions, print **one
+base + one lid** first, assemble it, and print the second set once it fits.
+Losing one enclosure to a fit error is annoying; losing two is a schedule
+problem.
