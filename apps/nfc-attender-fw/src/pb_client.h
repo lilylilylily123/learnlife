@@ -57,8 +57,19 @@ struct AttendanceRow {
 // unexplained reboot long after the fact.
 void init();
 
-// Authenticate with the device account stored in NVS. Caches the token.
+// Authenticate with the device account stored in NVS. Caches the token in RAM
+// and NVS, with the expiry read from the token's own `exp` claim.
 bool login();
+
+// Ensure a usable bearer token exists, logging in only if the cached one is
+// missing or close to expiry. Prefer this over login() — on a reboot it
+// normally reuses the token from NVS and skips the round-trip entirely.
+bool ensure_token();
+
+// Drop the cached token from RAM and NVS. Called after a 401, so the next
+// request re-authenticates rather than retrying a credential the server has
+// already rejected.
+void clear_token();
 
 // Pull every learner. Equivalent to listLearners({ perPage: 500 }).
 bool fetch_roster(std::vector<LearnerRow>& out);

@@ -270,7 +270,7 @@ constexpr int64_t kNtpRetryMs = 30000;
         }
         // First-online roster refresh; in phase 3 also drain on schedule.
         std::vector<pb_client::LearnerRow> items;
-        if (pb_client::login() && pb_client::fetch_roster(items)) {
+        if (pb_client::ensure_token() && pb_client::fetch_roster(items)) {
           roster::replace(items);
           // Pre-fetch today's attendance rows once. Every learner's first
           // tap of the day now hits cache instead of doing two TLS calls.
@@ -356,6 +356,13 @@ constexpr int64_t kNtpRetryMs = 30000;
         // and because a failed drain stops at the head of the queue, retrying
         // it forever would block every scan queued behind it.
         const int code = pb_client::patch_attendance_status(id, s.fields_json);
+        if (code == 401) {
+          // Token rejected. Drop it so the next cycle logs in again rather
+          // than replaying a credential the server has already refused. The
+          // entry stays queued (401 classifies as RetryLater).
+          Serial.println("[net] 401 — clearing cached token");
+          pb_client::clear_token();
+        }
         const WriteOutcome outcome = classify_http_status(code);
         if (outcome == WriteOutcome::PermanentFail) {
           Serial.printf("[net] giving up on scan for learner %s (HTTP %d) — "
@@ -390,7 +397,7 @@ constexpr int64_t kNtpRetryMs = 30000;
       if (!pb_client::refresh_today_delta(date, changed)) {
         // No watermark for this date yet — either the first poll after boot
         // failed, or the day rolled over. A full prefetch re-establishes it.
-        if (pb_client::login()) {
+        if (pb_client::ensure_token()) {
           pb_client::prefetch_today_attendance(date);
         }
       } else if (changed > 0) {

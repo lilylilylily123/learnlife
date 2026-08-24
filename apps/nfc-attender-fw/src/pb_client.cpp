@@ -12,8 +12,11 @@
 
 #include "chunked_source.h"
 #include "config.h"
+#include "time_sync.h"
 #include "fields.h"
+#include "jwt.h"
 #include "json_source.h"
+#include "pb_ca.h"
 #include "pb_request.h"
 #include "pb_response.h"
 
@@ -55,9 +58,11 @@ class Lock {
   bool held_;
 };
 
-// Cached bearer token. Refreshed on every login() call. We don't persist it
-// to NVS yet — the device re-logs in on boot, which is fine in Phase 2.
+// Cached bearer token, mirrored in NVS so it survives a reboot. `g_token_exp`
+// is the `exp` claim decoded from the token itself, not a locally-computed
+// guess at a lifetime.
 std::string g_token;
+std::time_t g_token_exp = 0;
 
 // Cached snapshot of the config used by all calls. Re-loaded each time we go
 // online so the user can update credentials via the serial provisioner without
@@ -189,11 +194,26 @@ bool ensure_cfg() {
 // Caller owns `http` and `client` and is responsible for end() / cleanup.
 bool open_https(HTTPClient& http, WiFiClientSecure& client,
                 const std::string& url, bool with_auth = true) {
-  client.setInsecure();  // TODO (phase 6+): pin pockethost.io's CA.
+  // Verify the server against a pinned root instead of trusting anything that
+  // answers. setInsecure() used to mean this device would hand its PocketBase
+  // account password to a laptop running a rogue AP named after the school
+  // WiFi. See src/pb_ca.h for the chain and for what to check if PocketHost
+  // ever changes issuer.
+  //
+  // Requires a correct clock: with a CA set, mbedTLS enforces the
+  // certificate's validity dates, and a pre-NTP device believing it is 1970
+  // fails every handshake as "not yet valid". The clock gate is what makes
+  // this safe (src/clock_gate.h).
+  client.setCACert(kPocketHostRootCA);
+
   // Long-ish timeouts so flaky WiFi doesn't immediately abort an in-flight
   // PATCH. The network task is the one waiting; the NFC task is unaffected.
   http.setConnectTimeout(8000);
   http.setTimeout(8000);
+  // The handshake is the slow part of a pinned connection — certificate chain
+  // verification on an ESP32 takes real time. The default is tighter than
+  // that on a congested network.
+  client.setHandshakeTimeout(15);
   if (!http.begin(client, String(url.c_str()))) {
     Serial.printf("[pb] http.begin failed for %s\n", url.c_str());
     return false;
@@ -255,6 +275,50 @@ void init() {
   }
 }
 
+// Reuse the persisted token when it still has real life left, otherwise log
+// in. Returns false only if a login was needed and failed.
+//
+// This is what finally makes config.h's `token` / `token_expires` fields mean
+// something — they have been persisted since Phase 1 while pb_client logged in
+// again on every single boot and reconnect.
+bool ensure_token() {
+  Lock lk;
+  if (!ensure_cfg()) return false;
+
+  if (!g_token.empty() &&
+      jwt::is_usable(g_token, g_token_exp, time_sync::now_unix())) {
+    return true;
+  }
+
+  // Nothing in RAM — try NVS before paying for a login. This is the common
+  // path on a reboot.
+  if (g_token.empty() && !g_cfg.token.empty()) {
+    if (jwt::is_usable(g_cfg.token, g_cfg.token_expires,
+                       time_sync::now_unix())) {
+      g_token = g_cfg.token;
+      g_token_exp = g_cfg.token_expires;
+      Serial.println("[pb] reusing cached token from NVS (no login needed)");
+      return true;
+    }
+    Serial.println("[pb] cached token expired — logging in");
+  }
+
+  return login();
+}
+
+void clear_token() {
+  Lock lk;
+  g_token.clear();
+  g_token_exp = 0;
+  // Clear the persisted copy too, or the next boot retries a token already
+  // known to be rejected.
+  if (ensure_cfg()) {
+    g_cfg.token.clear();
+    g_cfg.token_expires = 0;
+    config::save(g_cfg);
+  }
+}
+
 bool login() {
   Lock lk;
   // Force a re-load so a freshly-provisioned config takes effect without a
@@ -285,7 +349,23 @@ bool login() {
     return false;
   }
   g_token = std::move(tok);
-  Serial.println("[pb] login ok");
+
+  // Read the expiry from the token itself rather than assuming a lifetime.
+  // If it can't be parsed the token still works — it just won't be reused
+  // after a reboot, which is a slow path, not a broken one.
+  if (jwt::extract_exp(g_token, g_token_exp)) {
+    g_cfg.token = g_token;
+    g_cfg.token_expires = g_token_exp;
+    config::save(g_cfg);
+    const long remaining =
+        static_cast<long>(g_token_exp - time_sync::now_unix());
+    Serial.printf("[pb] login ok — token cached, valid ~%ld min\n",
+                  remaining / 60);
+  } else {
+    g_token_exp = 0;
+    Serial.println("[pb] login ok (token expiry unreadable — will re-login "
+                   "next boot)");
+  }
   return true;
 }
 
