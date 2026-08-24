@@ -28,6 +28,11 @@ The lid orientation matters most: printing it outer-face-down means the surface
 a card touches is the smooth bed face, and its thickness is exact rather than
 subject to top-layer variation.
 
+**Flip the lid 180° in the slicer.** It is modelled in assembly orientation so
+its features line up with the base, which means the OLED retaining ribs hang
+*below* z=0 in the exported STL. That is expected, not a bug — every slicer
+drops the part onto the bed on import.
+
 ## Settings
 
 | Setting | Value | Why |

@@ -60,16 +60,41 @@ screw_pilot_d = 2.5;        // [COUPON] pilot hole for an M3 self-tapping screw.
 
 wall_t   = 2.4;             // side wall thickness (3 perimeters at 0.4 nozzle)
 floor_t  = 2.4;             // base floor thickness
-lid_t    = 2.0;             // [TILE] lid thickness — and therefore the plastic
-                            // the NFC field must cross. THE most important
-                            // number in this file for read reliability.
-                            // Validate with antenna_tiles.scad before printing
-                            // a real lid. Tested band: 1.2 - 3.0.
 
-// Internal envelope. Provisional until the makerspace's bed size is known —
-// see `MAX EXTERNAL FOOTPRINT` note at the bottom of this file.
-box_ix = 120;               // internal X (left-right)
-box_iy = 88;                // internal Y (front-back)
+lid_plate_t = 4.0;          // general lid thickness. A 125 x 95 mm plate at
+                            // 2 mm flexes enough to feel cheap and to bow away
+                            // from the OLED it is meant to hold down, so the
+                            // lid is thicker EXCEPT directly over the antenna.
+                            //
+                            // 4.0 rather than 3.0 because the screw heads
+                            // countersink 3 mm into it: at 3.0 the counterbore
+                            // went straight through the top face. lid.scad
+                            // asserts that at least 1 mm of plate remains
+                            // under each head to bear on.
+
+lid_t    = 2.0;             // [TILE] plastic over the ANTENNA ONLY — a pocket
+                            // milled into the lid's underside thins it to this
+                            // over the coil. THE most important number in this
+                            // file for read reliability. Validate with
+                            // antenna_tiles.scad before printing a real lid.
+                            // Tested band: 1.2 - 3.0. Must be < lid_plate_t.
+
+// Internal envelope.
+//
+// Driven by the layout, not chosen: the breakout and the PN532 have to sit
+// side by side with antenna_keepout between them (they cannot stack — see
+// that parameter), and the corner bosses eat ~10 mm at each edge. With the
+// current PLACEHOLDER breakout size that works out to a minimum of about
+// 120 x 94, rounded up here for margin.
+//
+// base.scad asserts all of this at render time. If you change a module
+// dimension and the layout stops fitting, the render fails with a message
+// naming the clearance that broke rather than producing a quietly wrong part.
+//
+// Expect this to SHRINK once the real breakout is measured — the placeholder
+// (75 x 50) is a guess at the large end.
+box_ix = 125;               // internal X (left-right)
+box_iy = 95;                // internal Y (front-back)
 box_iz = 40;                // internal Z (floor to lid underside)
 
 corner_r = 4;               // external corner radius
@@ -97,11 +122,42 @@ insert_d      = 4.2;        // M3 heat-set insert bore (4.0 insert + 0.2 fit)
 insert_depth  = 5.0;
 
 boss_od       = 7.0;        // screw boss outer diameter
-boss_h        = 12.0;       // screw boss height above the floor
+                            // Bosses run the FULL internal height (box_iz) so
+                            // the lid screws down into them from above. There
+                            // is no separate boss height parameter — a boss
+                            // shorter than the box could not reach the lid.
 screw_head_d  = 6.0;        // screw head diameter (for the countersink)
 screw_head_h  = 3.0;
 screw_len     = 12;         // M3 x 12 self-tapping
 boss_inset    = 6.0;        // boss centre distance from the internal corner
+
+
+// ══ INTERNAL LAYOUT ══════════════════════════════════════════════════════
+// WHERE each module sits on the floor, in internal coordinates: (0,0) is the
+// front-left INNER corner, +X right, +Y back.
+//
+// ⚠ These are the values most likely to need adjusting once the breakout
+// board is in hand, because they depend on its real size and on which way its
+// plugged-in DevKit faces. Render assembly.scad and look before printing.
+//
+// The layout intent: the breakout runs front-to-back down the LEFT side, and
+// the PN532 tap zone sits to its RIGHT, laterally clear of its copper. See
+// antenna_keepout above for why they can't simply stack.
+
+stb_rotate = 90;            // breakout rotation, degrees. 90 = long axis
+                            // front-back, which is what makes room for the
+                            // tap zone beside it.
+stb_pos_x = 10;             // breakout front-left corner, internal coords
+stb_pos_y = 10;
+
+pn_pos_x = 69;              // PN532 front-left corner, internal coords
+pn_pos_y = 25;
+
+buz_pos_x = 70;             // buzzer centre — sits against the front wall so
+buz_pos_y = 8;              // its sound holes fire at the user, not the desk
+
+oled_pos_x = 35;            // OLED window centre along the front wall (X)
+oled_z = 22;                // OLED window centre height above the floor
 
 
 // ══ MODULES ══════════════════════════════════════════════════════════════

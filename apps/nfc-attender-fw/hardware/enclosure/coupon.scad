@@ -181,6 +181,12 @@ boss_x0 = 40;
 boss_y = 68;
 boss_pitch = 14;
 
+// Local, not from params.scad: the real enclosure bosses run the full internal
+// height of the box (see the note on boss_od there), which would make this
+// coupon 40mm tall for no benefit. 12mm is deep enough to test whether a pilot
+// size bites without splitting, which is the only question being asked here.
+coupon_boss_h = 12;
+
 module calibration_block() {
   translate([cal_x, cal_y, coupon_t])
     cube([cal_size, cal_size, cal_h]);
@@ -192,13 +198,13 @@ module calibration_block() {
 module screw_boss_ladder() {
   for (i = [0 : len(pilot_ds) - 1])
     translate([boss_x0 + i * boss_pitch, boss_y, coupon_t])
-      cylinder(h = boss_h, d = boss_od);
+      cylinder(h = coupon_boss_h, d = boss_od);
 }
 
 module screw_pilot_cuts() {
   for (i = [0 : len(pilot_ds) - 1])
     translate([boss_x0 + i * boss_pitch, boss_y, coupon_t - 0.5])
-      cylinder(h = boss_h + 1, d = pilot_ds[i]);
+      cylinder(h = coupon_boss_h + 1, d = pilot_ds[i]);
 }
 
 // ── BACK (y 84): standing test wall ─────────────────────────────────────

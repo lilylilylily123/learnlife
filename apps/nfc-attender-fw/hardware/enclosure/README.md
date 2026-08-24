@@ -41,13 +41,46 @@ order your printer access allows.
 | `params.scad` | **Every** tunable dimension. Flat `name = value;` lines only. |
 | `antenna_tiles.scad` | Thickness ladder for the read-through-plastic test. Standalone. |
 | `coupon.scad` | Tolerance test plate: calibration square, screw bosses, PCB pockets, lip grooves, USB slots, bridge test. |
+| `base.scad` | The tray. Holds every module; has the OLED window, USB cutout, vents. |
+| `lid.scad` | Featureless plate. Thin over the antenna, TAP CARD label, screws down. |
+| `assembly.scad` | **Not printable.** Preview of base + lid + mock modules — look at this before booking a printer. |
+| `lib/layout_checks.scad` | Clearance asserts that run on every render. See below. |
 | `export.sh` | Renders every part to `stl/`. `--check` parses without writing. |
 | `stl/` | Generated STLs, committed so a makerspace never needs the toolchain. |
 | `docs/measurements.md` | Caliper worksheet — fill in, then copy into `params.scad`. |
 
-Parts still to be written (gated on step 3): `base.scad`, `lid.scad`,
-`stand.scad`, `retainer.scad`, `clamp.scad`. `export.sh` skips them until they
-exist.
+Parts still to be written: `stand.scad` (the 15° wedge), `retainer.scad` (dupont
+hold-down bar), `clamp.scad` (external cable clamp). `export.sh` skips them
+until they exist.
+
+## The layout is checked, not eyeballed
+
+`lib/layout_checks.scad` asserts every clearance at render time — module
+footprints inside the box, the antenna keepout, nothing overlapping a corner
+boss, the OLED ribs actually reaching the display, the countersink not breaking
+through the lid.
+
+This is not decoration. The first draft of `base.scad` rendered as a perfectly
+valid manifold solid with **three real collisions in it**: the breakout
+overlapped a corner boss, the buzzer overlapped the OLED pocket, and the antenna
+keepout was short by 0.65 mm. None of that is visible in a render — OpenSCAD
+fuses overlapping solids into one clean-looking part, and you would find out six
+hours into a print.
+
+So when you replace the placeholder dimensions with real measurements, the
+render either succeeds or fails with a message naming the constraint that broke
+and what to change:
+
+```
+ERROR: Assertion failed: "Antenna keepout violated: only 5.35mm between the
+breakout and the coil, need 12mm. Move pn_pos_x right, move the breakout left,
+widen box_ix, or lower antenna_keepout if the coil-over-breakout test showed
+the copper doesn't matter."
+```
+
+Expect the box to **shrink** once the real breakout is measured — the
+placeholder (75 × 50 mm) is a guess at the large end, and `box_ix`/`box_iy` are
+sized to fit it.
 
 ## How to change the design
 
