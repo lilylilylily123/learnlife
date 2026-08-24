@@ -3,6 +3,25 @@
 Parametric OpenSCAD enclosure for the standalone NFC attendance terminal.
 Two units, solderless assembly, printed at a school/makerspace printer.
 
+## Looking at the model
+
+```bash
+cd apps/nfc-attender-fw/hardware/enclosure
+./view.sh              # assembly preview — then press F5
+./view.sh base         # or a single part
+```
+
+Two things that make it look broken when it isn't:
+
+- **The OpenSCAD window opens empty.** It does not render on open — press
+  **F5**. (F6 is the slow exact render; you only need it before exporting.)
+- **It must be run from this directory.** Every part does
+  `include <params.scad>`, which resolves against the working directory, so
+  `openscad apps/.../assembly.scad` from the repo root opens a blank new
+  document instead. `view.sh` cds for you.
+
+The `qt.qpa.fonts` and `FALLBACK` lines OpenSCAD prints on macOS are harmless.
+
 ## Start here
 
 Nothing in this directory needs to be designed before you can start printing.
@@ -46,6 +65,7 @@ order your printer access allows.
 | `assembly.scad` | **Not printable.** Preview of base + lid + mock modules — look at this before booking a printer. |
 | `lib/layout_checks.scad` | Clearance asserts that run on every render. See below. |
 | `export.sh` | Renders every part to `stl/`. `--check` parses without writing. |
+| `view.sh` | Opens a part in the GUI from the correct directory. |
 | `stl/` | Generated STLs, committed so a makerspace never needs the toolchain. |
 | `docs/measurements.md` | Caliper worksheet — fill in, then copy into `params.scad`. |
 
