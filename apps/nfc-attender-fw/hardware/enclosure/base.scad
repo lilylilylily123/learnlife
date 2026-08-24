@@ -18,7 +18,8 @@
 //   (0,0,0) = outer front-left-bottom corner
 //   +X right, +Y towards the back, +Z up
 //
-//   Front wall  y = 0 .. wall_t          <- OLED window, buzzer holes
+//   Front wall  y = 0 .. wall_t          <- OLED window (the SHORT edge,
+//                                          facing the user)
 //   Back wall   y = ext_y-wall_t .. ext_y <- USB-C, vents, strain relief
 //   Floor       z = 0 .. floor_t
 //   Interior    starts at (wall_t, wall_t, floor_t)
@@ -170,25 +171,28 @@ module breakout_posts() {
       pcb_post(stb_standoff_h + 0.01, stb_hole_d + 3.0, stb_hole_d - 0.6);
 }
 
-// A collar on the INNER face of the front wall that grips the piezo disc
-// edge-on, facing its sound holes.
+// A shallow ring on the floor holding the piezo disc flat, face UP.
 //
-// The disc stands VERTICALLY, not flat on the floor. A piezo radiates from its
-// face, so one lying flat fires at the lid and the sound has to turn a corner
-// to reach holes in the wall — audibly quieter. Standing it against the wall
-// points it straight at the user.
+// It fires up through a grille in the lid rather than out through a wall.
+// There is nowhere else for it: at 72 mm internal the front wall has only
+// ~13 mm beside the OLED and the collar needs 16, and the rest of the floor is
+// underneath the boards. The bay behind them is the reason box_iy is deeper
+// than the breakout alone.
+//
+// Facing up is also the better acoustic answer here — a piezo radiates from
+// its face, and the lid grille is a straight shot out, where a wall would make
+// the sound turn a corner.
 module buzzer_ring() {
   collar_d = buz_d + 2 * 2.0;
-  translate([ix(buz_pos_x), wall_t, floor_t + buz_d / 2 + 2])
-    rotate([-90, 0, 0])
-      difference() {
-        cylinder(h = buz_h * 0.7, d = collar_d);
-        translate([0, 0, -0.5])
-          cylinder(h = buz_h, d = buz_d + 2 * 0.3);
-        // Slot the collar so the disc can be pressed in and its leads exit.
-        translate([-1.5, -collar_d, -0.5])
-          cube([3, collar_d, buz_h + 1]);
-      }
+  translate([ix(buz_pos_x), iy(buz_pos_y), floor_t - 0.01])
+    difference() {
+      cylinder(h = buz_h * 0.6 + 0.01, d = collar_d);
+      translate([0, 0, 1.2])
+        cylinder(h = buz_h, d = buz_d + 2 * 0.3);
+      // Notch so the leads can exit sideways without being pinched.
+      translate([-1.75, 0, 1.2])
+        cube([3.5, collar_d, buz_h]);
+    }
 }
 
 // A bar across the inside of the back wall. A zip tie through the two slots
@@ -213,7 +217,7 @@ module wago_bay() {
     }
 }
 
-// ══ FRONT WALL: OLED window + buzzer ═════════════════════════════════════
+// ══ FRONT WALL: OLED window ══════════════════════════════════════════════
 
 module front_wall_cuts() {
   // Display window. Sized from the measured ACTIVE area plus a margin, not
@@ -223,10 +227,6 @@ module front_wall_cuts() {
              floor_t + oled_z - oled_win_w / 2])
     cube([oled_win_l, wall_t + 1, oled_win_w]);
 
-  // Buzzer sound holes, firing forward at the user. Through the FRONT wall,
-  // not the floor — holes in the floor point at the desk and sound muffled.
-  translate([ix(buz_pos_x), 0, floor_t + buz_d / 2 + 2])
-    sound_holes(sound_hole_n, sound_hole_d, sound_hole_pitch, wall_t);
 }
 
 // A recess on the INNER face of the front wall that the OLED module drops

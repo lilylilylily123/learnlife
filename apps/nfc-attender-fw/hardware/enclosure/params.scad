@@ -81,21 +81,26 @@ lid_t    = 2.0;             // [TILE] plastic over the ANTENNA ONLY — a pocket
 
 // Internal envelope.
 //
-// Driven by the layout, not chosen: the breakout and the PN532 have to sit
-// side by side with antenna_keepout between them (they cannot stack — see
-// that parameter), and the corner bosses eat ~10 mm at each edge. With the
-// current PLACEHOLDER breakout size that works out to a minimum of about
-// 120 x 94, rounded up here for margin.
+// Driven by the layout, not chosen. The PN532 sits DIRECTLY ABOVE the breakout,
+// separated vertically rather than laterally — antenna_keepout cares about
+// distance from the coil, not which direction that distance runs. So the
+// footprint only has to fit the breakout plus corner bosses (~10 mm per edge),
+// plus a bay at the back for the buzzer.
+//
+// An earlier version put the boards side by side, forcing a 130 x 100 box with
+// a 27 mm display marooned on a 130 mm face. Stacking makes it 77 x 119 —
+// narrower than it is deep, like a card terminal, with the display filling a
+// third of the face it sits on. THE SHORT EDGE FACES THE USER.
 //
 // base.scad asserts all of this at render time. If you change a module
 // dimension and the layout stops fitting, the render fails with a message
 // naming the clearance that broke rather than producing a quietly wrong part.
 //
 // Expect this to SHRINK once the real breakout is measured — the placeholder
-// (75 x 50) is a guess at the large end.
-box_ix = 125;               // internal X (left-right)
-box_iy = 95;                // internal Y (front-back)
-box_iz = 40;                // internal Z (floor to lid underside)
+// (75 x 50) is a guess at the large end. At 60 x 45 the box would be ~104 deep.
+box_ix = 72;                // internal X — left-right, THE FACE YOU LOOK AT
+box_iy = 114;               // internal Y — front-back, the depth on the desk
+box_iz = 35;                // internal Z (floor to lid underside)
 
 corner_r = 4;               // external corner radius
 lip_h    = 2.5;             // height of the alignment lip on the lid
@@ -140,24 +145,31 @@ boss_inset    = 6.0;        // boss centre distance from the internal corner
 // board is in hand, because they depend on its real size and on which way its
 // plugged-in DevKit faces. Render assembly.scad and look before printing.
 //
-// The layout intent: the breakout runs front-to-back down the LEFT side, and
-// the PN532 tap zone sits to its RIGHT, laterally clear of its copper. See
-// antenna_keepout above for why they can't simply stack.
+// Layout intent, front to back:
+//
+//   front   OLED in the short end wall, facing the user
+//           PN532 tap zone on tall posts, so the card target sits at the near
+//           end of the lid where a hand naturally lands
+//   middle  breakout + DevKit on the floor, UNDERNEATH the PN532
+//   back    buzzer, firing up through a lid grille well clear of the antenna
 
-stb_rotate = 90;            // breakout rotation, degrees. 90 = long axis
-                            // front-back, which is what makes room for the
-                            // tap zone beside it.
-stb_pos_x = 10;             // breakout front-left corner, internal coords
-stb_pos_y = 10;
+stb_rotate = 90;            // 90 = breakout long axis front-back
+stb_pos_x = 11;             // breakout front-left corner, internal coords
+stb_pos_y = 11;
 
-pn_pos_x = 69;              // PN532 front-left corner, internal coords
-pn_pos_y = 25;
+pn_pos_x = 15;              // PN532 front-left corner, internal coords.
+pn_pos_y = 14;              // Toward the FRONT: the tap target belongs at the
+                            // near edge of the lid, not the far one.
 
-buz_pos_x = 70;             // buzzer centre — sits against the front wall so
-buz_pos_y = 8;              // its sound holes fire at the user, not the desk
+// Buzzer lies FLAT on the floor at the back, firing UP through a lid grille.
+// It cannot go in the front wall — at 72 mm internal there is only ~13 mm
+// beside the OLED and the collar needs 16 — and the rest of the floor is under
+// the boards. The back also keeps its grille far from the tap zone.
+buz_pos_x = 36;             // centred left-right
+buz_pos_y = 94;             // behind both boards
 
-oled_pos_x = 35;            // OLED window centre along the front wall (X)
-oled_z = 22;                // OLED window centre height above the floor
+oled_pos_x = 36;            // centred: this is the face people look at
+oled_z = 18;                // OLED window centre height above the floor
 
 
 // ══ MODULES ══════════════════════════════════════════════════════════════
@@ -213,10 +225,19 @@ pn_coil_cx = 0;             // [MEASURE] coil centre X offset from board centre
 pn_coil_cy = 0;             // [MEASURE] coil centre Y offset from board centre
 pn_coil_d  = 36;            // [MEASURE] coil outer size (largest dimension)
 
-pn_post_h  = 26.0;          // height of the posts the PN532 sits on. Together
-                            // with antenna_air_gap this sets how close the
-                            // antenna is to the card. Prior bench work found
-                            // reliable reads at ~30 mm and targeted 10-15 mm.
+pn_post_h  = 32.0;          // height of the posts the PN532 sits on. With
+                            // antenna_air_gap this sets how close the antenna
+                            // is to the card. Prior bench work found reliable
+                            // reads at ~30 mm and targeted 10-15 mm.
+                            //
+                            // 32 rather than 26 because the PN532 now sits
+                            // ABOVE the breakout: it buys 16 mm of vertical
+                            // clearance over the DevKit, comfortably more than
+                            // antenna_keepout demands. Directly above is a
+                            // harsher position than beside at equal distance —
+                            // more of the coil's flux passes through a board
+                            // underneath than past one off to the side — so
+                            // the extra margin is deliberate.
 antenna_air_gap = 0.5;      // PN532 top face -> lid inner face
 antenna_keepout = 12.0;     // minimum clearance from the coil edge to ANY other
                             // PCB. A large copper plane parallel and close to
@@ -345,7 +366,8 @@ buz_d = 12.0;               // [MEASURE] disc diameter
 buz_h = 9.5;                // [MEASURE] body height
 sound_hole_d = 2.0;         // sound hole diameter. NOT 1.5 — a 0.4 mm nozzle
                             // renders holes below ~2 mm ragged and undersized.
-sound_hole_n = 3;           // grid is sound_hole_n x sound_hole_n
+sound_hole_n = 4;           // grid is n x n, cut through the LID above
+                            // the buzzer (see buz_pos_*)
 sound_hole_pitch = 3.2;
 
 // ── Cable ──

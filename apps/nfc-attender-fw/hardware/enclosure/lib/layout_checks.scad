@@ -71,19 +71,35 @@ module layout_checks() {
 
   // ── The antenna keepout ────────────────────────────────────────────────
   // The one constraint that is about physics rather than packaging: copper
-  // parallel and close to the coil acts as a shorted turn and detunes it.
+  // close and parallel to the coil acts as a shorted turn and detunes it.
+  //
+  // Distance is what matters, NOT direction — so the requirement is satisfied
+  // by separating the boards laterally OR vertically. This layout stacks them
+  // and uses the vertical route, which is what lets the box be 77 x 119 rather
+  // than 130 x 100.
+  //
   // Measured from the COIL edge, not the board edge, because the coil is
   // usually not centred on its board.
   coil_x0 = pn_pos_x + pn_l / 2 + pn_coil_cx - pn_coil_d / 2;
   coil_x1 = pn_pos_x + pn_l / 2 + pn_coil_cx + pn_coil_d / 2;
   stb_x1  = stb_pos_x + stb_fx;
 
-  assert(coil_x0 - stb_x1 >= antenna_keepout || stb_pos_x - coil_x1 >= antenna_keepout,
-         str("Antenna keepout violated: only ", coil_x0 - stb_x1,
-             "mm between the breakout and the coil, need ", antenna_keepout,
-             "mm. Move pn_pos_x right, move the breakout left, widen box_ix, ",
-             "or lower antenna_keepout if the coil-over-breakout test in ",
-             "docs/measurements.md showed the copper doesn't matter."));
+  lateral_gap  = max(coil_x0 - stb_x1, stb_pos_x - coil_x1);
+  // Top of a DevKit plugged into the breakout, up to the PN532's underside.
+  vertical_gap = pn_post_h - (stb_standoff_h + stb_h);
+
+  assert(lateral_gap >= antenna_keepout || vertical_gap >= antenna_keepout,
+         str("Antenna keepout violated: lateral gap ", lateral_gap,
+             "mm, vertical gap ", vertical_gap, "mm, need ", antenna_keepout,
+             "mm in one of them. Raise pn_post_h to stack them further apart, ",
+             "separate them sideways, or lower antenna_keepout if the ",
+             "coil-over-breakout test in docs/measurements.md showed the ",
+             "copper doesn't matter."));
+
+  // Stacking is only meaningful if the PN532 actually clears the DevKit.
+  assert(vertical_gap > 2 || lateral_gap > 0,
+         str("PN532 would collide with the DevKit: only ", vertical_gap,
+             "mm above it. Raise pn_post_h."));
 
   // ── Nothing overlaps a corner boss ─────────────────────────────────────
   // The bosses run full height, so anything overlapping one simply cannot be
@@ -100,23 +116,32 @@ module layout_checks() {
   }
 
   // ── Front-wall features don't collide ──────────────────────────────────
+  // The buzzer lies flat on the floor and fires up through a lid grille, so it
+  // must be clear of both boards in plan view — and of the OLED pocket, in
+  // case someone moves it back to the front wall.
   assert(!_overlaps(buz_rect, oled_rect),
-         str("Buzzer ring overlaps the OLED pocket. Buzzer spans x ",
-             buz_rect[0], "..", buz_rect[0] + buz_rect[2],
-             ", OLED pocket spans x ", oled_rect[0], "..",
-             oled_rect[0] + oled_rect[2],
-             ". Move buz_pos_x or oled_pos_x."));
-
+         "Buzzer overlaps the OLED pocket. Move buz_pos_x or oled_pos_x.");
   assert(!_overlaps(buz_rect, stb_rect),
-         "Buzzer overlaps the breakout board. Move buz_pos_x or buz_pos_y.");
+         str("Buzzer overlaps the breakout. It needs floor space clear of the ",
+             "boards — the bay behind them is why box_iy is deeper than the ",
+             "breakout alone. Move buz_pos_y back or increase box_iy."));
   assert(!_overlaps(buz_rect, pn_rect),
-         "Buzzer overlaps the PN532. Move buz_pos_x or buz_pos_y.");
+         "Buzzer overlaps the PN532 footprint. Move buz_pos_y back.");
+
+  // Its lid grille must not land in the antenna pocket — holes there would
+  // both weaken the tap surface and sit right over the coil.
+  assert(buz_pos_y - buz_r > pn_pos_y + pn_w,
+         str("Buzzer grille would fall over the PN532/antenna region. Keep ",
+             "buz_pos_y behind y ", pn_pos_y + pn_w + buz_r, "."));
 
   assert(oled_pos_x - oled_win_l / 2 > 0 &&
          oled_pos_x + oled_win_l / 2 < box_ix,
          "OLED window runs off the end of the front wall — check oled_pos_x.");
 
   // ── Vertical clearances ────────────────────────────────────────────────
+  assert(buz_h < box_iz - 2,
+         "Buzzer is taller than the interior. Raise box_iz.");
+
   assert(pn_post_h + pn_t + antenna_air_gap <= box_iz,
          str("PN532 sits too high: posts (", pn_post_h, ") + board (", pn_t,
              ") + air gap (", antenna_air_gap, ") = ",

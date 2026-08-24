@@ -36,7 +36,7 @@ use <lib/shapes.scad>
 use <base.scad>
 use <lid.scad>
 
-show_lid   = true;
+show_lid   = false;
 show_parts = true;
 lid_lift   = 25;      // exploded gap, mm. 0 = closed.
 
@@ -98,9 +98,9 @@ module mock_modules() {
                floor_t + oled_z - oled_pcb_w / 2 - oled_glass_off_y])
       cube([oled_pcb_l, oled_pcb_t, oled_pcb_w]);
 
-  // Piezo, edge-on against the front wall facing its sound holes.
+  // Piezo, lying face-up on the floor at the back, firing through the lid
+  // grille above it.
   color("Goldenrod", 0.9)
-    translate([ix(buz_pos_x), wall_t + buz_h / 2, floor_t + buz_d / 2 + 2])
-      rotate([90, 0, 0])
-        cylinder(h = buz_h, d = buz_d, center = true);
+    translate([ix(buz_pos_x), iy(buz_pos_y), floor_t])
+      cylinder(h = buz_h, d = buz_d);
 }

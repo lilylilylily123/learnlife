@@ -128,22 +128,37 @@ dupont wires cross the parting line and every service visit strains them. The
 lid's only job is to be thin over the antenna — so if read range disappoints,
 you reprint a 20-minute lid rather than the whole box.
 
-**The PN532 sits on tall posts, laterally clear of the electronics.**
+**The PN532 sits on tall posts directly above the breakout board.**
 13.56 MHz NFC is a near-field *magnetic* link. Plastic is nearly transparent to
-it; what actually destroys range is a conductive surface lying parallel and
-close to the coil, acting as a shorted turn and detuning it. The ESP32 has a
-large ground pour and a metal shield can, and the screw terminal breakout is a
-double-layer PCB with real copper — so the coil has to sit beside them rather
-than above them, which is what makes the box wider rather than taller.
+it; what destroys range is a conductive surface close and parallel to the coil,
+acting as a shorted turn and detuning it. The ESP32 has a large ground pour and
+a metal shield can, and the breakout is a double-layer PCB with real copper.
 
-*How much* clearance is genuinely needed is a measurement, not a guess. The
-coil-over-breakout test in `docs/measurements.md` §0 settles it on the bench
-before any geometry is drawn: if the copper turns out not to matter, the layout
-can stack and the box gets smaller.
+What matters is **distance from the coil, not direction** — so 32 mm posts put
+16 mm of air between the DevKit and the antenna, comfortably more than the
+12 mm keepout, and the two boards stack.
 
-**The OLED goes in the vertical front wall**, which puts its PCB edge-on to the
-coil's field instead of coplanar with it, and makes the display readable by
-someone standing at a desk.
+An earlier version separated them sideways instead, which forced a
+130 × 100 mm box with a 27 mm display marooned on a 130 mm face. Stacking makes
+it **77 × 119 mm** — narrower than it is deep, like a card terminal.
+
+Directly above is a slightly harsher position than beside at equal distance,
+because more of the coil's flux passes through a board underneath it than past
+one off to the side. Hence 16 mm rather than the bare minimum. The
+coil-over-breakout test in `docs/measurements.md` §0 confirms it on the bench.
+
+**The SHORT edge faces the user**, with the OLED in it. On the old 130 mm face
+a 23 mm window occupied 18% of the width and looked lost; on a 77 mm face it is
+30% and reads as a designed panel. Standing the display in a vertical wall also
+puts its PCB edge-on to the coil's field rather than coplanar with it.
+
+**The tap zone is at the front of the lid**, above the PN532, where a hand
+naturally lands — not at the far end.
+
+**The buzzer lies face-up on the floor at the back** and fires through a lid
+grille. It cannot go in the front wall: at 72 mm internal there is only ~13 mm
+beside the OLED and the collar needs 16. The back also keeps its holes well
+away from the tap surface.
 
 **The wedge is a separate cradle, not an angled box top.** The earlier
 `hardware/production-enclosure-v1` design rejected a wedged box for a real

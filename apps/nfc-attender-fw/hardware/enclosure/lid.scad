@@ -95,6 +95,7 @@ module lid() {
       oled_ribs();
     }
     antenna_pocket_cut();
+    buzzer_grille();
     screw_holes();
     label_deboss();
     if (nfc_glyph) nfc_glyph_deboss();
@@ -207,6 +208,19 @@ module screw_holes() {
     translate([p[0], p[1], lid_h - screw_head_h])
       cylinder(h = screw_head_h + 0.1, d = screw_head_d);
   }
+}
+
+// Sound holes above the buzzer, which lies face-up on the floor at the back.
+// Deliberately far from the antenna pocket at the front: holes there would
+// weaken the tap surface and sit directly over the coil.
+module buzzer_grille() {
+  span = (sound_hole_n - 1) * sound_hole_pitch;
+  for (i = [0 : sound_hole_n - 1])
+    for (j = [0 : sound_hole_n - 1])
+      translate([ix(buz_pos_x) - span / 2 + i * sound_hole_pitch,
+                 iy(buz_pos_y) - span / 2 + j * sound_hole_pitch,
+                 -0.5])
+        cylinder(h = lid_h + 1, d = sound_hole_d);
 }
 
 // ══ TOP-FACE GRAPHICS ════════════════════════════════════════════════════
