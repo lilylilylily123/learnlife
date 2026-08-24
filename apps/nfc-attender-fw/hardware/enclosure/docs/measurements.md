@@ -47,30 +47,52 @@ what you observe — it is good capstone material.
 
 Metal interference observed: ______________________________________________
 
-### Coil-over-breakout test → sets `antenna_keepout` (and the box width)
+### Coil-over-ESP32 test → validates the whole stacked layout
 
-This one decides how big the enclosure has to be, so it is worth doing carefully.
+**RUN THIS EARLY.** It needs no new parts — just the bench rig you already have
+— and it tests the single biggest assumption in the enclosure design.
 
-The PN532 used to sit directly above a mini breadboard, which is small
-discontinuous metal strips and electrically almost invisible to the coil. It now
-has to share a box with a **screw terminal breakout board** — a double-layer PCB
-with real copper on it. If that copper detunes the antenna, the PN532 has to sit
-laterally clear of the breakout, and the box gets wider to fit them side by side.
+The PN532 now sits **directly above** the ESP32, on 32 mm posts. That is what
+makes the box 77 × 119 instead of 130 × 100. If a board that close detunes the
+coil, the whole layout has to go back to side-by-side and the box gets wide
+again.
 
-On the bench, with a tile of your chosen `lid_t` on top of the PN532:
+The board that matters is the **DevKit, not the breakout**. The breakout is a
+passive PCB with traces; the DevKit has a metal shield can and a large ground
+pour, and in the stacked layout it is the nearer of the two. So this test works
+perfectly well before the breakout arrives.
 
-| PN532 position | Max reliable read height |
-|---|---|
-| Free air, nothing underneath | |
-| Directly on top of the breakout board | |
-| 10 mm to the side of the breakout | |
-| 20 mm to the side of the breakout | |
+Set up: PN532 held face-up at a measured height above a powered ESP32 DevKit
+lying flat. A stack of the antenna tiles, or a ruler and a steady hand, is
+enough. Put your chosen `lid_t` tile on top of the PN532 so the test includes
+the plastic.
 
-Chosen `antenna_keepout` = ________ mm
+| PN532 height above the DevKit | Max reliable read height | Notes |
+|---|---|---|
+| Free air, nothing underneath | | baseline |
+| 8 mm | | |
+| 12 mm | | = `antenna_keepout` |
+| **16 mm** | | **= the design value** |
+| 24 mm | | |
 
-If "directly on top" reads about as well as free air, the copper isn't a problem
-and the box can be smaller and the layout stacked. If it drops noticeably, keep
-them side by side and use the smallest offset that recovers full range.
+Result: at 16 mm, read range is ____% of the free-air baseline.
+
+**How to read it:**
+
+- **Close to baseline at 16 mm** → stacking is fine, design confirmed, nothing
+  to change.
+- **Noticeably down at 16 mm but recovered by 24 mm** → raise `pn_post_h` to
+  40 and `box_iz` to 43. The box gets taller but keeps its footprint.
+- **Still down at 24 mm** → stacking doesn't work with this hardware. Go back to
+  side-by-side: set `pn_pos_x`/`pn_pos_y` clear of the breakout in plan and
+  widen `box_ix`. `lib/layout_checks.scad` accepts either arrangement and will
+  tell you if the numbers don't fit.
+
+Also worth noting while the rig is out: does powering the ESP32 on vs off change
+anything? A running WiFi radio is a different electromagnetic environment from
+an unpowered board.
+
+Powered vs unpowered difference: ______________________________________
 
 ### Tolerance coupon → sets five parameters
 

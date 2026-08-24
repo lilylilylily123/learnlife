@@ -35,6 +35,11 @@ brew install --cask openscad@snapshot   # installs the app + an `openscad` CLI
 ./export.sh                             # renders everything into stl/
 ```
 
+**Almost none of this waits on the screw-terminal breakout.** That board only
+sets the box's footprint (`box_ix`/`box_iy`). Everything below can happen now,
+and `lib/layout_checks.scad` will tell you if the real dimensions break the
+layout when you finally plug them in.
+
 Then, in order:
 
 1. **Print `stl/antenna_tiles.stl`** — five loose plastic tiles, ~15 min, ~10 g.
@@ -45,13 +50,20 @@ Then, in order:
 2. **Print `stl/coupon.stl`** — one 120 × 90 mm test plate, ~40 min. Converts
    one print into the five tolerance numbers at the top of `params.scad`.
 
-3. **Measure your modules** with calipers into `docs/measurements.md`, and copy
-   the results into `params.scad`.
+3. **Run the coil-over-ESP32 test** (`docs/measurements.md` §0) — no new parts
+   needed. It validates the stacked layout, which is the single biggest
+   assumption in the design: if a DevKit 16 mm below the coil kills read range,
+   the box has to go back to a wide side-by-side arrangement.
 
-4. Only then render and print the enclosure itself.
+4. **Measure your modules** with calipers into `docs/measurements.md`, and copy
+   the results into `params.scad`. Everything except the breakout is already in
+   your hands.
 
-Steps 1–3 are all independent of each other, so they can happen in whatever
-order your printer access allows.
+5. When the breakout arrives, measure it, re-render, and only then print the
+   enclosure itself.
+
+Steps 1–4 are independent of each other and of the breakout, so they can happen
+in whatever order suits.
 
 ## Files
 

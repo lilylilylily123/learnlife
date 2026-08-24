@@ -35,10 +35,12 @@ include <params.scad>
 use <lib/shapes.scad>
 use <base.scad>
 use <lid.scad>
+use <stand.scad>
 
 show_lid   = false;
 show_parts = true;
-lid_lift   = 25;      // exploded gap, mm. 0 = closed.
+show_stand = true;     // the wedge cradle (stand_angle in params.scad)
+lid_lift   = 0;      // exploded gap, mm. 0 = closed.
 
 // Mirrors the derived values in base.scad / lid.scad.
 ext_x = box_ix + 2 * wall_t;
@@ -53,14 +55,29 @@ stb_fy = (stb_rotate == 90) ? stb_l : stb_w;
 
 // ══ SCENE ════════════════════════════════════════════════════════════════
 
-color("Gainsboro") base();
+// The stand raises the box and tilts it back; everything else rides on top.
+stand_rise = (ext_y + 1.2) * sin(stand_angle);
+
+module on_stand() {
+  if (show_stand)
+    translate([stand_wall_t + 0.6, 0, stand_rise])
+      rotate([-stand_angle, 0, 0])
+        children();
+  else
+    children();
+}
+
+if (show_stand) color("DarkSlateGray", 0.9) stand();
+
+on_stand() color("Gainsboro") base();
 
 if (show_lid)
-  color("SlateGray", 0.55)
-    translate([0, 0, ext_z - lip_h + lid_lift])
-      lid();
+  on_stand()
+    color("SlateGray", 0.55)
+      translate([0, 0, ext_z - lip_h + lid_lift])
+        lid();
 
-if (show_parts) mock_modules();
+if (show_parts) on_stand() mock_modules();
 
 // ══ MOCK MODULES ═════════════════════════════════════════════════════════
 // Simple slabs at measured sizes. Enough to see whether things fit and face
