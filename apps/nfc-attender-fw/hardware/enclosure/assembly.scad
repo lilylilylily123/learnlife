@@ -11,14 +11,30 @@
 //
 // ── VIEW IT ──────────────────────────────────────────────────────────────
 //
-//   openscad assembly.scad                 # GUI, orbit around it
-//   openscad -o /tmp/a.png --viewall --autocenter \
-//            --camera=0,0,0,60,0,25,0 --projection=p assembly.scad
+//   openscad assembly.scad
+//
+//   ⚠ The OpenSCAD window opens EMPTY until you press F5 (Preview). It does
+//     not render on open. F5 is fast; F6 is the slow exact render and is not
+//     needed just to look.
+//
+//   Run it from THIS directory, or OpenSCAD cannot find params.scad:
+//     cd hardware/enclosure && openscad assembly.scad
+//
+//   Headless:
+//     openscad -o /tmp/a.png --viewall --autocenter \
+//              --camera=0,0,0,60,0,25,0 --projection=p assembly.scad
 //
 // Toggle `show_lid = false` to look inside.
+//
+// This builds base and lid FROM SOURCE rather than importing stl/*.stl, so it
+// always reflects the current params.scad and needs nothing exported first.
+// (It used to import the STLs, which meant an empty window if they were
+// missing and — worse — silently stale geometry if params had changed since.)
 
 include <params.scad>
 use <lib/shapes.scad>
+use <base.scad>
+use <lid.scad>
 
 show_lid   = true;
 show_parts = true;
@@ -37,12 +53,12 @@ stb_fy = (stb_rotate == 90) ? stb_l : stb_w;
 
 // ══ SCENE ════════════════════════════════════════════════════════════════
 
-color("Gainsboro") import("stl/base.stl");
+color("Gainsboro") base();
 
 if (show_lid)
   color("SlateGray", 0.55)
     translate([0, 0, ext_z - lip_h + lid_lift])
-      import("stl/lid.stl");
+      lid();
 
 if (show_parts) mock_modules();
 
