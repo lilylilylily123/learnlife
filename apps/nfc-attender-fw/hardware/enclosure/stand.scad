@@ -57,6 +57,14 @@ cradle_fit = 0.6;
 cradle_x = ext_x + 2 * cradle_fit;
 cradle_y = ext_y + 2 * cradle_fit;
 
+// Solid material left UNDER the cradle at its lowest point (the back).
+//
+// Not cosmetic. Without it the cradle's back edge lands exactly on the wedge's
+// bottom face, leaving a zero-thickness knife edge: newer OpenSCAD silently
+// repairs that, OpenSCAD 2021.01 (what CI runs) correctly rejects the result as
+// non-manifold, and a slicer would make a mess of it either way.
+stand_floor_t = 3;
+
 rise   = cradle_y * sin(stand_angle);   // how high the front sits
 d_proj = cradle_y * cos(stand_angle);   // depth once tilted
 
@@ -65,7 +73,7 @@ D = d_proj + stand_wall_t;              // + back stop
 
 // Relief pocket under the wedge. Saves a lot of filament on what is otherwise
 // a solid triangular block, and shortens the print considerably.
-relief_inset = stand_wall_t + 4;
+relief_inset = max(stand_wall_t + 4, foot_d + 2);
 relief_h_margin = 5;
 
 $fa = 1;
@@ -79,6 +87,9 @@ assert(stand_angle > 0 && stand_angle < 45,
 assert(stand_lip_h < ext_z * 0.5,
        str("stand_lip_h (", stand_lip_h, ") is more than half the box height — ",
            "the cradle would swallow the display."));
+
+assert(relief_inset > foot_d / 2 + foot_inset - foot_d / 2,
+       "Foot recesses would fall outside the wall and cut into the hollow.");
 
 echo(str("[stand] ", stand_angle, " deg: front rises ", rise,
          "mm, assembled height ", rise + ext_z,
@@ -107,11 +118,11 @@ module wedge() {
     rotate([90, 0, 90])
       linear_extrude(height = W)
         polygon([
-          [0, 0],                        // front bottom
-          [D, 0],                        // back bottom
-          [D, stand_lip_h],              // back stop, top
-          [d_proj, stand_lip_h],         // where the incline meets the stop
-          [0, rise + stand_lip_h],       // front top
+          [0, 0],                                     // front bottom
+          [D, 0],                                     // back bottom
+          [D, stand_floor_t + stand_lip_h],           // back stop, top
+          [d_proj, stand_floor_t + stand_lip_h],      // stop meets the incline
+          [0, stand_floor_t + rise + stand_lip_h],    // front top
         ]);
 }
 
@@ -119,9 +130,24 @@ module wedge() {
 // Everything it removes is the cradle; what survives beside and behind it is
 // the lip.
 module box_cradle() {
-  translate([stand_wall_t, 0, cradle_y * sin(stand_angle)])
+  // Overshoot forward and upward so every face of this cutter exits the wedge
+  // cleanly instead of grazing one.
+  //
+  // Two grazing contacts had to be designed out, and both rendered as a valid
+  // solid on a modern OpenSCAD while OpenSCAD 2021.01 (what CI runs) correctly
+  // rejected them:
+  //   - the cutter's back-bottom edge landed exactly on the wedge's bottom
+  //     face  -> fixed by stand_floor_t, which also gives the cradle a floor
+  //   - the cutter's front-bottom edge lay exactly in the wedge's front face
+  //     plane -> fixed by the overshoot below
+  //
+  // A cut that merely touches a surface is ambiguous: is the result open or
+  // closed there? Overshooting removes the question.
+  overshoot = 20;
+  translate([stand_wall_t, 0, stand_floor_t + cradle_y * sin(stand_angle)])
     rotate([-stand_angle, 0, 0])
-      cube([cradle_x, cradle_y, ext_z + 20]);
+      translate([0, -overshoot, 0])
+        cube([cradle_x, cradle_y + overshoot, ext_z + overshoot]);
 }
 
 // Hollow out the middle of the wedge from below. The walls that remain follow
@@ -133,8 +159,10 @@ module underside_relief() {
         polygon([
           [relief_inset, 0],
           [D - relief_inset, 0],
-          [D - relief_inset, max(stand_lip_h - relief_h_margin, 0.5)],
-          [relief_inset, max(rise + stand_lip_h - relief_h_margin, 0.5)],
+          [D - relief_inset,
+           max(stand_floor_t + stand_lip_h - relief_h_margin, 0.5)],
+          [relief_inset,
+           max(stand_floor_t + rise + stand_lip_h - relief_h_margin, 0.5)],
         ]);
 }
 

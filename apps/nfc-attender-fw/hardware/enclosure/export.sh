@@ -69,6 +69,20 @@ else
 fi
 rm -f "${TMPWORK}/probe.stl"
 
+# Force the CGAL backend when this build has one.
+#
+# Not a preference — a correctness check. Newer OpenSCAD defaults to the
+# Manifold backend, which SILENTLY REPAIRS geometry that CGAL rejects. Two real
+# bugs in stand.scad rendered as perfectly valid solids locally and failed CI,
+# which runs OpenSCAD 2021.01 (CGAL only). Using CGAL here means local and CI
+# agree, and a grazing cut is caught on the machine that made it.
+BACKEND_ARGS=()
+if openscad --backend=CGAL -o "${TMPWORK}/probe2.stl" \
+     <(echo 'cube(1);') >/dev/null 2>&1; then
+  BACKEND_ARGS=(--backend=CGAL)
+fi
+rm -f "${TMPWORK}/probe2.stl"
+
 # A single part was named on the command line.
 if [[ $# -gt 0 ]]; then
   PARTS=("$@")
@@ -97,7 +111,7 @@ for part in "${PARTS[@]}"; do
   # faces) on stderr while still exiting 0, so grep the log rather than
   # trusting the exit status alone.
   log="$(mktemp)"
-  if ! openscad "${FORMAT_ARGS[@]}" -o "$out" "$src" >"$log" 2>&1; then
+  if ! openscad "${BACKEND_ARGS[@]}" "${FORMAT_ARGS[@]}" -o "$out" "$src" >"$log" 2>&1; then
     echo "  FAIL    ${src}"
     sed 's/^/            /' "$log" >&2
     failed=$((failed + 1))
@@ -109,6 +123,14 @@ for part in "${PARTS[@]}"; do
   # case-insensitively would also hit OpenSCAD's own success line,
   # "Status: NoError", and report every clean render as a failure.
   problems="$(grep -E '(WARNING|ERROR):' "$log" || true)"
+
+  # The manifold warning is phrased without a colon, so the pattern above
+  # misses it. It is the single most important thing this script can catch: a
+  # non-manifold mesh slices into garbage.
+  manifold="$(grep -i '2-manifold' "$log" || true)"
+  if [[ -n "$manifold" ]]; then
+    problems="${problems}"$'\n'"${manifold}"
+  fi
 
   # The manifold check is the one that actually matters for printability:
   # a non-manifold mesh slices into garbage. OpenSCAD prints this on the
