@@ -10,8 +10,10 @@
 
 #include <map>
 
+#include "chunked_source.h"
 #include "config.h"
 #include "fields.h"
+#include "json_source.h"
 #include "pb_request.h"
 #include "pb_response.h"
 
@@ -70,10 +72,28 @@ bool g_cfg_loaded = false;
 std::map<std::string, AttendanceRow> g_today_rows;
 std::string g_today_date;  // YYYY-MM-DD — flush cache when this changes
 
+// Highest `updated` value seen among today's rows. The delta poll asks
+// PocketBase for rows newer than this instead of re-fetching the whole day.
+std::string g_updated_watermark;
+
+// PocketBase datetimes are fixed-width "YYYY-MM-DD HH:MM:SS.sssZ", so a
+// lexicographic comparison is also chronological — no parsing needed.
+//
+// Advanced ONLY from values PocketBase returned, never from device time: the
+// device clock can lag the server's, and a watermark set from local time would
+// permanently skip every row modified inside that gap.
+void note_watermark(const std::string& updated) {
+  if (updated.empty()) return;
+  if (updated > g_updated_watermark) g_updated_watermark = updated;
+}
+
 void reset_cache_if_new_day(const std::string& date) {
   if (g_today_date != date) {
     g_today_rows.clear();
     g_today_date = date;
+    // The watermark is per-day: carrying yesterday's across midnight would
+    // make the new day's first delta poll return nothing.
+    g_updated_watermark.clear();
   }
 }
 
@@ -187,10 +207,43 @@ bool open_https(HTTPClient& http, WiFiClientSecure& client,
 
 // Read the entire response body. HTTPClient::getString() handles transfer
 // encoding for us.
+//
+// Fine for small responses (login, a single record). NOT used for list pages —
+// see ResponseSource below.
 std::string read_body(HTTPClient& http) {
   String s = http.getString();
   return std::string(s.c_str(), s.length());
 }
+
+// Presents an HTTP response body as a ByteSource the JSON parser can read
+// directly, without ever holding the whole body in RAM.
+//
+// Two things to know:
+//
+//  1. getStream() returns the RAW socket. Unlike getString(), it does NOT
+//     de-chunk. PocketHost is behind Cloudflare, so a chunked response is
+//     possible, and chunk framing fed to a JSON parser produces garbage.
+//     HTTPClient signals chunked by reporting getSize() < 0 (no
+//     Content-Length), which is what selects the de-chunking wrapper here.
+//
+//  2. Both members are constructed either way and only one is handed out.
+//     ChunkedByteSource is a few bytes of bookkeeping, so keeping it unused is
+//     cheaper than the branchy alternative.
+struct ResponseSource {
+  StreamByteSource raw;
+  ChunkedByteSource chunked;
+  bool is_chunked;
+
+  explicit ResponseSource(HTTPClient& http)
+      : raw(http.getStream()),
+        chunked(raw),
+        is_chunked(http.getSize() < 0) {}
+
+  ByteSource& get() {
+    return is_chunked ? static_cast<ByteSource&>(chunked)
+                      : static_cast<ByteSource&>(raw);
+  }
+};
 
 }  // namespace
 
@@ -244,7 +297,10 @@ bool prefetch_today_attendance(const std::string& date) {
   }
   reset_cache_if_new_day(date);
 
-  constexpr int kPerPage = 500;
+  // 25, not 500. Smaller pages mean the parser's working set stays small even
+  // though rows are consumed as they decode — and with ~61 learners this is
+  // three requests instead of one, which is a fine trade against an OOM.
+  constexpr int kPerPage = 25;
   int page = 1;
   int inserted = 0;
   while (true) {
@@ -259,26 +315,86 @@ bool prefetch_today_attendance(const std::string& date) {
       http.end();
       return false;
     }
-    std::string body = read_body(http);
+
+    // Parse straight off the socket and drop each row into the cache as it
+    // decodes. Nothing ever holds the whole body, and no vector of rows is
+    // built — the two allocations that together caused the OOM.
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_attendance_page(
+        rs.get(), meta, [&](AttendanceRow&& r) {
+          if (r.learner_id.empty()) return true;
+          note_watermark(r.updated);
+          const std::string key = r.learner_id;  // copy before the move
+          g_today_rows[key] = std::move(r);
+          ++inserted;
+          return true;
+        });
     http.end();
 
-    pb_response::AttendancePage parsed;
-    if (!pb_response::parse_attendance_page(body, parsed)) {
-      Serial.println("[pb] prefetch_today parse failed");
+    if (!ok) {
+      Serial.printf("[pb] prefetch_today page %d parse failed\n", page);
       return false;
     }
-    for (auto& r : parsed.items) {
-      if (!r.learner_id.empty()) {
-        g_today_rows[r.learner_id] = std::move(r);
-        ++inserted;
-      }
-    }
-    if (parsed.total_pages <= page) break;
+    if (meta.total_pages <= page) break;
     ++page;
   }
-  Serial.printf("[pb] prefetched %d attendance rows for %s\n",
-                inserted, date.c_str());
+  Serial.printf("[pb] prefetched %d attendance rows for %s (watermark %s)\n",
+                inserted, date.c_str(),
+                g_updated_watermark.empty() ? "-" : g_updated_watermark.c_str());
   persist_today_cache();
+  return true;
+}
+
+bool refresh_today_delta(const std::string& date, int& out_changed) {
+  Lock lk;
+  out_changed = 0;
+  if (g_token.empty()) return false;
+
+  // No watermark means nothing has been fetched for today yet, so there is no
+  // "since" to ask about. Caller should do a full prefetch first.
+  if (g_today_date != date || g_updated_watermark.empty()) return false;
+
+  constexpr int kPerPage = 25;
+  int page = 1;
+  while (true) {
+    WiFiClientSecure client;
+    HTTPClient http;
+    const std::string url = pb_request::list_attendance_updated_since_url(
+        g_cfg.pb_url, date, g_updated_watermark, page, kPerPage);
+    if (!open_https(http, client, url)) return false;
+    int code = http.GET();
+    if (code != 200) {
+      Serial.printf("[pb] delta page %d HTTP %d\n", page, code);
+      http.end();
+      return false;
+    }
+
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_attendance_page(
+        rs.get(), meta, [&](AttendanceRow&& r) {
+          if (r.learner_id.empty()) return true;
+          note_watermark(r.updated);
+          const std::string key = r.learner_id;
+          g_today_rows[key] = std::move(r);
+          ++out_changed;
+          return true;
+        });
+    http.end();
+
+    if (!ok) {
+      Serial.println("[pb] delta parse failed");
+      return false;
+    }
+    if (meta.total_pages <= page) break;
+    ++page;
+  }
+
+  if (out_changed > 0) {
+    Serial.printf("[pb] delta: %d row(s) changed server-side\n", out_changed);
+    persist_today_cache();
+  }
   return true;
 }
 
@@ -290,9 +406,9 @@ bool fetch_roster(std::vector<LearnerRow>& out) {
   }
   out.clear();
 
-  // PocketBase caps perPage at 500. The roster is small enough that one page
-  // covers it, but the loop generalises in case we grow.
-  constexpr int kPerPage = 500;
+  // Paged for the same reason as the attendance prefetch: a single 500-row
+  // page would put the whole roster in the parser's working set at once.
+  constexpr int kPerPage = 25;
   int page = 1;
   while (true) {
     WiFiClientSecure client;
@@ -306,16 +422,21 @@ bool fetch_roster(std::vector<LearnerRow>& out) {
       http.end();
       return false;
     }
-    std::string body = read_body(http);
+
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_learners_page(
+        rs.get(), meta, [&](LearnerRow&& l) {
+          out.push_back(std::move(l));
+          return true;
+        });
     http.end();
 
-    pb_response::LearnersPage parsed;
-    if (!pb_response::parse_learners_page(body, parsed)) {
-      Serial.println("[pb] fetch_roster parse failed");
+    if (!ok) {
+      Serial.printf("[pb] fetch_roster page %d parse failed\n", page);
       return false;
     }
-    for (auto& l : parsed.items) out.push_back(std::move(l));
-    if (parsed.total_pages <= page) break;
+    if (meta.total_pages <= page) break;
     ++page;
   }
   Serial.printf("[pb] fetched %u learners\n", static_cast<unsigned>(out.size()));

@@ -209,14 +209,29 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
   }
 }
 
-// How often the network task re-pulls today's attendance cache while the
-// device is online and idle. Without this refresh, a dashboard-side change
-// (Reset day, justification, manual time edit) never reaches the firmware —
-// the local cache stays pinned to whatever value PB had on the last reconnect
-// or the last local action. 10s is a tradeoff: fast enough that a guide who
-// resets a learner and walks to the reader sees the right state, slow enough
-// to keep PB load light (≤6 GETs/min when idle).
-constexpr int64_t kPeriodicPrefetchMs = 10000;
+// How often the network task asks PocketBase for attendance rows changed since
+// the last poll. Without this, a dashboard-side change (Reset day, a
+// justification, a manual time edit) never reaches the firmware — the cache
+// stays pinned to whatever PB had at the last reconnect or local action.
+//
+// 30 s, not 10 s, and the number comes from arithmetic rather than taste:
+//
+//   PocketHost allows 1000 requests/hour PER IP
+//   (x-pockethost-ratelimit-ip-hourly-limit), and both devices plus the Tauri
+//   dashboard sit behind the school's single NAT'd address.
+//
+//     at 10 s: 360 req/h/device -> 720/h for two devices = 72% of the budget
+//              spent doing nothing
+//     at 30 s: 120 req/h/device -> 240/h, leaving room for scans, roster
+//              refreshes and the dashboard
+//
+// The cost is latency: a guide who presses "Reset day" and walks to the reader
+// sees it within 30 s instead of 10. That is still faster than the walk.
+//
+// This is a DELTA poll (`updated > watermark`), so the normal case is one
+// request returning an empty page — far cheaper than the full re-fetch this
+// replaced, which is what OOMed on 61 rows.
+constexpr int64_t kDeltaPollMs = 30000;
 
 // How often to retry NTP while online but still without a trusted clock.
 // Until this succeeds the device refuses to record attendance (clock_gate),
@@ -305,13 +320,39 @@ constexpr int64_t kNtpRetryMs = 30000;
       });
     }
 
-    // Periodic prefetch DISABLED — pb_response::parse_attendance_page OOMs on a
-    // 61-row response (JsonDocument copy of the body + per-row lunch_events
-    // re-serialise blows past free heap once TLS is established). Re-enable
-    // once parse_attendance_page streams from the HTTP response or pages the
-    // request. Until then, dashboard-side edits (Reset day, justifications)
-    // only reach the firmware on the next reboot or local tap.
-    (void)last_prefetch_ms;
+    // Periodic delta poll. Previously disabled: the old full re-fetch OOMed on
+    // a 61-row page, because it copied the whole body into a JsonDocument and
+    // built a vector of rows on top. Both allocations are gone — the response
+    // is parsed straight off the socket into the cache — so this is live again.
+    if (online &&
+        static_cast<int64_t>(millis()) - last_prefetch_ms >= kDeltaPollMs) {
+      last_prefetch_ms = millis();
+      auto t = time_sync::now_local();
+      char date[16];
+      std::snprintf(date, sizeof(date), "%04d-%02d-%02d",
+                    t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+
+      // Log the low-water mark alongside each poll. This is the evidence that
+      // the streaming parse actually fixed the OOM rather than just moving it:
+      // if `min` keeps falling poll after poll, something is still growing.
+      Serial.printf("[heap] free %u min %u (pre-poll)\n",
+                    static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(esp_get_minimum_free_heap_size()));
+
+      int changed = 0;
+      if (!pb_client::refresh_today_delta(date, changed)) {
+        // No watermark for this date yet — either the first poll after boot
+        // failed, or the day rolled over. A full prefetch re-establishes it.
+        if (pb_client::login()) {
+          pb_client::prefetch_today_attendance(date);
+        }
+      } else if (changed > 0) {
+        // Something was edited server-side. Repaint so a guide standing at the
+        // device sees the idle screen refresh rather than wondering whether
+        // the reset landed.
+        ui::show(ui::Event::Idle);
+      }
+    }
   }
 }
 
@@ -407,6 +448,7 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   t HH:MM [W]      override clock (W: 0=Sun..6=Sat)");
     Serial.println("[cli]   t off            clear override");
     Serial.println("[cli]   c                clear local today-cache");
+    Serial.println("[cli]   heap             free / min-ever / largest block");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
     Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
     Serial.println("[cli]   ?                this help");
@@ -435,6 +477,17 @@ void handle_console_line(const std::string& line) {
                   c.wifi_ssid.c_str());
     delay(500);
     ESP.restart();
+    return;
+  }
+  if (line == "heap") {
+    // `min ever` is the number that actually matters for the OOM: free heap
+    // right now says nothing about the low-water mark hit during a TLS
+    // handshake plus a page parse. Watch it across a few delta polls — if it
+    // stops falling, the streaming parse is holding.
+    Serial.printf("[heap] free %u, min ever %u, largest block %u\n",
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(esp_get_minimum_free_heap_size()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
     return;
   }
   if (line == "c") {

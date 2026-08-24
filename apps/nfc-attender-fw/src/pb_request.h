@@ -42,6 +42,25 @@ std::string list_attendance_for_date_url(const std::string& base,
                                          const std::string& date_yyyy_mm_dd,
                                          int page, int per_page);
 
+// GET <base>/api/collections/attendance/records?page=N&perPage=M&sort=updated&filter=…
+// Filter: date ~ "<YYYY-MM-DD>" && updated > "<since>"
+//
+// The delta counterpart to list_attendance_for_date_url. Re-fetching all ~61
+// rows every poll would burn PocketHost's per-IP budget (1000 requests/hour,
+// shared by both devices and the dashboard); asking only for rows PocketBase
+// itself has touched since the last poll usually returns an empty page.
+//
+// `since` is a PocketBase datetime string ("YYYY-MM-DD HH:MM:SS.sssZ") taken
+// from the highest `updated` value already seen — never from device time,
+// which would let clock skew silently skip rows.
+//
+// Sorted by `updated` ascending so a truncated multi-page delta still advances
+// the watermark monotonically.
+std::string list_attendance_updated_since_url(const std::string& base,
+                                              const std::string& date_yyyy_mm_dd,
+                                              const std::string& since,
+                                              int page, int per_page);
+
 // POST <base>/api/collections/attendance/records
 // Body: {"learner":"<id>","date":"<YYYY-MM-DD>"}
 std::string create_attendance_url(const std::string& base);

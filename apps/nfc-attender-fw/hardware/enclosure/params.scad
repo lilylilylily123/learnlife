@@ -246,6 +246,44 @@ stb_standoff_h = 4.0;       // gap under the board for solder tails
 // Search terms that work: "ESP32 30Pin GPIO Breakout Board 1 into 2 Terminal
 // Adapter" or "ESP32 DevKit V1 expansion board screw terminal".
 
+
+// ── Wago 221 lever nuts (OPTIONAL — not needed for this build) ──
+//
+// I2C is a SHARED BUS: SDA and SCL each reach every peripheral, and 3V3 and
+// GND do too. A breadboard made that trivial (one column ties five holes
+// together), and a screw terminal gives one wire per pin, so it looks like
+// something has to replace the breadboard's fan-out.
+//
+// Counting the actual device says otherwise:
+//
+//   3V3   PN532 + OLED                 2 wires, 1 terminal
+//   GND   PN532 + OLED + buzzer        3 wires, but the MRD068A has a GND
+//                                      terminal on EACH side — 2 + 1
+//   D21   PN532 + OLED (SDA)           2 wires, 1 terminal
+//   D22   PN532 + OLED (SCL)           2 wires, 1 terminal
+//   D25   buzzer                       1 wire
+//
+// Worst case is TWO wires in one terminal. Two 24 AWG conductors is about
+// 0.4 mm2 into a terminal rated near 1.5 mm2 — unremarkable, and standard
+// practice for signal wiring. Twist the stripped ends together before
+// inserting so the clamp bears on both evenly.
+//
+// So: no Wagos for a two-peripheral build. They earn their place only if a
+// third device joins the bus — the DS3231 (include_rtc) would make it three
+// wires on 3V3, SDA and SCL, which is a genuine squeeze. Set this true then.
+//
+// If used: the 5-conductor 221-415, not the 3-conductor 221-413. The 3-way is
+// exactly full at two peripherals and leaves no room to grow.
+include_wago_bay = false;
+wago_n = 4;                 // 3V3, GND, SDA, SCL
+wago_l = 21.0;              // [MEASURE] 221-415 body length
+wago_w = 12.5;              // [MEASURE] body width (5-conductor)
+wago_h = 9.0;               // [MEASURE] body height
+wago_gap = 2.0;             // spacing between adjacent nuts in the bay
+                            // The bay is an open-topped printed pocket that
+                            // stops them sliding around; the levers must stay
+                            // reachable, so it is a corral, not a lid.
+
 // ── Piezo buzzer (GPIO 25) ──
 buz_d = 12.0;               // [MEASURE] disc diameter
 buz_h = 9.5;                // [MEASURE] body height

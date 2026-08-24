@@ -82,6 +82,22 @@ std::string list_attendance_for_date_url(const std::string& base,
          buf + percent_encode(filter);
 }
 
+std::string list_attendance_updated_since_url(const std::string& base,
+                                              const std::string& date,
+                                              const std::string& since,
+                                              int page, int per_page) {
+  std::string filter = "date ~ \"";
+  filter += date;
+  filter += "\" && updated > \"";
+  filter += since;
+  filter += "\"";
+  char buf[80];
+  std::snprintf(buf, sizeof(buf), "?page=%d&perPage=%d&sort=updated&filter=",
+                page, per_page);
+  return canonical_base(base) + "/api/collections/attendance/records" +
+         buf + percent_encode(filter);
+}
+
 std::string create_attendance_url(const std::string& base) {
   return canonical_base(base) + "/api/collections/attendance/records";
 }

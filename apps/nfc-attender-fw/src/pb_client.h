@@ -34,6 +34,11 @@ struct AttendanceRow {
   // a fallback (mirrors attendance.ts:127).
   std::string lunch_out_legacy;
   std::string lunch_in_legacy;
+  // PocketBase's own last-modified timestamp. Drives the delta-sync
+  // watermark: the device asks for rows with `updated > <max seen>` rather
+  // than re-fetching the whole day, which is what keeps the poll inside
+  // PocketHost's per-IP request budget.
+  std::string updated;
 };
 
 // Create the mutex guarding this module's shared state. MUST be called from
@@ -62,6 +67,20 @@ bool fetch_roster(std::vector<LearnerRow>& out);
 // today-cache. Called once at boot so every learner's first tap of the day
 // is fast (no synchronous network roundtrip on the scan path).
 bool prefetch_today_attendance(const std::string& date_yyyy_mm_dd);
+
+// Pull only the attendance rows PocketBase has modified since the last poll,
+// and merge them into the today-cache. `out_changed` receives how many rows
+// actually came back — usually zero.
+//
+// This is what makes a dashboard edit (Reset day, a justification, a manual
+// time correction) reach the device without a reboot. A full re-fetch would do
+// the same job, but PocketHost allows 1000 requests/hour per IP and both
+// devices plus the dashboard share the school's NAT — so the poll asks for a
+// delta instead, which is normally a single request returning an empty page.
+//
+// Returns false if there is no watermark yet (nothing fetched for `date`), in
+// which case the caller should run a full prefetch first.
+bool refresh_today_delta(const std::string& date_yyyy_mm_dd, int& out_changed);
 
 // Restore the today-cache from /today.json on LittleFS, but only if the
 // persisted date matches `today`. Returns true if the cache was repopulated
