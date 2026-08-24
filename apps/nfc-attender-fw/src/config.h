@@ -17,9 +17,16 @@ struct DeviceConfig {
   std::string pb_email;
   std::string pb_password;
   std::string device_id;        // last 4 of MAC, populated on first boot
+  std::string device_name;      // human label, e.g. "Front desk" / "Studio 2"
+  std::string ota_password;     // empty = OTA disabled (fails closed)
   std::string token;            // cached PB auth token
   std::time_t token_expires = 0;
 };
+
+// Last 4 hex digits of the MAC, e.g. "a1b2". Stable per device, so it can
+// distinguish two units on the same bench, in PocketBase logs, and as the
+// mDNS/OTA hostname. Lowercase because hostnames are.
+std::string derive_device_id();
 
 bool load(DeviceConfig& out);
 bool save(const DeviceConfig& c);

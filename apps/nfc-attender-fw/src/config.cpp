@@ -7,6 +7,11 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_random.h>
+
+#include <cstring>
+
+#include "ui.h"
 
 namespace llattender::config {
 
@@ -35,6 +40,8 @@ bool load(DeviceConfig& out) {
   out.pb_email      = get_str(p, "pb_email");
   out.pb_password   = get_str(p, "pb_password");
   out.device_id     = get_str(p, "device_id");
+  out.device_name   = get_str(p, "dev_name");
+  out.ota_password  = get_str(p, "ota_pw");
   out.token         = get_str(p, "token");
   out.token_expires = p.getULong64("tok_exp", 0);
   p.end();
@@ -50,6 +57,8 @@ bool save(const DeviceConfig& c) {
   put_str(p, "pb_email",   c.pb_email);
   put_str(p, "pb_password",c.pb_password);
   put_str(p, "device_id",  c.device_id);
+  put_str(p, "dev_name",   c.device_name);
+  put_str(p, "ota_pw",     c.ota_password);
   put_str(p, "token",      c.token);
   p.putULong64("tok_exp", c.token_expires);
   p.end();
@@ -97,7 +106,39 @@ bool is_provisioned() {
   return !c.wifi_ssid.empty() && !c.pb_email.empty();
 }
 
+std::string derive_device_id() {
+  uint8_t mac[6] = {0};
+  WiFi.macAddress(mac);
+  char buf[8];
+  // Lowercase: this ends up as an mDNS hostname, and hostnames are
+  // case-insensitive but conventionally lowercase.
+  std::snprintf(buf, sizeof(buf), "%02x%02x", mac[4], mac[5]);
+  return buf;
+}
+
 namespace {
+
+// Generate a random password using the ESP32's hardware RNG.
+//
+// esp_random() is seeded from physical noise once WiFi/BT is active, which it
+// is here — unlike random(), which without an explicit seed produces the SAME
+// sequence on every boot of every device. A predictable "random" AP password
+// would be no better than an open one.
+//
+// The alphabet deliberately omits 0/O and 1/l/I: this gets read off a 0.96"
+// OLED and typed into a phone, and a password nobody can transcribe is a
+// password that gets replaced with something weak.
+std::string random_password(size_t len) {
+  static const char kAlphabet[] =
+      "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  constexpr size_t kN = sizeof(kAlphabet) - 1;
+  std::string out;
+  out.reserve(len);
+  for (size_t i = 0; i < len; ++i) {
+    out += kAlphabet[esp_random() % kN];
+  }
+  return out;
+}
 
 // Build an AP SSID like "LL-Attender-A1B2" using the last 4 hex digits of the
 // MAC so multiple devices on the same bench don't collide.
@@ -149,6 +190,10 @@ small { display: block; color: #888; font-size: 0.8rem; margin-top: 4px; }
   <input id="email" name="email" type="email" required autocomplete="off" autocapitalize="none" autocorrect="off">
   <label for="pbpw">PB device password</label>
   <input id="pbpw" name="pbpw" type="password" required autocomplete="off">
+
+  <label for="devname">Device name</label>
+  <input id="devname" name="devname" placeholder="Front desk" autocomplete="off">
+  <small>Shown on the boot screen. Helps tell two devices apart.</small>
   <button type="submit">Save and reboot</button>
 </form>
 </body>
@@ -166,12 +211,29 @@ body { font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
 .ok { font-size: 4rem; margin: 16px 0 0; }
 h1 { font-size: 1.4rem; margin: 8px 0; }
 p { color: #666; }
+.ota { text-align: left; margin-top: 32px; padding: 16px; border: 2px solid #f59e0b;
+       border-radius: 8px; background: #fffbeb; }
+.ota h2 { font-size: 1rem; margin: 0 0 4px; color: #92400e; }
+.ota p { font-size: 0.85rem; margin: 0 0 12px; }
+dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+dt { font-weight: 600; font-size: 0.85rem; }
+dd { margin: 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.95rem;
+       background: #fff; padding: 2px 6px; border-radius: 4px; user-select: all; }
 </style>
 </head>
 <body>
 <div class="ok">&#10003;</div>
 <h1>Saved</h1>
 <p>The device is rebooting. You can disconnect from this WiFi and use it as normal.</p>
+<div class="ota">
+  <h2>Write this down now</h2>
+  <p>Needed to update the firmware over WiFi. It is not shown again.</p>
+  <dl>
+    <dt>Hostname</dt><dd><code>%HOSTNAME%</code></dd>
+    <dt>OTA password</dt><dd><code>%OTAPW%</code></dd>
+  </dl>
+</div>
 </body>
 </html>)HTML";
 
@@ -221,15 +283,30 @@ void run_web_provisioning() {
 
   WiFi.mode(WIFI_AP);
   const std::string ssid = ap_ssid();
-  // Open AP (no password). Phase-4 hardening: random per-boot password printed
-  // on the OLED. For now, ease-of-setup wins.
-  WiFi.softAP(ssid.c_str());
+
+  // Password-protected, regenerated every boot, displayed on the OLED.
+  //
+  // This AP accepts the PocketBase device account password over plain HTTP.
+  // Left open on a school WiFi full of curious teenagers, it is the weakest
+  // link in the entire system: anyone in range could join, read the form, and
+  // submit their own PocketBase endpoint. A per-boot password means a
+  // shoulder-surfed one is useless after the next restart.
+  //
+  // 8 characters from a 56-character alphabet is ~46 bits — far beyond
+  // guessing over WPA2, which rate-limits handshakes anyway.
+  const std::string ap_pw = random_password(8);
+  WiFi.softAP(ssid.c_str(), ap_pw.c_str());
   IPAddress ip = WiFi.softAPIP();
-  Serial.printf("[config] AP up: SSID=%s, IP=%s\n",
-                ssid.c_str(), ip.toString().c_str());
+
+  Serial.printf("[config] AP up: SSID=%s PASSWORD=%s IP=%s\n",
+                ssid.c_str(), ap_pw.c_str(), ip.toString().c_str());
   Serial.println("[config] connect a phone to that WiFi, the setup page");
   Serial.println("[config] should pop up automatically (or visit");
   Serial.printf("[config] http://%s manually).\n", ip.toString().c_str());
+
+  // The OLED is the only way to read the password without a serial cable,
+  // which is the whole point during a field setup.
+  ui::show_provisioning(ssid, ap_pw);
 
   // Catch-all DNS so the OS captive-portal detector lands on our form.
   dns.start(53, "*", ip);
@@ -251,6 +328,18 @@ void run_web_provisioning() {
     if (!url.empty()) c.pb_url = url;
     c.pb_email    = take("email");
     c.pb_password = take("pbpw");
+    c.device_name = take("devname");
+
+    // device_id has been declared since Phase 1 but never actually written.
+    // It identifies the unit in logs, in the AP SSID and as the OTA hostname,
+    // which is how you tell two devices on one bench apart.
+    if (c.device_id.empty()) c.device_id = derive_device_id();
+
+    // Generate the OTA password once, on first provisioning, and keep it. It
+    // is shown on the confirmation page — the only time it is ever displayed,
+    // so it has to be written down then. Regenerating it on every boot would
+    // make OTA unusable, since the uploader needs a stable secret.
+    if (c.ota_password.empty()) c.ota_password = random_password(12);
 
     if (c.wifi_ssid.empty() || c.pb_email.empty() || c.pb_password.empty()) {
       server.send(400, "text/plain",
@@ -261,7 +350,18 @@ void run_web_provisioning() {
       server.send(500, "text/plain", "NVS save failed.");
       return;
     }
-    server.send(200, "text/html", kSavedHtml);
+    // The OTA password is displayed exactly once, here. It is never shown
+    // again — not on the OLED, not over serial — so the confirmation page has
+    // to make it obvious that it needs writing down.
+    std::string page = kSavedHtml;
+    const std::string host = "ll-attender-" + c.device_id + ".local";
+    auto sub = [&page](const char* token, const std::string& value) {
+      const size_t at = page.find(token);
+      if (at != std::string::npos) page.replace(at, std::strlen(token), value);
+    };
+    sub("%HOSTNAME%", host);
+    sub("%OTAPW%", c.ota_password);
+    server.send(200, "text/html", page.c_str());
     server.client().flush();
     delay(500);
     ESP.restart();
@@ -274,10 +374,33 @@ void run_web_provisioning() {
   });
   server.begin();
 
-  // Spin forever; the only exit is ESP.restart() inside /save.
+  // Bounded, not forever. A device that drops into setup mode and is then
+  // forgotten would otherwise sit advertising an access point indefinitely —
+  // on a school network, for as long as it stays powered. Rebooting retries
+  // the saved credentials, which is usually what a stuck device needs anyway.
+  constexpr uint32_t kProvisioningTimeoutMs = 10 * 60 * 1000;  // 10 minutes
+  const uint32_t started = millis();
+  uint32_t last_log = 0;
+
   for (;;) {
     dns.processNextRequest();
     server.handleClient();
+
+    const uint32_t elapsed = millis() - started;
+    if (elapsed >= kProvisioningTimeoutMs) {
+      Serial.println("[config] provisioning timed out after 10 min — rebooting");
+      ui::show(ui::Event::Boot, "Setup timed out");
+      delay(1500);
+      ESP.restart();
+    }
+    // A minute-by-minute countdown, so someone watching the serial console
+    // knows the window is closing rather than wondering why it rebooted.
+    if (elapsed - last_log >= 60000) {
+      last_log = elapsed;
+      Serial.printf("[config] setup mode: %u min remaining\n",
+                    static_cast<unsigned>(
+                        (kProvisioningTimeoutMs - elapsed) / 60000));
+    }
     delay(2);
   }
 }

@@ -49,6 +49,14 @@ void set_network_error(bool on);
 // their name and a green verdict.
 void set_pending_count(int n);
 
+// Show the setup-mode screen: the AP name and its per-boot password.
+//
+// Persistent — no timeout — because it must stay readable for as long as it
+// takes someone to type it into a phone. The OLED is the only way to read the
+// password without a serial cable, which is the whole point during a field
+// setup.
+void show_provisioning(const std::string& ssid, const std::string& password);
+
 // Called periodically from the UI task to advance time-based transitions
 // (auto-revert action feedback to idle, redraw the idle clock, blink the
 // network-error glyph). Cheap when nothing changed.

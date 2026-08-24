@@ -26,7 +26,7 @@ constexpr uint32_t kSplashMs = 1500;
 Adafruit_SSD1306 g_oled(kWidth, kHeight, &Wire, /*reset=*/-1);
 bool g_have_oled = false;
 
-enum class Mode { Boot, Idle, Action, Unknown, WaitingClock };
+enum class Mode { Boot, Idle, Action, Unknown, WaitingClock, Provisioning };
 
 struct State {
   Mode mode = Mode::Boot;
@@ -36,6 +36,8 @@ struct State {
   bool queued_offline = false;  // sticks until next non-Queued event
   bool network_error = false;
   int pending = 0;              // queued scans not yet accepted by PocketBase
+  char ap_ssid[32] = {0};
+  char ap_pw[24] = {0};
   bool dirty = true;
 };
 
@@ -204,6 +206,21 @@ void render_waiting_clock() {
   g_oled.display();
 }
 
+// Setup mode. Two pieces of information, and the password is the one being
+// typed into a phone, so it gets the larger type.
+void render_provisioning() {
+  g_oled.clearDisplay();
+  g_oled.setTextColor(SSD1306_WHITE);
+
+  draw_centered("SETUP - join WiFi", 0, 1);
+  g_oled.drawLine(0, 10, kWidth - 1, 10, SSD1306_WHITE);
+  draw_centered(g_st.ap_ssid, 15, 1);
+  draw_centered("password:", 28, 1);
+  draw_centered(g_st.ap_pw, 40, 2);
+
+  g_oled.display();
+}
+
 void render_action() {
   g_oled.clearDisplay();
   g_oled.setTextColor(SSD1306_WHITE);
@@ -259,6 +276,7 @@ void redraw() {
     case Mode::Action:  render_action();  break;
     case Mode::Unknown: render_unknown(); break;
     case Mode::WaitingClock: render_waiting_clock(); break;
+    case Mode::Provisioning: render_provisioning(); break;
   }
   g_st.dirty = false;
   g_last_redraw_ms = millis();
@@ -334,6 +352,17 @@ void show(Event ev, const char* learner_name) {
       g_st.name[sizeof(g_st.name) - 1] = '\0';
       break;
   }
+  g_st.dirty = true;
+  redraw();
+}
+
+void show_provisioning(const std::string& ssid, const std::string& password) {
+  std::strncpy(g_st.ap_ssid, ssid.c_str(), sizeof(g_st.ap_ssid) - 1);
+  g_st.ap_ssid[sizeof(g_st.ap_ssid) - 1] = '\0';
+  std::strncpy(g_st.ap_pw, password.c_str(), sizeof(g_st.ap_pw) - 1);
+  g_st.ap_pw[sizeof(g_st.ap_pw) - 1] = '\0';
+  g_st.mode = Mode::Provisioning;
+  g_st.mode_until_ms = 0;   // persistent: it must stay readable while typing
   g_st.dirty = true;
   redraw();
 }

@@ -25,6 +25,7 @@
 #include "config.h"
 #include "fields.h"
 #include "nfc.h"
+#include "ota.h"
 #include "pb_client.h"
 #include "queue.h"
 #include "roster.h"
@@ -114,6 +115,14 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
   ScanMsg in{};
   for (;;) {
     if (xQueueReceive(g_scan_q, &in, portMAX_DELAY) != pdTRUE) continue;
+
+    // Drop scans while firmware is being written. A tap acknowledged on the
+    // OLED now would be wiped by the reboot that follows, which is worse than
+    // simply not reading the card — the learner would believe they signed in.
+    if (ota::in_progress()) {
+      Serial.println("[proc] OTA in progress — ignoring scan");
+      continue;
+    }
 
     const std::string uid_hex = in.uid_hex;
     const auto* learner = roster::lookup_by_uid(uid_hex);
@@ -252,6 +261,13 @@ constexpr int64_t kNtpRetryMs = 30000;
       if (online) {
         time_sync::sync_ntp();
         last_ntp_try_ms = millis();
+        // OTA needs an IP, so it can only start once WiFi is actually up.
+        // init() is idempotent; re-running it on a reconnect is harmless.
+        {
+          config::DeviceConfig c;
+          config::load(c);
+          ota::init(c.device_id, c.ota_password);
+        }
         // First-online roster refresh; in phase 3 also drain on schedule.
         std::vector<pb_client::LearnerRow> items;
         if (pb_client::login() && pb_client::fetch_roster(items)) {
@@ -271,6 +287,21 @@ constexpr int64_t kNtpRetryMs = 30000;
           last_prefetch_ms = millis();
         }
       }
+    }
+
+    // Pump OTA before the long block below. handle() is cheap when idle, but
+    // it has to be called often enough that an upload attempt isn't left
+    // waiting up to 5 seconds for the queue timeout to expire.
+    for (int i = 0; i < 50; ++i) {
+      ota::tick();
+      if (ota::in_progress()) {
+        // Give the transfer the whole task. Nothing else here matters while
+        // firmware is being written, and competing for the CPU would only
+        // slow it down.
+        vTaskDelay(pdMS_TO_TICKS(10));
+        continue;
+      }
+      vTaskDelay(pdMS_TO_TICKS(2));
     }
 
     // Wait for a flush signal or 5s timeout, whichever comes first.
@@ -481,6 +512,7 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   heap             free / min-ever / largest block");
     Serial.println("[cli]   q                queue depth + pending entries");
     Serial.println("[cli]   r                roster size + age");
+    Serial.println("[cli]   ota              OTA hostname + upload command");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
     Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
     Serial.println("[cli]   ?                this help");
@@ -520,6 +552,21 @@ void handle_console_line(const std::string& line) {
                   static_cast<unsigned>(ESP.getFreeHeap()),
                   static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    return;
+  }
+  if (line == "ota") {
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    if (c.ota_password.empty()) {
+      Serial.println("[cli] OTA disabled — no password provisioned. Re-run "
+                     "setup (type RESET at boot) to generate one.");
+    } else {
+      Serial.printf("[cli] OTA host: %s.local\n",
+                    llattender::ota::hostname().c_str());
+      Serial.println("[cli]   pio run -e esp32dev_ota -t upload");
+      Serial.println("[cli] password is NOT shown here — it was displayed once "
+                     "on the setup confirmation page.");
+    }
     return;
   }
   if (line == "q") {
