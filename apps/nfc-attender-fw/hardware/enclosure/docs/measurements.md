@@ -16,11 +16,33 @@ often not quite rectangular. Record the larger value.
 
 ---
 
-## 0. Test print results
+## 0. Bench tests
 
-Run these two prints before designing anything. Neither needs measurements.
+None of these needs a measurement first, so they can happen whenever.
 
-### Antenna tile ladder → sets `lid_t`
+**Priority order**, highest value first:
+
+1. **Coil-over-ESP32** (below) — nothing to print, and it validates the stacked
+   layout, which is the biggest assumption in the design.
+2. **Tolerance coupon** — sets five parameters that are currently guesses and
+   WILL be wrong for your printer.
+3. **Antenna tiles** — optional; see the note under that heading.
+
+### Antenna tile ladder → sets `lid_t`  *(OPTIONAL)*
+
+**You can probably skip this.** In the stacked layout the PN532 sits directly
+under the lid, so the card ends up **3.8 mm from the coil**. Even deleting the
+antenna pocket entirely and using a uniform 4 mm lid only takes that to 5.8 mm.
+A rig that reads at 30-50 mm will not notice either.
+
+The physics agrees: 13.56 MHz NFC is near-field MAGNETIC coupling at a ~22 m
+wavelength, and PLA/PETG are non-conductive. The plastic doesn't attenuate the
+field — it only contributes its own thickness as distance. 2 mm of lid is 2 mm
+of air. This ladder measures a variable the geometry already made irrelevant.
+
+Still worth 15 minutes and 10 g if: read range disappoints once assembled and
+you want to rule thickness in or out, your PN532 clone seems weak, or the
+school's cards are unusually thick. Diagnostic, not a prerequisite.
 
 Print `antenna_tiles.scad`. Lay each tile on the bench PN532, hold a real
 school card flat on it, lift slowly, and record the height at which reads stop
@@ -37,8 +59,8 @@ being reliable. "Reliable" is 5 taps out of 5, not 3 out of 5.
 Chosen `lid_t` = ________ mm
 
 Pick the **thickest** tile that still reads comfortably with the card resting
-on it. Thicker means a stiffer lid; you are buying the most rigidity you can
-without hurting reads.
+on it. Thicker means a stiffer lid. If they all read about the same — the likely
+outcome — leave `lid_t` at 2.0 and move on.
 
 **Bonus test, worth more than the ladder itself:** put a laptop or steel ruler
 flat underneath the PN532 and repeat. The drop you see is why the enclosure

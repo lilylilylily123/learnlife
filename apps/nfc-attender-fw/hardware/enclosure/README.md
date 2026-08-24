@@ -42,28 +42,24 @@ layout when you finally plug them in.
 
 Then, in order:
 
-1. **Print `stl/antenna_tiles.stl`** — five loose plastic tiles, ~15 min, ~10 g.
-   Lay each on the bench PN532 and find how far a real card still reads
-   through it. This sets `lid_t`, the most important number in the design.
-   *Needs no measurements and no design decisions.*
+1. **Run the coil-over-ESP32 test** (`docs/measurements.md` §0). Nothing to
+   print. Validates the stacked layout — the biggest assumption in the design.
 
 2. **Print `stl/coupon.stl`** — one 120 × 90 mm test plate, ~40 min. Converts
    one print into the five tolerance numbers at the top of `params.scad`.
 
-3. **Run the coil-over-ESP32 test** (`docs/measurements.md` §0) — no new parts
-   needed. It validates the stacked layout, which is the single biggest
-   assumption in the design: if a DevKit 16 mm below the coil kills read range,
-   the box has to go back to a wide side-by-side arrangement.
-
-4. **Measure your modules** with calipers into `docs/measurements.md`, and copy
+3. **Measure your modules** with calipers into `docs/measurements.md`, and copy
    the results into `params.scad`. Everything except the breakout is already in
    your hands.
 
-5. When the breakout arrives, measure it, re-render, and only then print the
+4. When the breakout arrives, measure it, re-render, and only then print the
    enclosure itself.
 
-Steps 1–4 are independent of each other and of the breakout, so they can happen
-in whatever order suits.
+`antenna_tiles.stl` also exists but is **optional** — the card ends up 3.8 mm
+from the coil, so lid thickness isn't the lever it looks like. Reasoning is in
+the worksheet.
+
+Steps 1–3 are independent of each other and of the breakout.
 
 ## Files
 
