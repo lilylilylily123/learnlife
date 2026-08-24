@@ -114,10 +114,11 @@ jobs:
           BIN=.pio/build/esp32dev/firmware.bin
           SIZE=$(stat -c%s "$BIN")
 
-          # Default ESP32 Arduino partition table gives each of the two app
-          # slots 1280 KB. Keep this in step with board_build.partitions once a
-          # custom partitions.csv lands (planned: 1536 KB slots for OTA).
-          SLOT=1310720
+          # Must match app0/app1 in apps/nfc-attender-fw/hardware/partitions.csv
+          # (0x180000 = 1536 KB). If that file changes, change this too — a
+          # stale value here would report a comfortable percentage while the
+          # real slot overflowed.
+          SLOT=1572864
           PCT=$(( SIZE * 100 / SLOT ))
 
           {
