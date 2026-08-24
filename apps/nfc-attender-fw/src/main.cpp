@@ -192,6 +192,7 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
     p.ts_unix = now_unix;
     p.fields_json = fields::serialize_action(action);
     queue::append(p);
+    ui::set_pending_count(queue::size());
     if (g_flush_signal) xQueueSend(g_flush_signal, &p.ts_unix, 0);
   }
 }
@@ -293,7 +294,7 @@ constexpr int64_t kNtpRetryMs = 30000;
     }
 
     if (online && queue::size() > 0) {
-      queue::drain([](const queue::PendingScan& s) {
+      queue::drain_ex([](const queue::PendingScan& s) -> WriteOutcome {
         // Online scans already carry an attendance_id (populated by
         // processor_task). Offline scans don't — for those we ensure the row
         // exists before patching. Either way, only the patch fields are taken
@@ -312,12 +313,27 @@ constexpr int64_t kNtpRetryMs = 30000;
           pb_client::AttendanceRow row;
           bool created = false;
           if (!pb_client::ensure_today_row(s.learner_id, date, row, created)) {
-            return false;  // keep on queue, retry next cycle
+            // Couldn't find or create the row — almost always the network.
+            // Keep the entry and try again next cycle.
+            return WriteOutcome::RetryLater;
           }
           id = row.id;
         }
-        return pb_client::patch_attendance(id, s.fields_json);
+
+        // Classify by HTTP status rather than a bare bool. A 404 means the row
+        // was deleted server-side and no number of retries will change that —
+        // and because a failed drain stops at the head of the queue, retrying
+        // it forever would block every scan queued behind it.
+        const int code = pb_client::patch_attendance_status(id, s.fields_json);
+        const WriteOutcome outcome = classify_http_status(code);
+        if (outcome == WriteOutcome::PermanentFail) {
+          Serial.printf("[net] giving up on scan for learner %s (HTTP %d) — "
+                        "moved to dead-letter file\n",
+                        s.learner_id.c_str(), code);
+        }
+        return outcome;
       });
+      ui::set_pending_count(queue::size());
     }
 
     // Periodic delta poll. Previously disabled: the old full re-fetch OOMed on
@@ -415,13 +431,27 @@ void setup() {
     ui::set_network_error(true);  // reuse the error indicator for now
   }
 
+  // Roster and queue come up BEFORE WiFi, and that ordering is the point.
+  //
+  // The roster is loaded from LittleFS, so a cold boot on a morning when the
+  // router is slow still resolves every card to a name. Previously the roster
+  // was RAM-only and populated solely on the offline->online WiFi edge, which
+  // meant a boot without network made all 61 cards read "Unknown card" —
+  // during the exact fifteen minutes when everyone arrives.
+  //
+  // The queue is restored from disk here too, so scans that were pending when
+  // the power was cut are still pending now rather than silently gone.
+  roster::init();
+  queue::init();
+  // Surface a queue restored from disk right away, so a device that was
+  // power-cut with unsent scans says so on the idle screen from boot rather
+  // than only after the next tap.
+  ui::set_pending_count(queue::size());
+
   WiFi.mode(WIFI_STA);
   if (!cfg.wifi_ssid.empty()) {
     WiFi.begin(cfg.wifi_ssid.c_str(), cfg.wifi_pw.c_str());
   }
-
-  roster::init();
-  queue::init();
   // Must happen before any task starts: pb_client's token, config snapshot and
   // today-cache are touched from processor_task, network_task AND the serial
   // console on the Arduino loop task.
@@ -449,6 +479,8 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   t off            clear override");
     Serial.println("[cli]   c                clear local today-cache");
     Serial.println("[cli]   heap             free / min-ever / largest block");
+    Serial.println("[cli]   q                queue depth + pending entries");
+    Serial.println("[cli]   r                roster size + age");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
     Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
     Serial.println("[cli]   ?                this help");
@@ -488,6 +520,22 @@ void handle_console_line(const std::string& line) {
                   static_cast<unsigned>(ESP.getFreeHeap()),
                   static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    return;
+  }
+  if (line == "q") {
+    llattender::queue::debug_dump();
+    return;
+  }
+  if (line == "r") {
+    const int n = llattender::roster::count();
+    const std::time_t age = llattender::roster::age_seconds();
+    if (age < 0) {
+      Serial.println("[cli] roster: never loaded — cards will not resolve");
+    } else {
+      Serial.printf("[cli] roster: %d learners, loaded %ld s ago (%s)\n",
+                    n, static_cast<long>(age),
+                    llattender::roster::ready() ? "ready" : "NOT ready");
+    }
     return;
   }
   if (line == "c") {

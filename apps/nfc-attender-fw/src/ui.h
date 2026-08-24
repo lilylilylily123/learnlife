@@ -40,6 +40,15 @@ void show(Event ev, const char* learner_name = nullptr);
 // is currently being displayed.
 void set_network_error(bool on);
 
+// How many scans are waiting to reach PocketBase. Shown on the idle screen
+// when non-zero.
+//
+// This is the one operational signal a guide can act on: a number that keeps
+// climbing means the device is recording taps but not delivering them, which
+// otherwise looks identical to everything working — the learner still sees
+// their name and a green verdict.
+void set_pending_count(int n);
+
 // Called periodically from the UI task to advance time-based transitions
 // (auto-revert action feedback to idle, redraw the idle clock, blink the
 // network-error glyph). Cheap when nothing changed.

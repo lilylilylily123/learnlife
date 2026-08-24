@@ -104,6 +104,17 @@ bool ensure_today_row(const std::string& learner_id,
 bool patch_attendance(const std::string& attendance_id,
                       const std::string& fields_json);
 
+// As patch_attendance, but returns the HTTP status so the caller can tell a
+// transient failure from a permanent one. Negative values are HTTPClient
+// transport errors, matching its own convention.
+//
+// The queue drain needs this: a 404 means the row was deleted server-side and
+// retrying can never succeed, and because a failed drain stops at the head of
+// the queue, retrying forever would block every scan behind it. Feed the
+// result to classify_http_status() in pb_result.h.
+int patch_attendance_status(const std::string& attendance_id,
+                            const std::string& fields_json);
+
 // Apply an action's field changes to the in-memory cached row for `learner_id`
 // so the next scan reads the predicted post-action state instead of hitting
 // the network. Caller passes the action they're about to enqueue.

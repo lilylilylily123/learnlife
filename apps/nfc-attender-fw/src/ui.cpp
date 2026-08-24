@@ -35,6 +35,7 @@ struct State {
   char name[64] = {0};
   bool queued_offline = false;  // sticks until next non-Queued event
   bool network_error = false;
+  int pending = 0;              // queued scans not yet accepted by PocketBase
   bool dirty = true;
 };
 
@@ -169,9 +170,19 @@ void render_idle() {
   format_clock(clk, sizeof(clk));
   draw_centered(clk, 18, 3);
 
-  char date[24];
-  format_date(date, sizeof(date));
-  draw_centered(date, 52, 1);
+  if (g_st.pending > 0) {
+    // Replaces the date line rather than squeezing in beside it. The date is
+    // decoration; scans sitting undelivered is the thing a guide needs to see,
+    // because otherwise a device that records but never uploads looks exactly
+    // like one that is working.
+    char pend[24];
+    std::snprintf(pend, sizeof(pend), "%d waiting to send", g_st.pending);
+    draw_centered(pend, 52, 1);
+  } else {
+    char date[24];
+    format_date(date, sizeof(date));
+    draw_centered(date, 52, 1);
+  }
 
   render_overlay();
   g_oled.display();
@@ -325,6 +336,12 @@ void show(Event ev, const char* learner_name) {
   }
   g_st.dirty = true;
   redraw();
+}
+
+void set_pending_count(int n) {
+  if (g_st.pending == n) return;
+  g_st.pending = n;
+  g_st.dirty = true;
 }
 
 void set_network_error(bool on) {

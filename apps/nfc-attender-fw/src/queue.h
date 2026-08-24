@@ -10,6 +10,8 @@
 #include <functional>
 #include <string>
 
+#include "pb_result.h"
+
 namespace llattender::queue {
 
 struct PendingScan {
@@ -31,7 +33,16 @@ bool append(const PendingScan& s);
 // Returns the number of entries successfully drained.
 int drain(const std::function<bool(const PendingScan&)>& writer);
 
+// Drain with full outcome reporting. Preferred over drain(): a plain bool
+// can't distinguish "the network blipped" from "this row was deleted and the
+// write will 404 forever", and the latter would otherwise be retried
+// indefinitely at the head of the queue, blocking every scan behind it.
+int drain_ex(const std::function<WriteOutcome(const PendingScan&)>& writer);
+
 // Number of entries still pending.
 int size();
+
+// Print the queue's contents to Serial. Backs the `q` console command.
+void debug_dump(int max_entries = 5);
 
 }  // namespace llattender::queue

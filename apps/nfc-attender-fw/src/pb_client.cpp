@@ -554,20 +554,29 @@ void clear_today_cache() {
 }
 
 bool patch_attendance(const std::string& id, const std::string& fields_json) {
+  return patch_attendance_status(id, fields_json) == 200;
+}
+
+int patch_attendance_status(const std::string& id,
+                            const std::string& fields_json) {
   Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] patch_attendance: not logged in");
-    return false;
+    // Negative == transient transport-level failure, same convention
+    // HTTPClient uses. Not logged in yet is temporary, not permanent.
+    return -1;
   }
   if (id.empty()) {
     Serial.println("[pb] patch_attendance: empty id");
-    return false;
+    // A queued entry with no id can never be written — 400 so it is
+    // dead-lettered rather than retried forever.
+    return 400;
   }
   WiFiClientSecure client;
   HTTPClient http;
   const std::string url =
       pb_request::patch_attendance_url(g_cfg.pb_url, id);
-  if (!open_https(http, client, url)) return false;
+  if (!open_https(http, client, url)) return -1;  // transient: couldn't connect
   int code = http.sendRequest(
       "PATCH",
       reinterpret_cast<uint8_t*>(const_cast<char*>(fields_json.data())),
@@ -575,9 +584,8 @@ bool patch_attendance(const std::string& id, const std::string& fields_json) {
   http.end();
   if (code != 200) {
     Serial.printf("[pb] patch_attendance HTTP %d\n", code);
-    return false;
   }
-  return true;
+  return code;
 }
 
 }  // namespace llattender::pb_client
