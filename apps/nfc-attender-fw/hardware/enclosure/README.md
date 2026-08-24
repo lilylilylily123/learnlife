@@ -75,12 +75,18 @@ dupont wires cross the parting line and every service visit strains them. The
 lid's only job is to be thin over the antenna — so if read range disappoints,
 you reprint a 20-minute lid rather than the whole box.
 
-**The PN532 sits on tall posts above the mini breadboard, never above the
-ESP32.** 13.56 MHz NFC is a near-field *magnetic* link. Plastic is nearly
-transparent to it; what actually destroys range is a conductive surface lying
-parallel and close to the coil, acting as a shorted turn and detuning it. The
-ESP32 has a large ground pour and a metal shield can. The mini breadboard has
-small discontinuous strips. So the coil looks down at the breadboard.
+**The PN532 sits on tall posts, laterally clear of the electronics.**
+13.56 MHz NFC is a near-field *magnetic* link. Plastic is nearly transparent to
+it; what actually destroys range is a conductive surface lying parallel and
+close to the coil, acting as a shorted turn and detuning it. The ESP32 has a
+large ground pour and a metal shield can, and the screw terminal breakout is a
+double-layer PCB with real copper — so the coil has to sit beside them rather
+than above them, which is what makes the box wider rather than taller.
+
+*How much* clearance is genuinely needed is a measurement, not a guess. The
+coil-over-breakout test in `docs/measurements.md` §0 settles it on the bench
+before any geometry is drawn: if the copper turns out not to matter, the layout
+can stack and the box gets smaller.
 
 **The OLED goes in the vertical front wall**, which puts its PCB edge-on to the
 coil's field instead of coplanar with it, and makes the display readable by
@@ -93,10 +99,37 @@ face, past a ~30 mm reliable read range. A flat box sitting in a tilted cradle
 keeps the antenna-to-card distance unchanged and makes the tilt a
 one-parameter reprint.
 
-**A mini breadboard is the honest solderless answer to bussing I²C.** The
-DevKitC exposes one 3V3 pin, and each header pin accepts exactly one dupont
-housing — three modules cannot share power and I²C off that directly. Because
-it takes floor space, it is an enclosure input rather than an afterthought.
+**A screw terminal breakout board busses I²C, not a breadboard.** The DevKitC
+exposes one 3V3 pin, and each header pin accepts exactly one dupont housing, so
+two peripherals cannot share power and I²C off it directly. Something has to fan
+those nets out.
+
+A mini breadboard was the first answer here and it was the wrong one. Breadboard
+contacts are spring clips built for temporary prototyping — [not rated for
+permanent installation](https://en.wikipedia.org/wiki/Breadboard), prone to
+going intermittent under vibration, and higher-resistance than a clamped joint.
+An intermittent I²C line in a device tapped a few hundred times a day is the
+worst available failure mode: it doesn't fail cleanly, it works for a week and
+then returns one garbage read.
+
+A 38-pin ESP32 screw terminal breakout fixes that with no soldering. The DevKitC
+plugs into its headers; every GPIO comes out on a screw clamp that cannot
+vibrate loose. Buy the **"1 into 2"** variant — it duplicates each GPIO to two
+terminals, exactly what 3V3, SDA and SCL need for two peripherals.
+
+Wiring is deliberately tool-light: cut female-to-female dupont jumpers in half
+and strip the cut end. Bare wire into the screw terminal, surviving female end
+onto the module's header pin. Wire strippers, nothing else.
+
+This board — not the DevKitC — is what bolts to the floor, which also removes
+the "does this clone even have mounting holes?" problem, since the breakout has
+them regardless of what the bare board does.
+
+**Known limit:** this secures the ESP32 end of every wire, not both ends. The
+peripheral end is still a dupont housing on a header pin, which is what the
+printed retainer bar addresses. A soldered perfboard remains strictly more
+robust — `hardware/production-enclosure-v1` has that design if it's ever worth
+the iron and the hours.
 
 **Fastening is M3 self-tapping screws into printed bosses.** Heat-set brass
 inserts are the better long-term joint, but they need a soldering iron and an

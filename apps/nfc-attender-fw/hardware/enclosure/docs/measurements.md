@@ -47,6 +47,31 @@ what you observe — it is good capstone material.
 
 Metal interference observed: ______________________________________________
 
+### Coil-over-breakout test → sets `antenna_keepout` (and the box width)
+
+This one decides how big the enclosure has to be, so it is worth doing carefully.
+
+The PN532 used to sit directly above a mini breadboard, which is small
+discontinuous metal strips and electrically almost invisible to the coil. It now
+has to share a box with a **screw terminal breakout board** — a double-layer PCB
+with real copper on it. If that copper detunes the antenna, the PN532 has to sit
+laterally clear of the breakout, and the box gets wider to fit them side by side.
+
+On the bench, with a tile of your chosen `lid_t` on top of the PN532:
+
+| PN532 position | Max reliable read height |
+|---|---|
+| Free air, nothing underneath | |
+| Directly on top of the breakout board | |
+| 10 mm to the side of the breakout | |
+| 20 mm to the side of the breakout | |
+
+Chosen `antenna_keepout` = ________ mm
+
+If "directly on top" reads about as well as free air, the copper isn't a problem
+and the box can be smaller and the layout stacked. If it drops noticeably, keep
+them side by side and use the smallest offset that recovers full range.
+
 ### Tolerance coupon → sets five parameters
 
 Print `coupon.scad`. Instructions are in the header of that file.
@@ -65,27 +90,29 @@ Print `coupon.scad`. Instructions are in the header of that file.
 
 ## 1. ESP32-WROOM-32 DevKitC (38-pin, USB-C)
 
+The DevKitC no longer bolts to the case — it plugs into the screw terminal
+breakout board (§5), which is what mounts to the floor. These dimensions still
+matter for clearance and for locating the USB-C cutout.
+
 | Measurement | Value | `params.scad` |
 |---|---|---|
 | PCB length | | `esp_l` |
 | PCB width | | `esp_w` |
 | PCB thickness | | `esp_t` |
-| **Has mounting holes at all?** yes / no | | `esp_has_mount_holes` |
-| Hole diameter (if any) | | `esp_hole_d` |
-| Hole spacing, long axis | | `esp_hole_dx` |
-| Hole spacing, short axis | | `esp_hole_dy` |
+| **Pin-row spacing: narrow (0.9") or wide (1.0")?** | | (decides which breakout to buy) |
 | USB-C connector body width | | `esp_usb_w` |
 | USB-C body height above PCB | | `esp_usb_h` |
 | USB-C overhang past the PCB edge | | `esp_usb_overhang` |
 | USB-C centre offset from PCB centreline | | `esp_usb_center_off` |
 
-⚠ **The mounting-hole question is a fork in the design.** Many 38-pin DevKitC
-clones have no mounting holes at all. If yours doesn't, the board is retained
-by printed L-clips over its long edges instead of screws — answer this before
-any base geometry gets drawn.
+⚠ **Measure the pin-row spacing BEFORE ordering the breakout board.** These come
+in narrow (0.9") and wide (1.0") variants and they are not interchangeable.
+Either measure yours, or buy a listing that explicitly covers both sizes.
 
 ⚠ **Measure the USB-C centre offset, don't assume zero.** It is off-centre on
 plenty of clones, and the back-wall cutout has to line up with the real port.
+Note the breakout board raises the DevKitC by `stb_h`, so the cutout height is
+measured from the breakout's top face, not from the enclosure floor.
 
 ---
 
@@ -148,20 +175,42 @@ and `box_iz` — how tall the box has to be.
 | Measurement | Value | Notes |
 |---|---|---|
 | Dupont female housing height, pushed onto a header pin | | above the PCB |
-| Header pin tail length below the PCB | | sets `esp_standoff_h` |
+| Header pin tail length below the breakout PCB | | sets `stb_standoff_h` |
+| Breakout + plugged DevKitC, total height | | sets `stb_h` |
 | PN532 + plugged dupont, total height | | |
 | OLED + plugged dupont, total height | | |
 | Tallest point in the whole assembly | | sets `box_iz` |
 
 ---
 
-## 5. Mini breadboard, buzzer, cable, cards
+## 5. Screw terminal breakout board
+
+**Cannot be measured until it arrives** — and the base/lid geometry can't be
+finalised without it, so this is the long pole on the enclosure. Order early.
+The two test prints (§0) are *not* blocked by it.
+
+Buy the **"1 into 2"** variant if available: it duplicates each GPIO to two
+terminals, which is exactly what 3V3, SDA and SCL need to reach two peripherals.
 
 | Measurement | Value | `params.scad` |
 |---|---|---|
-| Mini breadboard length (incl. adhesive backing) | | `bb_l` |
-| Mini breadboard width | | `bb_w` |
-| Mini breadboard height | | `bb_h` |
+| Breakout PCB length | | `stb_l` |
+| Breakout PCB width | | `stb_w` |
+| Total height (screw terminals, or plugged-in DevKitC — whichever is taller) | | `stb_h` |
+| Mounting hole diameter | | `stb_hole_d` |
+| Hole spacing, long axis | | `stb_hole_dx` |
+| Hole spacing, short axis | | `stb_hole_dy` |
+| Does it accept two 24 AWG wires per terminal? | yes / no | (affects fan-out) |
+
+The placeholder values in `params.scad` are a guess at a typical board and will
+almost certainly be wrong for yours. Replace all six before rendering a base.
+
+---
+
+## 6. Buzzer, cable, cards
+
+| Measurement | Value | `params.scad` |
+|---|---|---|
 | Buzzer disc diameter | | `buz_d` |
 | Buzzer body height | | `buz_h` |
 | USB cable outer diameter | | `cable_od` |
@@ -170,7 +219,7 @@ and `box_iz` — how tall the box has to be.
 
 ---
 
-## 6. Makerspace constraints
+## 7. Makerspace constraints
 
 Ask before treating `box_ix` / `box_iy` as final — bed size decides whether two
 parts fit on one plate, which decides how many visits this takes.
@@ -186,7 +235,7 @@ parts fit on one plate, which decides how many visits this takes.
 
 ---
 
-## 7. Bench wiring, recorded before dismantling
+## 8. Bench wiring, recorded before dismantling
 
 Verify against the firmware, which hardcodes these:
 `src/nfc.cpp:26` (I²C SDA 21 / SCL 22 — Arduino defaults, never explicitly
@@ -208,6 +257,10 @@ set, so moving them would need `Wire.begin(sda, scl)`) and
 
 Photos taken: ☐ top ☐ front ☐ connector detail
 
-Both peripherals share one I²C bus; the mini breadboard exists to fan 3V3,
-GND, SDA and SCL out to both, because the DevKitC exposes only one 3V3 pin and
-each header pin accepts exactly one dupont housing.
+Both peripherals share one I²C bus. The screw terminal breakout exists to fan
+3V3, GND, SDA and SCL out to both, because the DevKitC exposes only one 3V3 pin
+and each header pin accepts exactly one dupont housing.
+
+In the built device each of these wires becomes a female-to-female dupont jumper
+cut in half: the stripped end goes into a screw terminal, the surviving female
+end pushes onto the module's header pin.

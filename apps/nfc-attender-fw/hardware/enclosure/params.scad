@@ -109,23 +109,21 @@ boss_inset    = 6.0;        // boss centre distance from the internal corner
 // figures and WILL be wrong for some clones. See docs/measurements.md.
 
 // ── ESP32-WROOM-32 DevKitC, 38-pin, USB-C ──
+// The DevKitC no longer mounts to the case directly — it plugs into the screw
+// terminal breakout board below, which is what actually bolts to the floor.
+// These dimensions still matter for clearance and for locating the USB-C port.
 esp_l  = 55.5;              // [MEASURE] PCB length
 esp_w  = 28.3;              // [MEASURE] PCB width
 esp_t  = 1.6;               // [MEASURE] PCB thickness
-esp_standoff_h = 4.0;       // gap under the board for header pin tails
-esp_has_mount_holes = false;// [MEASURE] many 38-pin clones have NO mounting
-                            // holes. If false, the board is retained by
-                            // printed L-clips over its long edges instead
-                            // of screws. Check yours before designing posts.
-esp_hole_d  = 3.2;          // [MEASURE] only used if esp_has_mount_holes
-esp_hole_dx = 48.0;         // [MEASURE] hole centre-to-centre, long axis
-esp_hole_dy = 21.0;         // [MEASURE] hole centre-to-centre, short axis
 
 esp_usb_w        = 9.2;     // [MEASURE] USB-C connector body width
 esp_usb_h        = 3.4;     // [MEASURE] USB-C connector body height above PCB
 esp_usb_overhang = 1.2;     // [MEASURE] how far the connector overhangs the PCB edge
 esp_usb_center_off = 0.0;   // [MEASURE] USB-C centre offset from the PCB centreline.
                             // Non-zero on plenty of clones — measure, don't assume.
+                            // Note the breakout board raises the DevKitC by
+                            // stb_h, so the USB-C cutout height is measured
+                            // from the breakout's top face, not the floor.
 
 // ── PN532 V3 NFC module (I2C mode, DIP 1=ON 2=OFF, addr 0x24) ──
 pn_l = 42.7;                // [MEASURE] board length
@@ -150,10 +148,25 @@ pn_post_h  = 26.0;          // height of the posts the PN532 sits on. Together
                             // reliable reads at ~30 mm and targeted 10-15 mm.
 antenna_air_gap = 0.5;      // PN532 top face -> lid inner face
 antenna_keepout = 12.0;     // minimum clearance from the coil edge to ANY other
-                            // PCB. A large ground plane parallel and close to
+                            // PCB. A large copper plane parallel and close to
                             // the coil acts as a shorted turn and detunes it —
                             // this is what actually kills read range, far more
                             // than plastic thickness does.
+                            //
+                            // This got stricter when the mini breadboard became
+                            // a screw terminal breakout. A breadboard is small
+                            // discontinuous strips and the PN532 could sit
+                            // straight above it. The breakout is a double-layer
+                            // PCB with real copper, so the coil now has to be
+                            // LATERALLY clear of it — which is what makes the
+                            // box wider rather than taller.
+                            //
+                            // How much clearance is genuinely needed is a
+                            // measurement, not a guess: hold the PN532 over the
+                            // breakout on the bench and compare read range
+                            // against holding it in free air. See
+                            // docs/measurements.md §0. If it turns out not to
+                            // matter, this can shrink and so can the box.
 
 // ── SSD1306 0.96" OLED, I2C addr 0x3C ──
 oled_pcb_l = 27.3;          // [MEASURE] module PCB length
@@ -172,16 +185,45 @@ oled_active_w = 10.86;
 oled_win_l = 23.0;          // cut window size — active area plus a small margin
 oled_win_w = 13.0;
 
-// ── 170-point mini breadboard (the solderless I2C bus hub) ──
-// The DevKitC exposes ONE 3V3 pin and one GND per side, and each header pin
-// accepts exactly one dupont housing. Three modules cannot share power and
-// I2C off that directly. A mini breadboard is the honest solderless answer,
-// and because it takes floor space it is an enclosure input, not an
-// afterthought.
-include_mini_breadboard = true;
-bb_l = 47.0;                // [MEASURE] including the adhesive backing
-bb_w = 35.0;                // [MEASURE]
-bb_h = 8.5;                 // [MEASURE]
+// ── Screw terminal breakout board (the solderless I2C bus hub) ──
+//
+// The DevKitC exposes ONE 3V3 pin, and each header pin accepts exactly one
+// dupont housing, so two peripherals cannot share power and I2C off it
+// directly. Something has to fan those nets out.
+//
+// A mini breadboard was the first answer and it was the wrong one. Breadboard
+// contacts are spring clips built for temporary prototyping — they are
+// explicitly not rated for permanent installation, they go intermittent under
+// vibration, and an intermittent I2C line in a device that gets tapped a few
+// hundred times a day is about the worst failure mode available. It doesn't
+// fail cleanly; it works for a week and then returns one garbage read.
+//
+// A 38-pin ESP32 screw terminal breakout board fixes that without soldering.
+// The DevKitC plugs into its headers and every GPIO comes out on a screw
+// clamp, which cannot vibrate loose. Buy the "1 into 2" variant: it
+// duplicates each GPIO to two terminals, which is exactly what 3V3, SDA and
+// SCL need for two peripherals.
+//
+// Wiring: cut female-to-female dupont jumpers in half and strip the cut end.
+// Bare wire into the screw terminal, surviving female end onto the PN532 or
+// OLED header pin. Wire strippers, no other tools.
+//
+// This board — not the DevKitC — is what bolts to the enclosure floor, which
+// conveniently removes the "does this clone even have mounting holes?"
+// problem, because the breakout has them regardless.
+stb_l = 100.0;              // [MEASURE] breakout PCB length — PLACEHOLDER,
+stb_w = 55.0;               // [MEASURE] these vary a lot between vendors and
+stb_h = 12.0;               // [MEASURE] cannot be trusted until yours arrives.
+                            // stb_h = top of the screw terminals, or top of a
+                            // plugged-in DevKitC, whichever is taller.
+stb_hole_d  = 3.2;          // [MEASURE] mounting hole diameter
+stb_hole_dx = 92.0;         // [MEASURE] hole centre-to-centre, long axis
+stb_hole_dy = 47.0;         // [MEASURE] hole centre-to-centre, short axis
+stb_standoff_h = 4.0;       // gap under the board for solder tails
+
+// ⚠ ORDERING: these boards come in NARROW (0.9") and WIDE (1.0") variants and
+// they are not interchangeable. Measure your DevKitC's pin-row spacing before
+// ordering, or buy a listing that explicitly covers both.
 
 // ── Piezo buzzer (GPIO 25) ──
 buz_d = 12.0;               // [MEASURE] disc diameter
