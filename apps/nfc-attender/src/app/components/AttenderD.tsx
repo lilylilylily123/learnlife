@@ -572,7 +572,7 @@ export function ScanHistoryCell({ student }: { student: Student }) {
   );
 }
 
-function lunchLabel(s: string): string {
+export function lunchLabel(s: string): string {
   switch (s) {
     case "present":
       return "on time";
@@ -642,7 +642,7 @@ const PROGRAM_LABEL: Record<string, string> = {
   pf: "Pathfinders",
 };
 
-function formatTimeShort(val?: string | null) {
+export function formatTimeShort(val?: string | null) {
   if (!val) return "—";
   const d = new Date(val);
   if (Number.isNaN(d.getTime())) return val;
@@ -665,7 +665,7 @@ interface WallTone {
 // WallView tone factors in the manual `status` field on top of presence —
 // otherwise a learner marked Late visually looks identical to one marked
 // Present, and Justified Absent looks identical to a no-show.
-function getWallTone(s: Student): WallTone {
+export function getWallTone(s: Student): WallTone {
   const events = s.lunch_events || [];
   const atLunch =
     events.length > 0 && events[events.length - 1].type === "out";
@@ -732,7 +732,7 @@ function getWallTone(s: Student): WallTone {
   };
 }
 
-function shortCardNum(id: string) {
+export function shortCardNum(id: string) {
   const tail = id.replace(/[^a-zA-Z0-9]/g, "").slice(-3).toUpperCase();
   return `#A-${tail || "000"}`;
 }
