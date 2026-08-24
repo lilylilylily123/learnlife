@@ -108,20 +108,35 @@ boss_inset    = 6.0;        // boss centre distance from the internal corner
 // ALL of the following are [MEASURE]. The values here are typical vendor
 // figures and WILL be wrong for some clones. See docs/measurements.md.
 
-// ── ESP32-WROOM-32 DevKitC, 38-pin, USB-C ──
-// The DevKitC no longer mounts to the case directly — it plugs into the screw
-// terminal breakout board below, which is what actually bolts to the floor.
-// These dimensions still matter for clearance and for locating the USB-C port.
-esp_l  = 55.5;              // [MEASURE] PCB length
-esp_w  = 28.3;              // [MEASURE] PCB width
+// ── ESP32-WROOM-32 DevKit V1, 30-pin, USB-C (ELEGOO) ──
+//
+// CONFIRMED 30-PIN (15 per side), not the 38-pin DevKitC. This matters for
+// buying the breakout board — the two are not interchangeable.
+//
+// Functionally it changes nothing for this project: the 30-pin variant omits
+// GPIO 0 and the flash pins (6-11, unusable anyway), but keeps GPIO 21/22 for
+// I2C and GPIO 25 for the buzzer. The bench rig already proves this — it runs
+// on exactly these pins today.
+//
+// The DevKit no longer mounts to the case directly — it plugs into the screw
+// terminal breakout below, which is what bolts to the floor. These dimensions
+// still matter for clearance and for locating the USB-C port.
+esp_l  = 52.0;              // [MEASURE] PCB length (30-pin is ~52, shorter
+                            // than the 38-pin's ~55.5)
+esp_w  = 28.0;              // [MEASURE] PCB width including the pin headers
 esp_t  = 1.6;               // [MEASURE] PCB thickness
+esp_row_pitch = 22.86;      // [MEASURE] spacing between the two pin ROWS,
+                            // outer edge to outer edge. 0.9" = 22.86 is
+                            // typical for 30-pin. Confirm before ordering the
+                            // breakout — this is the dimension that decides
+                            // whether the DevKit physically seats in it.
 
 esp_usb_w        = 9.2;     // [MEASURE] USB-C connector body width
 esp_usb_h        = 3.4;     // [MEASURE] USB-C connector body height above PCB
 esp_usb_overhang = 1.2;     // [MEASURE] how far the connector overhangs the PCB edge
 esp_usb_center_off = 0.0;   // [MEASURE] USB-C centre offset from the PCB centreline.
                             // Non-zero on plenty of clones — measure, don't assume.
-                            // Note the breakout board raises the DevKitC by
+                            // Note the breakout board raises the DevKit by
                             // stb_h, so the USB-C cutout height is measured
                             // from the breakout's top face, not the floor.
 
@@ -187,7 +202,7 @@ oled_win_w = 13.0;
 
 // ── Screw terminal breakout board (the solderless I2C bus hub) ──
 //
-// The DevKitC exposes ONE 3V3 pin, and each header pin accepts exactly one
+// The DevKit exposes ONE 3V3 pin, and each header pin accepts exactly one
 // dupont housing, so two peripherals cannot share power and I2C off it
 // directly. Something has to fan those nets out.
 //
@@ -198,32 +213,38 @@ oled_win_w = 13.0;
 // hundred times a day is about the worst failure mode available. It doesn't
 // fail cleanly; it works for a week and then returns one garbage read.
 //
-// A 38-pin ESP32 screw terminal breakout board fixes that without soldering.
-// The DevKitC plugs into its headers and every GPIO comes out on a screw
-// clamp, which cannot vibrate loose. Buy the "1 into 2" variant: it
+// A 30-pin ESP32 DevKit V1 screw terminal breakout board fixes that without
+// soldering. The DevKit plugs into its headers and every GPIO comes out on a
+// screw clamp, which cannot vibrate loose. Buy the "1 into 2" variant: it
 // duplicates each GPIO to two terminals, which is exactly what 3V3, SDA and
 // SCL need for two peripherals.
+//
+// Many of these boards also carry onboard RESET and BOOT buttons. That is
+// worth having: the DevKit's own buttons end up unreachable inside a closed
+// case, and it means include_reset_button below can stay off — the breakout
+// provides it. Prefer a listing that mentions them.
 //
 // Wiring: cut female-to-female dupont jumpers in half and strip the cut end.
 // Bare wire into the screw terminal, surviving female end onto the PN532 or
 // OLED header pin. Wire strippers, no other tools.
 //
-// This board — not the DevKitC — is what bolts to the enclosure floor, which
+// This board — not the DevKit — is what bolts to the enclosure floor, which
 // conveniently removes the "does this clone even have mounting holes?"
 // problem, because the breakout has them regardless.
-stb_l = 100.0;              // [MEASURE] breakout PCB length — PLACEHOLDER,
-stb_w = 55.0;               // [MEASURE] these vary a lot between vendors and
+stb_l = 75.0;               // [MEASURE] breakout PCB length — PLACEHOLDER,
+stb_w = 50.0;               // [MEASURE] these vary a lot between vendors and
 stb_h = 12.0;               // [MEASURE] cannot be trusted until yours arrives.
                             // stb_h = top of the screw terminals, or top of a
-                            // plugged-in DevKitC, whichever is taller.
+                            // plugged-in DevKit, whichever is taller.
 stb_hole_d  = 3.2;          // [MEASURE] mounting hole diameter
-stb_hole_dx = 92.0;         // [MEASURE] hole centre-to-centre, long axis
-stb_hole_dy = 47.0;         // [MEASURE] hole centre-to-centre, short axis
+stb_hole_dx = 68.0;         // [MEASURE] hole centre-to-centre, long axis
+stb_hole_dy = 43.0;         // [MEASURE] hole centre-to-centre, short axis
 stb_standoff_h = 4.0;       // gap under the board for solder tails
 
-// ⚠ ORDERING: these boards come in NARROW (0.9") and WIDE (1.0") variants and
-// they are not interchangeable. Measure your DevKitC's pin-row spacing before
-// ordering, or buy a listing that explicitly covers both.
+// ⚠ ORDERING: must be the 30-PIN DevKit V1 variant. A 38-pin breakout will not
+// seat a 30-pin board. Confirm esp_row_pitch above matches the listing too.
+// Search terms that work: "ESP32 30Pin GPIO Breakout Board 1 into 2 Terminal
+// Adapter" or "ESP32 DevKit V1 expansion board screw terminal".
 
 // ── Piezo buzzer (GPIO 25) ──
 buz_d = 12.0;               // [MEASURE] disc diameter
@@ -262,9 +283,13 @@ device_label = "";          // optional second line embossed on the base back
 // redesign.
 
 // ── Reset button (panel-mount momentary, across ESP32 EN and GND) ──
-// SOLDERLESS-COMPATIBLE: EN and GND are both header pins, so a pre-wired
-// panel-mount button with dupont ends plugs straight in. Worth having — the
-// DevKitC's own EN button ends up unreachable inside a closed box.
+// SOLDERLESS-COMPATIBLE: EN and GND are both screw terminals, so a pre-wired
+// panel-mount button plugs straight in.
+//
+// Usually unnecessary: most 30-pin breakout boards carry their own RESET and
+// BOOT buttons, which is the whole reason to prefer a listing that has them —
+// the DevKit's own buttons are unreachable inside a closed case. Turn this on
+// only if the board you receive lacks them.
 include_reset_button = false;
 button_hole_d = 12.5;       // [MEASURE] panel-mount thread diameter
 button_z = 12;              // centre height above the floor
@@ -272,7 +297,7 @@ button_y_offset = 58;       // distance from the back wall
 
 // ── Power switch (SPDT toggle interrupting 5V to VIN) ──
 // NOT SOLDERLESS. Interrupting 5V between the USB-C connector and VIN cannot
-// be done on a DevKitC without cutting a trace or soldering, because the
+// be done on a DevKit without cutting a trace or soldering, because the
 // connector feeds VIN on-board. Practical solderless alternatives:
 //   - an inline USB power switch dongle on the cable, or
 //   - simply unplugging the device.

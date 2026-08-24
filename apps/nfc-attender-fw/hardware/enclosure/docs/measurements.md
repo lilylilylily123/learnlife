@@ -88,9 +88,14 @@ Print `coupon.scad`. Instructions are in the header of that file.
 
 ---
 
-## 1. ESP32-WROOM-32 DevKitC (38-pin, USB-C)
+## 1. ESP32-WROOM-32 DevKit V1 (30-pin, USB-C, ELEGOO)
 
-The DevKitC no longer bolts to the case — it plugs into the screw terminal
+**Confirmed 30-pin** (15 per side), not the 38-pin DevKitC. Functionally this
+changes nothing — the 30-pin variant drops GPIO 0 and the unusable flash pins
+but keeps GPIO 21/22 for I²C and GPIO 25 for the buzzer, which the bench rig
+already proves.
+
+The DevKit no longer bolts to the case — it plugs into the screw terminal
 breakout board (§5), which is what mounts to the floor. These dimensions still
 matter for clearance and for locating the USB-C cutout.
 
@@ -99,19 +104,19 @@ matter for clearance and for locating the USB-C cutout.
 | PCB length | | `esp_l` |
 | PCB width | | `esp_w` |
 | PCB thickness | | `esp_t` |
-| **Pin-row spacing: narrow (0.9") or wide (1.0")?** | | (decides which breakout to buy) |
+| Pin-row spacing, outer edge to outer edge | | `esp_row_pitch` |
 | USB-C connector body width | | `esp_usb_w` |
 | USB-C body height above PCB | | `esp_usb_h` |
 | USB-C overhang past the PCB edge | | `esp_usb_overhang` |
 | USB-C centre offset from PCB centreline | | `esp_usb_center_off` |
 
-⚠ **Measure the pin-row spacing BEFORE ordering the breakout board.** These come
-in narrow (0.9") and wide (1.0") variants and they are not interchangeable.
-Either measure yours, or buy a listing that explicitly covers both sizes.
+⚠ **Measure the pin-row spacing BEFORE ordering the breakout board.** 0.9"
+(22.86 mm) is typical for 30-pin, but confirm it against the listing — this is
+the dimension that decides whether the DevKit physically seats.
 
 ⚠ **Measure the USB-C centre offset, don't assume zero.** It is off-centre on
 plenty of clones, and the back-wall cutout has to line up with the real port.
-Note the breakout board raises the DevKitC by `stb_h`, so the cutout height is
+Note the breakout board raises the DevKit by `stb_h`, so the cutout height is
 measured from the breakout's top face, not from the enclosure floor.
 
 ---
@@ -176,7 +181,7 @@ and `box_iz` — how tall the box has to be.
 |---|---|---|
 | Dupont female housing height, pushed onto a header pin | | above the PCB |
 | Header pin tail length below the breakout PCB | | sets `stb_standoff_h` |
-| Breakout + plugged DevKitC, total height | | sets `stb_h` |
+| Breakout + plugged DevKit, total height | | sets `stb_h` |
 | PN532 + plugged dupont, total height | | |
 | OLED + plugged dupont, total height | | |
 | Tallest point in the whole assembly | | sets `box_iz` |
@@ -189,18 +194,26 @@ and `box_iz` — how tall the box has to be.
 finalised without it, so this is the long pole on the enclosure. Order early.
 The two test prints (§0) are *not* blocked by it.
 
+Must be the **30-pin DevKit V1** variant — a 38-pin breakout will not seat a
+30-pin board.
+
 Buy the **"1 into 2"** variant if available: it duplicates each GPIO to two
 terminals, which is exactly what 3V3, SDA and SCL need to reach two peripherals.
+
+Prefer a listing that mentions **onboard RESET and BOOT buttons**. The DevKit's
+own buttons are unreachable inside a closed case, and a breakout that has them
+saves adding a panel-mount button.
 
 | Measurement | Value | `params.scad` |
 |---|---|---|
 | Breakout PCB length | | `stb_l` |
 | Breakout PCB width | | `stb_w` |
-| Total height (screw terminals, or plugged-in DevKitC — whichever is taller) | | `stb_h` |
+| Total height (screw terminals, or plugged-in DevKit — whichever is taller) | | `stb_h` |
 | Mounting hole diameter | | `stb_hole_d` |
 | Hole spacing, long axis | | `stb_hole_dx` |
 | Hole spacing, short axis | | `stb_hole_dy` |
 | Does it accept two 24 AWG wires per terminal? | yes / no | (affects fan-out) |
+| Has onboard RESET / BOOT buttons? | yes / no | (else `include_reset_button`) |
 
 The placeholder values in `params.scad` are a guess at a typical board and will
 almost certainly be wrong for yours. Replace all six before rendering a base.
@@ -258,7 +271,7 @@ set, so moving them would need `Wire.begin(sda, scl)`) and
 Photos taken: ☐ top ☐ front ☐ connector detail
 
 Both peripherals share one I²C bus. The screw terminal breakout exists to fan
-3V3, GND, SDA and SCL out to both, because the DevKitC exposes only one 3V3 pin
+3V3, GND, SDA and SCL out to both, because the DevKit exposes only one 3V3 pin
 and each header pin accepts exactly one dupont housing.
 
 In the built device each of these wires becomes a female-to-female dupont jumper

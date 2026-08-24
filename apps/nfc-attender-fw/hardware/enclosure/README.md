@@ -99,7 +99,7 @@ face, past a ~30 mm reliable read range. A flat box sitting in a tilted cradle
 keeps the antenna-to-card distance unchanged and makes the tilt a
 one-parameter reprint.
 
-**A screw terminal breakout board busses I²C, not a breadboard.** The DevKitC
+**A screw terminal breakout board busses I²C, not a breadboard.** The DevKit
 exposes one 3V3 pin, and each header pin accepts exactly one dupont housing, so
 two peripherals cannot share power and I²C off it directly. Something has to fan
 those nets out.
@@ -112,16 +112,19 @@ An intermittent I²C line in a device tapped a few hundred times a day is the
 worst available failure mode: it doesn't fail cleanly, it works for a week and
 then returns one garbage read.
 
-A 38-pin ESP32 screw terminal breakout fixes that with no soldering. The DevKitC
-plugs into its headers; every GPIO comes out on a screw clamp that cannot
-vibrate loose. Buy the **"1 into 2"** variant — it duplicates each GPIO to two
-terminals, exactly what 3V3, SDA and SCL need for two peripherals.
+A 30-pin ESP32 DevKit V1 screw terminal breakout fixes that with no soldering.
+The DevKit plugs into its headers; every GPIO comes out on a screw clamp that
+cannot vibrate loose. Buy the **"1 into 2"** variant — it duplicates each GPIO
+to two terminals, exactly what 3V3, SDA and SCL need for two peripherals.
+
+Prefer a listing with **onboard RESET and BOOT buttons**: the DevKit's own
+buttons are unreachable inside a closed case.
 
 Wiring is deliberately tool-light: cut female-to-female dupont jumpers in half
 and strip the cut end. Bare wire into the screw terminal, surviving female end
 onto the module's header pin. Wire strippers, nothing else.
 
-This board — not the DevKitC — is what bolts to the floor, which also removes
+This board — not the DevKit — is what bolts to the floor, which also removes
 the "does this clone even have mounting holes?" problem, since the breakout has
 them regardless of what the bare board does.
 
