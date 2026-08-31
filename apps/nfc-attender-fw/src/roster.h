@@ -22,4 +22,15 @@ const pb_client::LearnerRow* lookup_by_uid(const std::string& uid_hex);
 // True if the cache has been loaded (from disk or network) at least once.
 bool ready();
 
+// How many learners are cached. Backs the `r` console command and the boot log.
+int count();
+
+// Seconds since the cache was last loaded or refreshed, or -1 if never.
+//
+// A roster that hasn't refreshed in a long time will silently fail to
+// recognise a newly-issued card, which presents as "Unknown card" at a learner
+// who is certain their card is registered. Surfacing the age makes that
+// diagnosable instead of mysterious.
+std::time_t age_seconds();
+
 }  // namespace llattender::roster

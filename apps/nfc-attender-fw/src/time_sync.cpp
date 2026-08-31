@@ -7,13 +7,24 @@
 
 namespace llattender::time_sync {
 
-// TODO: DS3231 + NTP. For now use the ESP32's internal clock so the rest of
-// the firmware has a working timebase from the moment NTP first succeeds.
+// Timebase is NTP over WiFi plus the ESP32's internal clock. There is
+// deliberately no DS3231 fitted (README.md "Hardware — not fitted"; the clock
+// gate in clock_gate.h covers the boot window instead, by refusing to record
+// taps until the clock is trustworthy).
 
 namespace {
 int g_override_hour = -1;
 int g_override_min  = -1;
 int g_override_wday = -1;
+
+// Any real clock reading is far above this; anything below it means the
+// system clock has never been set and is still sitting near the 1970 epoch.
+// 1700000000 is 2023-11-14, comfortably before this device existed and
+// comfortably after 1970.
+constexpr std::time_t kMinValidEpoch = 1700000000;
+
+// Latched once NTP has produced a plausible clock. See is_synced().
+bool g_synced = false;
 }  // namespace
 
 bool init() {
@@ -28,7 +39,7 @@ bool init() {
   //   ends last Sun of October at 03:00.
   setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", /*overwrite=*/1);
   tzset();
-  Serial.println("[time] init (TZ=Europe/Madrid; RTC stub)");
+  Serial.println("[time] init (TZ=Europe/Madrid)");
   return true;
 }
 
@@ -43,8 +54,23 @@ bool sync_ntp() {
   tzset();
   // Wait briefly for time to be set. Real implementation should be in a task.
   for (int i = 0; i < 20; ++i) {
-    if (now_unix() > 1700000000) return true;
+    if (is_synced()) return true;
     delay(100);
+  }
+  Serial.println("[time] NTP sync failed — clock still untrusted");
+  return false;
+}
+
+bool is_synced() {
+  if (g_synced) return true;
+  // Deliberately ::time() rather than now_unix(): this asks whether the REAL
+  // system clock has been set, and now_unix() applies the test-mode override
+  // shift, which would let `t 09:30` on a 1970 clock look like a genuine sync.
+  // The override is accounted for separately, in clock_gate.
+  if (::time(nullptr) > kMinValidEpoch) {
+    g_synced = true;
+    Serial.println("[time] clock trusted (NTP acquired)");
+    return true;
   }
   return false;
 }

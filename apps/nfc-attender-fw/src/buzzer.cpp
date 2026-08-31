@@ -63,6 +63,10 @@ void cue(ui::Event ev) {
       beep_blocking(kFreqMid, 80);
       break;
     case E::UnknownCard:
+    case E::ScanBusy:
+      // Same low buzz for both: from the learner's point of view each means
+      // "that tap did not count". What matters is that it is unmistakably not
+      // a success cue.
       beep_blocking(kFreqLow, 250);
       break;
     case E::AlreadyDone:
@@ -79,6 +83,12 @@ void cue(ui::Event ev) {
       beep_blocking(kFreqLow, 90);
       delay(60);
       beep_blocking(kFreqLow, 90);
+      break;
+    case E::WaitingClock:
+      // Same low buzz as an unknown card: from the learner's point of view
+      // both mean "that tap did not count, something is wrong". Distinct from
+      // every success cue, which is what actually matters here.
+      beep_blocking(kFreqLow, 250);
       break;
     case E::Queued:
     case E::NetworkError:

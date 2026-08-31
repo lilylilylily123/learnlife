@@ -46,6 +46,99 @@ clone in later.
 
 ---
 
+## Standalone device: credentials at rest (OPEN DECISION)
+
+Applies to `apps/nfc-attender-fw` — the ESP32 desk terminal.
+
+### Threat
+
+The device stores its PocketBase account email and password **unencrypted in
+NVS**. Anyone with five minutes of physical access and a USB cable can read the
+whole flash:
+
+```sh
+esptool.py --port /dev/tty.usbserial-XXXX read_flash 0x9000 0x5000 nvs.bin
+strings nvs.bin
+```
+
+That account has role `lg`, so it can read every learner record and every
+attendance row for the whole school. The device lives on an open front desk.
+
+### What already reduces the blast radius
+
+- **One PocketBase account per device.** A compromised or stolen unit is
+  revoked by disabling that one account, without touching the other device or
+  re-provisioning it.
+- **Token caching** means the password itself crosses the network far less
+  often than it used to (was: every boot and every reconnect).
+- **The setup AP is closed.** It used to be an open access point accepting that
+  same password over plain HTTP; it now uses a random per-boot WPA2 password
+  displayed on the OLED, and times out after 10 minutes.
+- **TLS is verified** against a pinned root (`src/pb_ca.h`), so the credential
+  can't be harvested by a rogue AP impersonating PocketHost.
+
+### Options, with honest costs
+
+1. **Accept and document.** ← *current state*
+   Physical access to the device is already a serious compromise for other
+   reasons (someone holding the box can also just tap cards). The per-device
+   account bounds the damage and makes revocation cheap.
+
+2. **A dedicated `device` role** with tighter collection rules — read the
+   roster, write attendance, nothing else. Genuine hardening, but it touches
+   the shared backend: `packages/shared/src/roles.ts`, the rules in
+   `pb_hooks/README.md`, and anything asserting the three-role model. Worth
+   doing if the device count grows.
+
+3. **Flash/NVS encryption.** The real fix, and it permanently ties the flash to
+   that specific chip. Bricking risk is real, and a bricked unit cannot be
+   recovered by reflashing.
+
+**Recommendation: (1) for the two-unit pilot, revisit (2) before any wider
+rollout.** This is a decision to make explicitly, not to leave implied.
+
+### If a device is lost or stolen
+
+1. Disable that device's user in the PocketBase admin UI — `users` → the
+   `device-NN@…` record → deactivate. This alone stops all access.
+2. Rotate the password on the remaining device only if the two ever shared one
+   (they should not).
+3. Check Settings → Logs for requests from that account after the loss.
+
+---
+
+## Standalone device: firmware update path
+
+`apps/nfc-attender-fw` supports LAN OTA updates. Notes for whoever operates it:
+
+- **OTA fails closed.** With no password provisioned, the OTA port does not
+  open at all. An unauthenticated OTA port on a school network is remote code
+  execution for anyone who runs a port scan.
+- **The password is generated once**, at provisioning, and displayed once on
+  the setup confirmation page. The device stores only its MD5. If it is lost,
+  re-provision (type `RESET` within 2 s of boot) to generate a new one.
+- **It is LAN-only.** The device does not pull firmware from the internet;
+  someone has to be on the school network and hold the password.
+- **Keep the USB runbook current.** The partition table can only be changed
+  over USB, and a pinned-CA failure (see below) would need a USB reflash if
+  OTA were somehow unavailable.
+
+### Pinned certificate — operational risk
+
+`src/pb_ca.h` pins **GTS Root R4** (valid to 2036), verified against the live
+host. If PocketHost ever migrates to a different certificate authority, **every
+device goes offline until updated**. Diagnose with:
+
+```sh
+openssl s_client -connect learnlife.pockethost.io:443 \
+    -servername learnlife.pockethost.io -showcerts | grep "^ *i:"
+```
+
+If the issuer chain no longer ends at GTS Root R4, update `src/pb_ca.h` and
+push an OTA update. This is exactly why OTA shipped before pinning.
+
+---
+
 ## Tauri release signing key (audit H-8)
 
 ### Current state

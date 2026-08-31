@@ -27,6 +27,12 @@ enum class Status {
 const char* status_to_str(Status s);
 Status status_from_str(const char* s);  // returns None on unknown
 
+// Map the split (arrival, justified) representation onto the legacy combined
+// `status` enum. Mirrors deriveStatus in packages/shared/src/attendance.ts:24-32
+// (and its copy in packages/pb-client/src/queries/attendance.ts). Being on
+// time is never justified, so Present always maps to Present.
+Status derive_status(Status arrival, bool justified);
+
 struct LunchEvent {
   enum Type { Out, In } type;
   // Stored as both unix seconds (for math) and the ISO-8601 string PocketBase
@@ -66,6 +72,9 @@ struct CheckInAction {
   // CheckIn
   std::string time_in_iso;
   Status status = Status::None;
+  // `arrival` is the source of truth; `status` is written alongside it so
+  // legacy consumers keep working (attendance.ts:82-90).
+  Status arrival = Status::None;
 
   // CheckOut
   std::string time_out_iso;

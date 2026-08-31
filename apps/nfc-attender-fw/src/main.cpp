@@ -1,12 +1,19 @@
 // LearnLife NFC Attender — firmware bootstrap.
 //
 // setup() initialises every subsystem via its module header. loop() stays
-// empty; the real work runs in pinned FreeRTOS tasks so the NFC reader
-// keeps responding even when the network task is blocked on TLS.
+// empty; the real work runs in four pinned FreeRTOS tasks so the NFC reader
+// keeps responding even when the network task is blocked on TLS:
 //
-// Phase-1 wiring: the per-scan path is connected end-to-end, but the network
-// task currently logs and discards writes — pb_client and roster are stubs
-// until phases 2-3.
+//   nfc  (core 0, prio 5)  poll the PN532, debounce, emit UIDs
+//   proc (core 1, prio 4)  UID -> learner, clock gate, state machine, enqueue
+//   ui   (core 1, prio 3)  drive the OLED and buzzer
+//   net  (core 0, prio 3)  WiFi, NTP, PocketBase, OTA, queue drain
+//
+// The tap path never touches the network: proc reads the today-cache only
+// (pb_client::lookup_today_row) and appends to the durable queue, and net
+// creates rows, recomputes cache-miss entries against the authoritative row,
+// and PATCHes. That split is what keeps ~80 morning check-ins from serialising
+// behind one TLS handshake each.
 
 #ifndef LLATTENDER_NATIVE_BUILD
 
@@ -21,15 +28,18 @@
 
 #include "attendance_adapter.h"
 #include "buzzer.h"
+#include "clock_gate.h"
 #include "config.h"
 #include "fields.h"
 #include "nfc.h"
+#include "ota.h"
 #include "pb_client.h"
 #include "queue.h"
 #include "roster.h"
 #include "state_machine.h"
 #include "time_sync.h"
 #include "ui.h"
+#include "version.h"
 
 namespace {
 
@@ -94,7 +104,13 @@ ui::Event ui_event_for_action(const llattender::CheckInAction& a) {
     if (nfc::poll_uid(uid)) {
       ScanMsg m{};
       std::strncpy(m.uid_hex, uid.c_str(), sizeof(m.uid_hex) - 1);
-      xQueueSend(g_scan_q, &m, 0);
+      // Never drop a tap silently. Timeout stays 0 — nfc_task must keep
+      // polling the reader — but the learner has to be told, or they walk
+      // away believing they signed in.
+      if (xQueueSend(g_scan_q, &m, 0) != pdTRUE) {
+        Serial.println("[nfc] scan queue full — tap dropped");
+        post_ui(ui::Event::ScanBusy);
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
@@ -114,6 +130,14 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
   for (;;) {
     if (xQueueReceive(g_scan_q, &in, portMAX_DELAY) != pdTRUE) continue;
 
+    // Drop scans while firmware is being written. A tap acknowledged on the
+    // OLED now would be wiped by the reboot that follows, which is worse than
+    // simply not reading the card — the learner would believe they signed in.
+    if (ota::in_progress()) {
+      Serial.println("[proc] OTA in progress — ignoring scan");
+      continue;
+    }
+
     const std::string uid_hex = in.uid_hex;
     const auto* learner = roster::lookup_by_uid(uid_hex);
     if (learner == nullptr) {
@@ -123,24 +147,42 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
     }
     g_last_learner_id = learner->id;
 
+    // Refuse to act on an untrusted clock.
+    //
+    // There is no DS3231 in this build, so until NTP lands the ESP32 believes
+    // it is 1970-01-01. Every threshold in the state machine is time-of-day
+    // based — 10:01 decides present vs late — so acting now would silently
+    // mark everyone `present` and stamp the PocketBase rows with a 1970 date,
+    // which then has to be unpicked by hand.
+    //
+    // Being visibly unavailable for the first few seconds after power-on is
+    // much cheaper than being confidently wrong all morning. See
+    // src/clock_gate.h.
+    if (!clock_gate::may_write_attendance(time_sync::is_synced(),
+                                          time_sync::has_time_override())) {
+      Serial.printf("[proc] clock not trusted — refusing to record tap by %s\n",
+                    learner->name.c_str());
+      post_ui(ui::Event::WaitingClock, learner->name.c_str());
+      continue;
+    }
+
     auto now_local = time_sync::now_local();
     auto now_unix = time_sync::now_unix();
     const std::string today = format_yyyy_mm_dd(now_local);
 
-    // Pull today's row from PocketBase so the state machine sees the real
-    // history (existing time_in, lunch_events, etc.). Synchronous TLS call
-    // adds ~1s of latency per scan — acceptable for phase 2; phase 3 swaps
-    // this for an on-disk snapshot refreshed by the network task.
+    // Cache-only. processor_task must never block on TLS: at ~80 learners the
+    // morning rush is ~80 consecutive cache misses, and a synchronous
+    // handshake per tap (a GET plus a POST, ~2 s) would overrun the scan
+    // queue and drop taps silently. A miss runs the state machine on an empty
+    // state — correct for a first tap of the day — and network_task creates
+    // the row during drain, where it also recomputes the action against the
+    // authoritative row (see the empty attendance_id branch below).
     pb_client::AttendanceRow row;
-    bool created = false;
     AttendanceState state;
     bool have_state = false;
-    if (WiFi.status() == WL_CONNECTED &&
-        pb_client::ensure_today_row(learner->id, today, row, created)) {
+    if (pb_client::lookup_today_row(learner->id, today, row)) {
       attendance_adapter::state_from_row(row, state);
       have_state = true;
-    } else {
-      Serial.println("[proc] offline — running state machine on empty state");
     }
 
     auto action = compute_check_in_action(state, now_local, now_unix);
@@ -172,6 +214,7 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
     p.ts_unix = now_unix;
     p.fields_json = fields::serialize_action(action);
     queue::append(p);
+    ui::set_pending_count(queue::size());
     if (g_flush_signal) xQueueSend(g_flush_signal, &p.ts_unix, 0);
   }
 }
@@ -189,8 +232,40 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
   }
 }
 
+// How often the network task asks PocketBase for attendance rows changed since
+// the last poll. Without this, a dashboard-side change (Reset day, a
+// justification, a manual time edit) never reaches the firmware — the cache
+// stays pinned to whatever PB had at the last reconnect or local action.
+//
+// 30 s, not 10 s, and the number comes from arithmetic rather than taste:
+//
+//   PocketHost allows 1000 requests/hour PER IP
+//   (x-pockethost-ratelimit-ip-hourly-limit), and both devices plus the Tauri
+//   dashboard sit behind the school's single NAT'd address.
+//
+//     at 10 s: 360 req/h/device -> 720/h for two devices = 72% of the budget
+//              spent doing nothing
+//     at 30 s: 120 req/h/device -> 240/h, leaving room for scans, roster
+//              refreshes and the dashboard
+//
+// The cost is latency: a guide who presses "Reset day" and walks to the reader
+// sees it within 30 s instead of 10. That is still faster than the walk.
+//
+// This is a DELTA poll (`updated > watermark`), so the normal case is one
+// request returning an empty page — far cheaper than the full re-fetch this
+// replaced, which is what OOMed on 61 rows.
+constexpr int64_t kDeltaPollMs = 30000;
+
+// How often to retry NTP while online but still without a trusted clock.
+// Until this succeeds the device refuses to record attendance (clock_gate),
+// so it is effectively out of service — retry briskly, but not so fast that a
+// blocked UDP/123 (common on school networks) turns into a busy loop.
+constexpr int64_t kNtpRetryMs = 30000;
+
 [[noreturn]] void network_task(void*) {
   bool last_online = false;
+  int64_t last_prefetch_ms = 0;
+  int64_t last_ntp_try_ms = 0;
   for (;;) {
     bool online = WiFi.status() == WL_CONNECTED;
     if (online != last_online) {
@@ -198,9 +273,17 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
       last_online = online;
       if (online) {
         time_sync::sync_ntp();
+        last_ntp_try_ms = millis();
+        // OTA needs an IP, so it can only start once WiFi is actually up.
+        // init() is idempotent; re-running it on a reconnect is harmless.
+        {
+          config::DeviceConfig c;
+          config::load(c);
+          ota::init(c.device_id, c.ota_password);
+        }
         // First-online roster refresh; in phase 3 also drain on schedule.
         std::vector<pb_client::LearnerRow> items;
-        if (pb_client::login() && pb_client::fetch_roster(items)) {
+        if (pb_client::ensure_token() && pb_client::fetch_roster(items)) {
           roster::replace(items);
           // Pre-fetch today's attendance rows once. Every learner's first
           // tap of the day now hits cache instead of doing two TLS calls.
@@ -214,22 +297,65 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
           if (!pb_client::load_today_cache_from_disk(date)) {
             pb_client::prefetch_today_attendance(date);
           }
+          last_prefetch_ms = millis();
         }
       }
+    }
+
+    // Pump OTA before the long block below. handle() is cheap when idle, but
+    // it has to be called often enough that an upload attempt isn't left
+    // waiting up to 5 seconds for the queue timeout to expire.
+    for (int i = 0; i < 50; ++i) {
+      ota::tick();
+      if (ota::in_progress()) {
+        // Give the transfer the whole task. Nothing else here matters while
+        // firmware is being written, and competing for the CPU would only
+        // slow it down.
+        vTaskDelay(pdMS_TO_TICKS(10));
+        continue;
+      }
+      vTaskDelay(pdMS_TO_TICKS(2));
     }
 
     // Wait for a flush signal or 5s timeout, whichever comes first.
     int64_t dummy = 0;
     xQueueReceive(g_flush_signal, &dummy, pdMS_TO_TICKS(5000));
 
+    // Keep retrying NTP while the clock is untrusted. Without this the only
+    // sync attempt is the one on the offline->online edge, so a single failed
+    // sync (a slow DHCP lease, a firewall dropping UDP/123 for the first few
+    // seconds) would leave the device refusing every tap until someone power
+    // cycles it or the WiFi drops and returns.
+    if (online && !time_sync::is_synced() &&
+        static_cast<int64_t>(millis()) - last_ntp_try_ms >= kNtpRetryMs) {
+      last_ntp_try_ms = millis();
+      Serial.println("[net] clock still untrusted — retrying NTP");
+      if (time_sync::sync_ntp()) {
+        // The idle screen shows "--:--" until this point; force a repaint so
+        // the real time appears without waiting for the next tap.
+        ui::show(ui::Event::Idle);
+      }
+    }
+
     if (online && queue::size() > 0) {
-      queue::drain([](const queue::PendingScan& s) {
-        // Online scans already carry an attendance_id (populated by
-        // processor_task). Offline scans don't — for those we ensure the row
-        // exists before patching. Either way, only the patch fields are taken
-        // from the queued entry; the local state machine already produced
-        // them and the row's other fields stay untouched.
+      queue::drain_ex([](const queue::PendingScan& s) -> WriteOutcome {
+        // Entries queued against a warm cache already carry an
+        // attendance_id and replay their original fields unchanged — those
+        // were computed against the authoritative row and are correct.
+        //
+        // Entries with no attendance_id were computed on a cache MISS, i.e.
+        // against an empty state, so they cannot have seen an excusal
+        // (jLate/jAbsent inheritance) or a time_in written by another client.
+        // For those we ensure the row exists and then recompute.
         std::string id = s.attendance_id;
+        std::string fields_json = s.fields_json;
+        // Set only on the recompute path. The cache must NOT be updated
+        // until the PATCH actually lands: an optimistic update followed by a
+        // RetryLater would leave the cache claiming a time_in that was never
+        // written, and the retry would then recompute to NoAction and DROP
+        // the check-in.
+        bool have_recomputed = false;
+        CheckInAction recomputed_action;
         if (id.empty()) {
           // Re-derive today from ts_unix so a queued entry that survives a
           // midnight rollover still hits its original date.
@@ -242,12 +368,96 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
           pb_client::AttendanceRow row;
           bool created = false;
           if (!pb_client::ensure_today_row(s.learner_id, date, row, created)) {
-            return false;  // keep on queue, retry next cycle
+            // Couldn't find or create the row — almost always the network.
+            // Keep the entry and try again next cycle.
+            return WriteOutcome::RetryLater;
           }
           id = row.id;
+
+          // Recompute against the authoritative row rather than replaying
+          // fields computed from an empty state. This is what makes the
+          // jLate/jAbsent inheritance correct on a cold cache, and it drops a
+          // check-in whose precondition no longer holds instead of
+          // overwriting an existing time_in.
+          AttendanceState authoritative;
+          attendance_adapter::state_from_row(row, authoritative);
+          const auto recomputed =
+              compute_check_in_action(authoritative, tm, s.ts_unix);
+          if (recomputed.type == ActionType::NoAction ||
+              recomputed.type == ActionType::Locked) {
+            Serial.printf("[net] scan for learner %s no longer applicable — "
+                          "dropping\n", s.learner_id.c_str());
+            // Ok: drop the entry, nothing to write.
+            return WriteOutcome::Ok;
+          }
+          fields_json = fields::serialize_action(recomputed);
+          recomputed_action = recomputed;
+          have_recomputed = true;
         }
-        return pb_client::patch_attendance(id, s.fields_json);
+
+        // Classify by HTTP status rather than a bare bool. A 404 means the row
+        // was deleted server-side and no number of retries will change that —
+        // and because a failed drain stops at the head of the queue, retrying
+        // it forever would block every scan queued behind it.
+        const int code = pb_client::patch_attendance_status(id, fields_json);
+        if (code == 401) {
+          // Token rejected. Drop it so the next cycle logs in again rather
+          // than replaying a credential the server has already refused. The
+          // entry stays queued (401 classifies as RetryLater).
+          Serial.println("[net] 401 — clearing cached token");
+          pb_client::clear_token();
+        }
+        const WriteOutcome outcome = classify_http_status(code);
+        if (outcome == WriteOutcome::Ok && have_recomputed) {
+          // Now that the write has landed, fold the recomputed mutations onto
+          // the authoritative cache entry ensure_today_row installed, so a
+          // follow-up tap by this learner reads real state instead of a blank
+          // row.
+          pb_client::update_today_cache_after_action(s.learner_id,
+                                                    recomputed_action);
+        }
+        if (outcome == WriteOutcome::PermanentFail) {
+          Serial.printf("[net] giving up on scan for learner %s (HTTP %d) — "
+                        "moved to dead-letter file\n",
+                        s.learner_id.c_str(), code);
+        }
+        return outcome;
       });
+      ui::set_pending_count(queue::size());
+    }
+
+    // Periodic delta poll. Previously disabled: the old full re-fetch OOMed on
+    // a 61-row page, because it copied the whole body into a JsonDocument and
+    // built a vector of rows on top. Both allocations are gone — the response
+    // is parsed straight off the socket into the cache — so this is live again.
+    if (online &&
+        static_cast<int64_t>(millis()) - last_prefetch_ms >= kDeltaPollMs) {
+      last_prefetch_ms = millis();
+      auto t = time_sync::now_local();
+      char date[16];
+      std::snprintf(date, sizeof(date), "%04d-%02d-%02d",
+                    t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+
+      // Log the low-water mark alongside each poll. This is the evidence that
+      // the streaming parse actually fixed the OOM rather than just moving it:
+      // if `min` keeps falling poll after poll, something is still growing.
+      Serial.printf("[heap] free %u min %u (pre-poll)\n",
+                    static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(esp_get_minimum_free_heap_size()));
+
+      int changed = 0;
+      if (!pb_client::refresh_today_delta(date, changed)) {
+        // No watermark for this date yet — either the first poll after boot
+        // failed, or the day rolled over. A full prefetch re-establishes it.
+        if (pb_client::ensure_token()) {
+          pb_client::prefetch_today_attendance(date);
+        }
+      } else if (changed > 0) {
+        // Something was edited server-side. Repaint so a guide standing at the
+        // device sees the idle screen refresh rather than wondering whether
+        // the reset landed.
+        ui::show(ui::Event::Idle);
+      }
     }
   }
 }
@@ -275,11 +485,15 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[boot] LearnLife NFC Attender starting");
-  Serial.printf("[boot] build %s %s\n", __DATE__, __TIME__);
+  Serial.printf("[boot] version %s (build %s %s)\n",
+                llattender::kFirmwareVersion, __DATE__, __TIME__);
   Serial.printf("[boot] reset reason: %s\n",
                 reset_reason_str(esp_reset_reason()));
 
-  g_scan_q = xQueueCreate(8, sizeof(ScanMsg));
+  // 32 deep, not 8: the morning arrival rush at ~80 learners can burst faster
+  // than processor_task runs the state machine. ScanMsg is 24 B, so this
+  // costs well under 1 KB and absorbs the burst instead of dropping taps.
+  g_scan_q = xQueueCreate(32, sizeof(ScanMsg));
   g_ui_q = xQueueCreate(16, sizeof(UiMsg));
   g_flush_signal = xQueueCreate(4, sizeof(int64_t));
 
@@ -303,7 +517,6 @@ void setup() {
   if (!config::is_provisioned()) {
     post_ui(ui::Event::Boot, "Setup mode");
     config::run_provisioning();
-    // TODO: once provisioning is implemented this branch will reboot.
   }
 
   if (!nfc::init()) {
@@ -311,13 +524,31 @@ void setup() {
     ui::set_network_error(true);  // reuse the error indicator for now
   }
 
+  // Roster and queue come up BEFORE WiFi, and that ordering is the point.
+  //
+  // The roster is loaded from LittleFS, so a cold boot on a morning when the
+  // router is slow still resolves every card to a name. Previously the roster
+  // was RAM-only and populated solely on the offline->online WiFi edge, which
+  // meant a boot without network made all 61 cards read "Unknown card" —
+  // during the exact fifteen minutes when everyone arrives.
+  //
+  // The queue is restored from disk here too, so scans that were pending when
+  // the power was cut are still pending now rather than silently gone.
+  roster::init();
+  queue::init();
+  // Surface a queue restored from disk right away, so a device that was
+  // power-cut with unsent scans says so on the idle screen from boot rather
+  // than only after the next tap.
+  ui::set_pending_count(queue::size());
+
   WiFi.mode(WIFI_STA);
   if (!cfg.wifi_ssid.empty()) {
     WiFi.begin(cfg.wifi_ssid.c_str(), cfg.wifi_pw.c_str());
   }
-
-  roster::init();
-  queue::init();
+  // Must happen before any task starts: pb_client's token, config snapshot and
+  // today-cache are touched from processor_task, network_task AND the serial
+  // console on the Arduino loop task.
+  pb_client::init();
 
   xTaskCreatePinnedToCore(nfc_task,       "nfc",  4096, nullptr, 5, nullptr, 0);
   xTaskCreatePinnedToCore(processor_task, "proc", 8192, nullptr, 4, nullptr, 1);
@@ -337,11 +568,95 @@ void handle_console_line(const std::string& line) {
   if (line.empty()) return;
   if (line == "?" || line == "h" || line == "help") {
     Serial.println("[cli] commands:");
-    Serial.println("[cli]   t HH:MM [W]  override clock (W: 0=Sun..6=Sat)");
-    Serial.println("[cli]   t off        clear override");
-    Serial.println("[cli]   c            clear local today-cache");
-    Serial.println("[cli]   w            wipe PB row for last-scanned learner");
-    Serial.println("[cli]   ?            this help");
+    Serial.println("[cli]   t HH:MM [W]      override clock (W: 0=Sun..6=Sat)");
+    Serial.println("[cli]   t off            clear override");
+    Serial.println("[cli]   c                clear local today-cache");
+    Serial.println("[cli]   heap             free / min-ever / largest block");
+    Serial.println("[cli]   q                queue depth + pending entries");
+    Serial.println("[cli]   r                roster size + age");
+    Serial.println("[cli]   ota              OTA hostname + upload command");
+    Serial.println("[cli]   v                firmware version + device identity");
+    Serial.println("[cli]   w                wipe PB row for last-scanned learner");
+    Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
+    Serial.println("[cli]   ?                this help");
+    return;
+  }
+  if (line.rfind("wifi ", 0) == 0) {
+    const std::string rest = line.substr(5);
+    const size_t bar = rest.find('|');
+    if (bar == std::string::npos) {
+      Serial.println("[cli] usage: wifi <ssid>|<password>");
+      return;
+    }
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    c.wifi_ssid = rest.substr(0, bar);
+    c.wifi_pw = rest.substr(bar + 1);
+    if (c.wifi_ssid.empty()) {
+      Serial.println("[cli] empty SSID — not saving");
+      return;
+    }
+    if (!llattender::config::save(c)) {
+      Serial.println("[cli] wifi save failed");
+      return;
+    }
+    Serial.printf("[cli] saved wifi creds (ssid='%s') — rebooting\n",
+                  c.wifi_ssid.c_str());
+    delay(500);
+    ESP.restart();
+    return;
+  }
+  if (line == "heap") {
+    // `min ever` is the number that actually matters for the OOM: free heap
+    // right now says nothing about the low-water mark hit during a TLS
+    // handshake plus a page parse. Watch it across a few delta polls — if it
+    // stops falling, the streaming parse is holding.
+    Serial.printf("[heap] free %u, min ever %u, largest block %u\n",
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(esp_get_minimum_free_heap_size()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    return;
+  }
+  if (line == "v") {
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    Serial.printf("[cli] version %s (build %s %s)\n",
+                  llattender::kFirmwareVersion, __DATE__, __TIME__);
+    Serial.printf("[cli] device id: %s  name: %s\n",
+                  c.device_id.empty() ? "-" : c.device_id.c_str(),
+                  c.device_name.empty() ? "-" : c.device_name.c_str());
+    Serial.printf("[cli] pb url: %s\n", c.pb_url.c_str());
+    return;
+  }
+  if (line == "ota") {
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    if (c.ota_password.empty()) {
+      Serial.println("[cli] OTA disabled — no password provisioned. Re-run "
+                     "setup (type RESET at boot) to generate one.");
+    } else {
+      Serial.printf("[cli] OTA host: %s.local\n",
+                    llattender::ota::hostname().c_str());
+      Serial.println("[cli]   pio run -e esp32dev_ota -t upload");
+      Serial.println("[cli] password is NOT shown here — it was displayed once "
+                     "on the setup confirmation page.");
+    }
+    return;
+  }
+  if (line == "q") {
+    llattender::queue::debug_dump();
+    return;
+  }
+  if (line == "r") {
+    const int n = llattender::roster::count();
+    const std::time_t age = llattender::roster::age_seconds();
+    if (age < 0) {
+      Serial.println("[cli] roster: never loaded — cards will not resolve");
+    } else {
+      Serial.printf("[cli] roster: %d learners, loaded %ld s ago (%s)\n",
+                    n, static_cast<long>(age),
+                    llattender::roster::ready() ? "ready" : "NOT ready");
+    }
     return;
   }
   if (line == "c") {

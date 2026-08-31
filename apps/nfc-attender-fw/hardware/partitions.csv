@@ -1,0 +1,62 @@
+# LearnLife NFC Attender — flash layout (4 MB ESP32-WROOM-32)
+#
+# ⚠ THIS CAN ONLY BE APPLIED OVER USB. A partition table cannot be changed by
+#   an OTA update, because the running firmware lives inside the layout it
+#   would be rewriting. Flash this during assembly, on BOTH devices, before
+#   either one goes to the Hub — otherwise the only way to change it later is
+#   to open the enclosure and connect a cable.
+#
+# ── WHY THE DEFAULT TABLE DOESN'T WORK ───────────────────────────────────
+#
+# Arduino's default ESP32 layout gives each of the two app slots 1280 KB. The
+# build is already ~1.11 MB, i.e. ~85% full, and OTA support plus the pinned
+# CA certificates only add to it. Running out of app space is not a graceful
+# failure — the link succeeds locally and the OTA write fails on the device.
+#
+# So: 1536 KB per slot, which puts the current image at ~72% and leaves real
+# headroom. The space comes out of the filesystem, which has far more than it
+# needs.
+#
+# ── OTA NEEDS TWO APP SLOTS ──────────────────────────────────────────────
+#
+# app0 and app1 are a matched pair. The device runs from one and writes the
+# incoming update into the other, then flips `otadata` to point at it and
+# reboots. If the new image doesn't boot, the bootloader can roll back to the
+# slot that still holds the working firmware. That redundancy is the whole
+# reason a bricked update isn't a trip to the Hub with a laptop — and it is
+# why the two slots must be the same size.
+#
+# ── WHAT SURVIVES A REPARTITION, AND WHAT DOESN'T ────────────────────────
+#
+# nvs stays at 0x9000 with the same size, so PROVISIONING SURVIVES: WiFi
+# credentials, the PocketBase device account, and the device id are all still
+# there after reflashing. You do not have to re-run the captive portal.
+#
+# littlefs MOVES, so its contents are LOST and it is reformatted on first boot
+# (main.cpp mounts with formatOnFail=true). That means /roster.txt,
+# /queue.jsonl and /today.json are wiped.
+#
+#   -> The roster and today-cache re-fetch automatically. No action needed.
+#   -> The QUEUE DOES NOT. Any scans still waiting to reach PocketBase are
+#      destroyed. Before repartitioning a device that has been in service,
+#      bring it online and check `q` on the serial console reads 0 pending.
+#
+# ── LAYOUT (4 MB / 0x400000) ─────────────────────────────────────────────
+#
+#   0x009000  nvs        20 KB   provisioning — unchanged from default
+#   0x00e000  otadata     8 KB   which app slot to boot
+#   0x010000  app0     1536 KB   firmware slot A
+#   0x190000  app1     1536 KB   firmware slot B (OTA target)
+#   0x310000  littlefs  896 KB   roster, queue, today-cache
+#   0x3f0000  coredump   64 KB   panic dumps, readable with esp-coredump
+#
+# App partitions must start on a 64 KB boundary; data partitions on 4 KB.
+# Offsets above satisfy both and tile the 4 MB exactly with no gaps.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x180000,
+app1,       app,  ota_1,    0x190000, 0x180000,
+littlefs,   data, spiffs,   0x310000, 0xe0000,
+coredump,   data, coredump, 0x3f0000, 0x10000,

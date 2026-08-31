@@ -20,8 +20,9 @@ namespace llattender::fields {
 // for ActionType::NoAction (caller should not write in that case).
 //
 // Examples:
-//   CheckIn (present)   → {"time_in":"2026-04-08T09:00:00.000Z","status":"present"}
-//   CheckIn (late)      → {"time_in":"…","status":"late"}
+//   CheckIn (present)   → {"time_in":"2026-04-08T09:00:00.000Z","arrival":"present","status":"present"}
+//   CheckIn (late)      → {"time_in":"…","arrival":"late","status":"late"}
+//   CheckIn (excused)   → {"time_in":"…","arrival":"late","status":"jLate"}
 //   LunchEvent (out)    → {"lunch_events":"[{\"type\":\"out\",\"time\":\"…\"}]"}
 //   LunchEvent (in,ok)  → {"lunch_events":"[…]","lunch_status":"present"}
 //   LateLunchReturn     → {"lunch_events":"[…]","lunch_status":"late"}

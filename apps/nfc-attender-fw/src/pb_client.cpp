@@ -10,8 +10,13 @@
 
 #include <map>
 
+#include "chunked_source.h"
 #include "config.h"
+#include "time_sync.h"
 #include "fields.h"
+#include "jwt.h"
+#include "json_source.h"
+#include "pb_ca.h"
 #include "pb_request.h"
 #include "pb_response.h"
 
@@ -19,9 +24,45 @@ namespace llattender::pb_client {
 
 namespace {
 
-// Cached bearer token. Refreshed on every login() call. We don't persist it
-// to NVS yet — the device re-logs in on boot, which is fine in Phase 2.
+// ── Concurrency ──────────────────────────────────────────────────────────
+//
+// Every global below is reachable from three FreeRTOS contexts: processor_task
+// (core 1), network_task (core 0) and the Arduino loop task running the serial
+// console. std::map and std::string are not thread-safe, and both the
+// processor and network paths also write /today.json. Without this lock the
+// failure mode is heap corruption surfacing as an unexplained reboot minutes
+// later — the kind of bug that gets blamed on the power supply or the
+// enclosure.
+//
+// Recursive because it costs nothing here and removes a whole class of
+// self-deadlock if a public function ever ends up calling another one.
+SemaphoreHandle_t g_mtx = nullptr;
+
+// RAII guard. Deliberately tolerant of a null mutex: if init() was somehow not
+// called, the correct behaviour is to run unlocked exactly as before rather
+// than to hard-fault a device sitting on a school front desk.
+class Lock {
+ public:
+  Lock() : held_(false) {
+    if (g_mtx != nullptr) {
+      held_ = xSemaphoreTakeRecursive(g_mtx, portMAX_DELAY) == pdTRUE;
+    }
+  }
+  ~Lock() {
+    if (held_) xSemaphoreGiveRecursive(g_mtx);
+  }
+  Lock(const Lock&) = delete;
+  Lock& operator=(const Lock&) = delete;
+
+ private:
+  bool held_;
+};
+
+// Cached bearer token, mirrored in NVS so it survives a reboot. `g_token_exp`
+// is the `exp` claim decoded from the token itself, not a locally-computed
+// guess at a lifetime.
 std::string g_token;
+std::time_t g_token_exp = 0;
 
 // Cached snapshot of the config used by all calls. Re-loaded each time we go
 // online so the user can update credentials via the serial provisioner without
@@ -36,10 +77,28 @@ bool g_cfg_loaded = false;
 std::map<std::string, AttendanceRow> g_today_rows;
 std::string g_today_date;  // YYYY-MM-DD — flush cache when this changes
 
+// Highest `updated` value seen among today's rows. The delta poll asks
+// PocketBase for rows newer than this instead of re-fetching the whole day.
+std::string g_updated_watermark;
+
+// PocketBase datetimes are fixed-width "YYYY-MM-DD HH:MM:SS.sssZ", so a
+// lexicographic comparison is also chronological — no parsing needed.
+//
+// Advanced ONLY from values PocketBase returned, never from device time: the
+// device clock can lag the server's, and a watermark set from local time would
+// permanently skip every row modified inside that gap.
+void note_watermark(const std::string& updated) {
+  if (updated.empty()) return;
+  if (updated > g_updated_watermark) g_updated_watermark = updated;
+}
+
 void reset_cache_if_new_day(const std::string& date) {
   if (g_today_date != date) {
     g_today_rows.clear();
     g_today_date = date;
+    // The watermark is per-day: carrying yesterday's across midnight would
+    // make the new day's first delta poll return nothing.
+    g_updated_watermark.clear();
   }
 }
 
@@ -58,6 +117,11 @@ void persist_today_cache() {
   doc["date"] = g_today_date;
   auto items = doc["items"].to<JsonObject>();
   for (auto& kv : g_today_rows) {
+    // Skip provisional rows (empty `id`): they were inserted by
+    // update_today_cache_after_action on a cache miss and have no
+    // server-side row behind them yet. A mid-day reboot must re-derive them
+    // from the server prefetch rather than trust a rowless entry.
+    if (kv.second.id.empty()) continue;
     auto o = items[kv.first].to<JsonObject>();
     o["id"]                = kv.second.id;
     o["learner_id"]        = kv.second.learner_id;
@@ -135,11 +199,26 @@ bool ensure_cfg() {
 // Caller owns `http` and `client` and is responsible for end() / cleanup.
 bool open_https(HTTPClient& http, WiFiClientSecure& client,
                 const std::string& url, bool with_auth = true) {
-  client.setInsecure();  // TODO (phase 6+): pin pockethost.io's CA.
+  // Verify the server against a pinned root instead of trusting anything that
+  // answers. setInsecure() used to mean this device would hand its PocketBase
+  // account password to a laptop running a rogue AP named after the school
+  // WiFi. See src/pb_ca.h for the chain and for what to check if PocketHost
+  // ever changes issuer.
+  //
+  // Requires a correct clock: with a CA set, mbedTLS enforces the
+  // certificate's validity dates, and a pre-NTP device believing it is 1970
+  // fails every handshake as "not yet valid". The clock gate is what makes
+  // this safe (src/clock_gate.h).
+  client.setCACert(kPocketHostRootCA);
+
   // Long-ish timeouts so flaky WiFi doesn't immediately abort an in-flight
   // PATCH. The network task is the one waiting; the NFC task is unaffected.
   http.setConnectTimeout(8000);
   http.setTimeout(8000);
+  // The handshake is the slow part of a pinned connection — certificate chain
+  // verification on an ESP32 takes real time. The default is tighter than
+  // that on a congested network.
+  client.setHandshakeTimeout(15);
   if (!http.begin(client, String(url.c_str()))) {
     Serial.printf("[pb] http.begin failed for %s\n", url.c_str());
     return false;
@@ -153,14 +232,100 @@ bool open_https(HTTPClient& http, WiFiClientSecure& client,
 
 // Read the entire response body. HTTPClient::getString() handles transfer
 // encoding for us.
+//
+// Fine for small responses (login, a single record). NOT used for list pages —
+// see ResponseSource below.
 std::string read_body(HTTPClient& http) {
   String s = http.getString();
   return std::string(s.c_str(), s.length());
 }
 
+// Presents an HTTP response body as a ByteSource the JSON parser can read
+// directly, without ever holding the whole body in RAM.
+//
+// Two things to know:
+//
+//  1. getStream() returns the RAW socket. Unlike getString(), it does NOT
+//     de-chunk. PocketHost is behind Cloudflare, so a chunked response is
+//     possible, and chunk framing fed to a JSON parser produces garbage.
+//     HTTPClient signals chunked by reporting getSize() < 0 (no
+//     Content-Length), which is what selects the de-chunking wrapper here.
+//
+//  2. Both members are constructed either way and only one is handed out.
+//     ChunkedByteSource is a few bytes of bookkeeping, so keeping it unused is
+//     cheaper than the branchy alternative.
+struct ResponseSource {
+  StreamByteSource raw;
+  ChunkedByteSource chunked;
+  bool is_chunked;
+
+  explicit ResponseSource(HTTPClient& http)
+      : raw(http.getStream()),
+        chunked(raw),
+        is_chunked(http.getSize() < 0) {}
+
+  ByteSource& get() {
+    return is_chunked ? static_cast<ByteSource&>(chunked)
+                      : static_cast<ByteSource&>(raw);
+  }
+};
+
 }  // namespace
 
+void init() {
+  if (g_mtx != nullptr) return;
+  g_mtx = xSemaphoreCreateRecursiveMutex();
+  if (g_mtx == nullptr) {
+    Serial.println("[pb] FATAL: could not create state mutex");
+  }
+}
+
+// Reuse the persisted token when it still has real life left, otherwise log
+// in. Returns false only if a login was needed and failed.
+//
+// This is what finally makes config.h's `token` / `token_expires` fields mean
+// something — they have been persisted since Phase 1 while pb_client logged in
+// again on every single boot and reconnect.
+bool ensure_token() {
+  Lock lk;
+  if (!ensure_cfg()) return false;
+
+  if (!g_token.empty() &&
+      jwt::is_usable(g_token, g_token_exp, time_sync::now_unix())) {
+    return true;
+  }
+
+  // Nothing in RAM — try NVS before paying for a login. This is the common
+  // path on a reboot.
+  if (g_token.empty() && !g_cfg.token.empty()) {
+    if (jwt::is_usable(g_cfg.token, g_cfg.token_expires,
+                       time_sync::now_unix())) {
+      g_token = g_cfg.token;
+      g_token_exp = g_cfg.token_expires;
+      Serial.println("[pb] reusing cached token from NVS (no login needed)");
+      return true;
+    }
+    Serial.println("[pb] cached token expired — logging in");
+  }
+
+  return login();
+}
+
+void clear_token() {
+  Lock lk;
+  g_token.clear();
+  g_token_exp = 0;
+  // Clear the persisted copy too, or the next boot retries a token already
+  // known to be rejected.
+  if (ensure_cfg()) {
+    g_cfg.token.clear();
+    g_cfg.token_expires = 0;
+    config::save(g_cfg);
+  }
+}
+
 bool login() {
+  Lock lk;
   // Force a re-load so a freshly-provisioned config takes effect without a
   // reboot.
   g_cfg_loaded = false;
@@ -189,18 +354,38 @@ bool login() {
     return false;
   }
   g_token = std::move(tok);
-  Serial.println("[pb] login ok");
+
+  // Read the expiry from the token itself rather than assuming a lifetime.
+  // If it can't be parsed the token still works — it just won't be reused
+  // after a reboot, which is a slow path, not a broken one.
+  if (jwt::extract_exp(g_token, g_token_exp)) {
+    g_cfg.token = g_token;
+    g_cfg.token_expires = g_token_exp;
+    config::save(g_cfg);
+    const long remaining =
+        static_cast<long>(g_token_exp - time_sync::now_unix());
+    Serial.printf("[pb] login ok — token cached, valid ~%ld min\n",
+                  remaining / 60);
+  } else {
+    g_token_exp = 0;
+    Serial.println("[pb] login ok (token expiry unreadable — will re-login "
+                   "next boot)");
+  }
   return true;
 }
 
 bool prefetch_today_attendance(const std::string& date) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] prefetch_today: not logged in");
     return false;
   }
   reset_cache_if_new_day(date);
 
-  constexpr int kPerPage = 500;
+  // 25, not 500. Smaller pages mean the parser's working set stays small even
+  // though rows are consumed as they decode — and with ~61 learners this is
+  // three requests instead of one, which is a fine trade against an OOM.
+  constexpr int kPerPage = 25;
   int page = 1;
   int inserted = 0;
   while (true) {
@@ -215,39 +400,100 @@ bool prefetch_today_attendance(const std::string& date) {
       http.end();
       return false;
     }
-    std::string body = read_body(http);
+
+    // Parse straight off the socket and drop each row into the cache as it
+    // decodes. Nothing ever holds the whole body, and no vector of rows is
+    // built — the two allocations that together caused the OOM.
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_attendance_page(
+        rs.get(), meta, [&](AttendanceRow&& r) {
+          if (r.learner_id.empty()) return true;
+          note_watermark(r.updated);
+          const std::string key = r.learner_id;  // copy before the move
+          g_today_rows[key] = std::move(r);
+          ++inserted;
+          return true;
+        });
     http.end();
 
-    pb_response::AttendancePage parsed;
-    if (!pb_response::parse_attendance_page(body, parsed)) {
-      Serial.println("[pb] prefetch_today parse failed");
+    if (!ok) {
+      Serial.printf("[pb] prefetch_today page %d parse failed\n", page);
       return false;
     }
-    for (auto& r : parsed.items) {
-      if (!r.learner_id.empty()) {
-        g_today_rows[r.learner_id] = std::move(r);
-        ++inserted;
-      }
-    }
-    if (parsed.total_pages <= page) break;
+    if (meta.total_pages <= page) break;
     ++page;
   }
-  Serial.printf("[pb] prefetched %d attendance rows for %s\n",
-                inserted, date.c_str());
+  Serial.printf("[pb] prefetched %d attendance rows for %s (watermark %s)\n",
+                inserted, date.c_str(),
+                g_updated_watermark.empty() ? "-" : g_updated_watermark.c_str());
   persist_today_cache();
   return true;
 }
 
+bool refresh_today_delta(const std::string& date, int& out_changed) {
+  Lock lk;
+  out_changed = 0;
+  if (g_token.empty()) return false;
+
+  // No watermark means nothing has been fetched for today yet, so there is no
+  // "since" to ask about. Caller should do a full prefetch first.
+  if (g_today_date != date || g_updated_watermark.empty()) return false;
+
+  constexpr int kPerPage = 25;
+  int page = 1;
+  while (true) {
+    WiFiClientSecure client;
+    HTTPClient http;
+    const std::string url = pb_request::list_attendance_updated_since_url(
+        g_cfg.pb_url, date, g_updated_watermark, page, kPerPage);
+    if (!open_https(http, client, url)) return false;
+    int code = http.GET();
+    if (code != 200) {
+      Serial.printf("[pb] delta page %d HTTP %d\n", page, code);
+      http.end();
+      return false;
+    }
+
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_attendance_page(
+        rs.get(), meta, [&](AttendanceRow&& r) {
+          if (r.learner_id.empty()) return true;
+          note_watermark(r.updated);
+          const std::string key = r.learner_id;
+          g_today_rows[key] = std::move(r);
+          ++out_changed;
+          return true;
+        });
+    http.end();
+
+    if (!ok) {
+      Serial.println("[pb] delta parse failed");
+      return false;
+    }
+    if (meta.total_pages <= page) break;
+    ++page;
+  }
+
+  if (out_changed > 0) {
+    Serial.printf("[pb] delta: %d row(s) changed server-side\n", out_changed);
+    persist_today_cache();
+  }
+  return true;
+}
+
 bool fetch_roster(std::vector<LearnerRow>& out) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] fetch_roster: not logged in");
     return false;
   }
   out.clear();
 
-  // PocketBase caps perPage at 500. The roster is small enough that one page
-  // covers it, but the loop generalises in case we grow.
-  constexpr int kPerPage = 500;
+  // Paged for the same reason as the attendance prefetch: a single 500-row
+  // page would put the whole roster in the parser's working set at once.
+  constexpr int kPerPage = 25;
   int page = 1;
   while (true) {
     WiFiClientSecure client;
@@ -261,25 +507,42 @@ bool fetch_roster(std::vector<LearnerRow>& out) {
       http.end();
       return false;
     }
-    std::string body = read_body(http);
+
+    ResponseSource rs(http);
+    pb_response::PageMeta meta;
+    const bool ok = pb_response::stream_learners_page(
+        rs.get(), meta, [&](LearnerRow&& l) {
+          out.push_back(std::move(l));
+          return true;
+        });
     http.end();
 
-    pb_response::LearnersPage parsed;
-    if (!pb_response::parse_learners_page(body, parsed)) {
-      Serial.println("[pb] fetch_roster parse failed");
+    if (!ok) {
+      Serial.printf("[pb] fetch_roster page %d parse failed\n", page);
       return false;
     }
-    for (auto& l : parsed.items) out.push_back(std::move(l));
-    if (parsed.total_pages <= page) break;
+    if (meta.total_pages <= page) break;
     ++page;
   }
   Serial.printf("[pb] fetched %u learners\n", static_cast<unsigned>(out.size()));
   return true;
 }
 
+bool lookup_today_row(const std::string& learner_id,
+                      const std::string& date,
+                      AttendanceRow& out) {
+  Lock lk;
+  reset_cache_if_new_day(date);
+  auto cached = g_today_rows.find(learner_id);
+  if (cached == g_today_rows.end()) return false;
+  out = cached->second;
+  return true;
+}
+
 bool ensure_today_row(const std::string& learner_id,
                       const std::string& date,
                       AttendanceRow& out, bool& created) {
+  Lock lk;
   created = false;
   if (g_token.empty()) {
     Serial.println("[pb] ensure_today_row: not logged in");
@@ -288,7 +551,12 @@ bool ensure_today_row(const std::string& learner_id,
 
   reset_cache_if_new_day(date);
   auto cached = g_today_rows.find(learner_id);
-  if (cached != g_today_rows.end()) {
+  // A provisional entry (empty `id`, inserted by
+  // update_today_cache_after_action on a cache miss) is a local prediction
+  // with no server row behind it. Both callers — the queue drain and the `w`
+  // console command — need a real record id, so fall through to the GET/POST
+  // and let the authoritative row replace the prediction.
+  if (cached != g_today_rows.end() && !cached->second.id.empty()) {
     out = cached->second;
     return true;
   }
@@ -347,8 +615,20 @@ bool ensure_today_row(const std::string& learner_id,
 
 void update_today_cache_after_action(const std::string& learner_id,
                                      const CheckInAction& action) {
+  Lock lk;
   auto it = g_today_rows.find(learner_id);
-  if (it == g_today_rows.end()) return;  // nothing cached yet
+  if (it == g_today_rows.end()) {
+    // With the cache-only tap path (processor_task no longer calls
+    // ensure_today_row), a miss is the *normal* first-tap-of-the-day case.
+    // Insert a provisional row — no server `id` yet — so the learner's second
+    // tap reads the predicted post-action state instead of re-missing, running
+    // the state machine on an empty state and queueing a duplicate check-in.
+    // network_task fills in the real id when it drains the entry.
+    AttendanceRow fresh;
+    fresh.learner_id = learner_id;
+    fresh.date = g_today_date;
+    it = g_today_rows.emplace(learner_id, std::move(fresh)).first;
+  }
   AttendanceRow& row = it->second;
   switch (action.type) {
     case ActionType::CheckIn:
@@ -373,10 +653,12 @@ void update_today_cache_after_action(const std::string& learner_id,
 }
 
 bool load_today_cache_from_disk(const std::string& today) {
+  Lock lk;
   return load_today_cache(today);
 }
 
 void clear_today_cache() {
+  Lock lk;
   g_today_rows.clear();
   g_today_date.clear();
   LittleFS.remove(kCachePath);
@@ -384,19 +666,29 @@ void clear_today_cache() {
 }
 
 bool patch_attendance(const std::string& id, const std::string& fields_json) {
+  return patch_attendance_status(id, fields_json) == 200;
+}
+
+int patch_attendance_status(const std::string& id,
+                            const std::string& fields_json) {
+  Lock lk;
   if (g_token.empty()) {
     Serial.println("[pb] patch_attendance: not logged in");
-    return false;
+    // Negative == transient transport-level failure, same convention
+    // HTTPClient uses. Not logged in yet is temporary, not permanent.
+    return -1;
   }
   if (id.empty()) {
     Serial.println("[pb] patch_attendance: empty id");
-    return false;
+    // A queued entry with no id can never be written — 400 so it is
+    // dead-lettered rather than retried forever.
+    return 400;
   }
   WiFiClientSecure client;
   HTTPClient http;
   const std::string url =
       pb_request::patch_attendance_url(g_cfg.pb_url, id);
-  if (!open_https(http, client, url)) return false;
+  if (!open_https(http, client, url)) return -1;  // transient: couldn't connect
   int code = http.sendRequest(
       "PATCH",
       reinterpret_cast<uint8_t*>(const_cast<char*>(fields_json.data())),
@@ -404,9 +696,8 @@ bool patch_attendance(const std::string& id, const std::string& fields_json) {
   http.end();
   if (code != 200) {
     Serial.printf("[pb] patch_attendance HTTP %d\n", code);
-    return false;
   }
-  return true;
+  return code;
 }
 
 }  // namespace llattender::pb_client

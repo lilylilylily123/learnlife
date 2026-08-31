@@ -65,6 +65,7 @@ std::string serialize_action(const CheckInAction& action) {
     case ActionType::CheckIn: {
       body += '{';
       emit_kv_string(body, "time_in", action.time_in_iso, /*first=*/true);
+      emit_kv_string(body, "arrival", status_to_str(action.arrival), /*first=*/false);
       emit_kv_string(body, "status", status_to_str(action.status), /*first=*/false);
       body += '}';
       return body;
@@ -94,6 +95,14 @@ std::string serialize_action(const CheckInAction& action) {
     }
 
     case ActionType::NoAction:
+    case ActionType::Locked:
+      // Neither writes anything. Locked is the 14:00-17:00 rejection: the tap
+      // is acknowledged on screen but must not touch the row.
+      //
+      // processor_task already skips both before reaching here (main.cpp), so
+      // this is unreachable today — but listing them makes the switch
+      // exhaustive, which is what makes -Wswitch useful as a tripwire if a new
+      // ActionType is ever added.
       return "";
   }
   return "";

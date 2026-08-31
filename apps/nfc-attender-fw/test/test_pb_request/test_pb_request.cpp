@@ -85,6 +85,30 @@ void test_patch_attendance_url() {
       pb_request::patch_attendance_url("https://pb.example", "xyz789").c_str());
 }
 
+
+void test_list_attendance_updated_since_url() {
+  // The delta-sync request. `sort=updated` matters: ascending order means a
+  // truncated multi-page delta still advances the watermark monotonically
+  // rather than leaving a hole.
+  const std::string url = pb_request::list_attendance_updated_since_url(
+      "https://learnlife.pockethost.io", "2026-08-24",
+      "2026-08-24 09:15:00.000Z", 1, 25);
+
+  TEST_ASSERT_EQUAL_STRING(
+      "https://learnlife.pockethost.io/api/collections/attendance/records"
+      "?page=1&perPage=25&sort=updated&filter="
+      "date%20~%20%222026-08-24%22%20%26%26%20updated%20%3E%20"
+      "%222026-08-24%2009%3A15%3A00.000Z%22",
+      url.c_str());
+}
+
+void test_list_attendance_updated_since_url_strips_trailing_slash() {
+  const std::string url = pb_request::list_attendance_updated_since_url(
+      "https://learnlife.pockethost.io/", "2026-08-24", "2026-08-24 09:00:00.000Z", 2, 25);
+  TEST_ASSERT_TRUE(url.rfind("https://learnlife.pockethost.io/api/", 0) == 0);
+  TEST_ASSERT_TRUE(url.find("page=2") != std::string::npos);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_percent_encode_unreserved_passthrough);
@@ -96,5 +120,7 @@ int main(int, char**) {
   RUN_TEST(test_find_today_attendance_url_encodes_filter);
   RUN_TEST(test_create_attendance_url_and_body);
   RUN_TEST(test_patch_attendance_url);
+  RUN_TEST(test_list_attendance_updated_since_url);
+  RUN_TEST(test_list_attendance_updated_since_url_strips_trailing_slash);
   return UNITY_END();
 }

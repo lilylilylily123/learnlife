@@ -4,3 +4,7 @@
 .DS_Store
 *.swp
 *.swo
+
+# OTA credentials live here — platformio.ini tells the operator to put the
+# upload password in it. Following that advice must not commit the password.
+platformio_override.ini

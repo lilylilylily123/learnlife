@@ -15,10 +15,12 @@ void test_check_in_present() {
   CheckInAction a;
   a.type = ActionType::CheckIn;
   a.time_in_iso = "2026-04-08T09:00:00.000Z";
+  a.arrival = Status::Present;
   a.status = Status::Present;
   std::string body = fields::serialize_action(a);
   TEST_ASSERT_EQUAL_STRING(
-      "{\"time_in\":\"2026-04-08T09:00:00.000Z\",\"status\":\"present\"}",
+      "{\"time_in\":\"2026-04-08T09:00:00.000Z\",\"arrival\":\"present\","
+      "\"status\":\"present\"}",
       body.c_str());
 }
 
@@ -26,10 +28,27 @@ void test_check_in_late() {
   CheckInAction a;
   a.type = ActionType::CheckIn;
   a.time_in_iso = "2026-04-08T10:01:00.000Z";
+  a.arrival = Status::Late;
   a.status = Status::Late;
   std::string body = fields::serialize_action(a);
   TEST_ASSERT_EQUAL_STRING(
-      "{\"time_in\":\"2026-04-08T10:01:00.000Z\",\"status\":\"late\"}",
+      "{\"time_in\":\"2026-04-08T10:01:00.000Z\",\"arrival\":\"late\","
+      "\"status\":\"late\"}",
+      body.c_str());
+}
+
+// An excused learner who then shows up: arrival is the source of truth and
+// status carries the inherited justification (attendance.ts:144-149).
+void test_check_in_late_justified() {
+  CheckInAction a;
+  a.type = ActionType::CheckIn;
+  a.time_in_iso = "2026-04-08T10:30:00.000Z";
+  a.arrival = Status::Late;
+  a.status = Status::JLate;
+  std::string body = fields::serialize_action(a);
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"time_in\":\"2026-04-08T10:30:00.000Z\",\"arrival\":\"late\","
+      "\"status\":\"jLate\"}",
       body.c_str());
 }
 
@@ -118,6 +137,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_check_in_present);
   RUN_TEST(test_check_in_late);
+  RUN_TEST(test_check_in_late_justified);
   RUN_TEST(test_check_out);
   RUN_TEST(test_lunch_out_only);
   RUN_TEST(test_lunch_in_present);

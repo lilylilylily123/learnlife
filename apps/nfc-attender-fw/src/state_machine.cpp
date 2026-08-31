@@ -51,6 +51,14 @@ Status status_from_str(const char* s) {
   return Status::None;
 }
 
+// Mirrors deriveStatus in packages/shared/src/attendance.ts:24-32.
+Status derive_status(Status arrival, bool justified) {
+  if (arrival == Status::None) return Status::None;
+  if (arrival == Status::Present) return Status::Present;  // never justified
+  if (!justified) return arrival;
+  return arrival == Status::Late ? Status::JLate : Status::JAbsent;
+}
+
 std::string format_iso8601(std::time_t t) {
   std::tm utc{};
 #if defined(_WIN32)
@@ -79,9 +87,15 @@ CheckInAction compute_check_in_action(const AttendanceState& state,
     CheckInAction a;
     a.type = ActionType::CheckIn;
     a.time_in_iso = now_iso;
-    a.status = at_or_after(hour, minute, LATE_HOUR, LATE_MINUTE)
-                   ? Status::Late
-                   : Status::Present;
+    a.arrival = at_or_after(hour, minute, LATE_HOUR, LATE_MINUTE)
+                    ? Status::Late
+                    : Status::Present;
+    // Preserve a prior excusal: a learner a guide marked jAbsent who then
+    // shows up keeps the justified flag on their late arrival.
+    // Mirrors attendance.ts:144-149.
+    const bool was_justified =
+        state.status == Status::JLate || state.status == Status::JAbsent;
+    a.status = derive_status(a.arrival, was_justified);
     return a;
   }
 

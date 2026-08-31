@@ -1,0 +1,181 @@
+name: "NFC Firmware: Test & Build"
+
+# Firmware CI for apps/nfc-attender-fw (PlatformIO / ESP32 / Arduino).
+#
+# This is deliberately a SEPARATE workflow from nfc-test-build.yml and
+# nfc-release.yml. Those two are path-filtered to `apps/nfc-attender/**` — the
+# Tauri desktop app — and that glob does NOT match `apps/nfc-attender-fw/`, so
+# the firmware has had no CI at all. Widening their filters would drag the
+# firmware through a pnpm/Node/Rust pipeline it has no use for, so it gets its
+# own instead.
+#
+# Note the firmware directory is excluded from the pnpm workspace on purpose
+# (see pnpm-workspace.yaml) — it is a C++ project, not a package. Nothing here
+# runs pnpm.
+
+on:
+  push:
+    branches:
+      - main
+      - "hardware/**"
+    paths:
+      - "apps/nfc-attender-fw/**"
+      - ".github/workflows/nfc-fw.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "apps/nfc-attender-fw/**"
+      - ".github/workflows/nfc-fw.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: apps/nfc-attender-fw
+
+jobs:
+  native-tests:
+    name: Native unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The `native` env only needs a host compiler and ArduinoJson, so this
+      # cache is small and warms almost instantly — unlike the esp32dev one.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-native-${{ hashFiles('apps/nfc-attender-fw/platformio.ini') }}
+          restore-keys: pio-native-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      # Covers the pure-logic modules: state machine, PB request/response,
+      # field serialisation, the queue line format and the attendance adapter.
+      # Everything that touches Arduino, WiFi or LittleFS is compiled out via
+      # LLATTENDER_NATIVE_BUILD and is NOT covered here.
+      #
+      # If you add a new pure module, it must be added to BOTH build_src_filter
+      # and test_filter in platformio.ini — they are explicit allow-lists, and
+      # a module missing from them is silently never compiled or run.
+      - name: Run unit tests
+        run: pio test -e native
+
+  firmware-build:
+    name: ESP32 firmware build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # This cache is the difference between a ~2 minute job and a ~10 minute
+      # one: the espressif32 platform plus its xtensa toolchain is a
+      # several-hundred-megabyte first download.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-esp32-${{ hashFiles('apps/nfc-attender-fw/platformio.ini') }}
+          restore-keys: pio-esp32-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run -e esp32dev
+
+      # Image size is a live constraint, not trivia. hardware/partitions.csv
+      # gives two 1536 KB app slots (OTA needs two, and they must be equal), so
+      # `pio run` already fails on its own if the image outgrows a slot. This
+      # step is the early-warning trend line ahead of that hard wall: it warns
+      # at 85% and fails at 95%, which leaves room for an OTA image that is
+      # slightly larger than the one currently running.
+      - name: Report image size
+        run: |
+          BIN=.pio/build/esp32dev/firmware.bin
+          SIZE=$(stat -c%s "$BIN")
+
+          # Must match app0/app1 in apps/nfc-attender-fw/hardware/partitions.csv
+          # (0x180000 = 1536 KB). If that file changes, change this too — a
+          # stale value here would report a comfortable percentage while the
+          # real slot overflowed.
+          SLOT=1572864
+          PCT=$(( SIZE * 100 / SLOT ))
+
+          {
+            echo "### Firmware image size"
+            echo ""
+            echo "\`firmware.bin\`: **${SIZE}** bytes of ${SLOT} app slot — **${PCT}% full**"
+            echo ""
+            echo '```'
+            pio run -e esp32dev --target size 2>/dev/null \
+              | grep -A1 -E '^[[:space:]]*text[[:space:]]+data[[:space:]]+bss' || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Fail loudly before the linker would, so a size regression is
+          # obvious in the PR rather than at flash time.
+          if [ "$PCT" -ge 95 ]; then
+            echo "::error::firmware.bin is ${PCT}% of the app slot — no room for OTA"
+            exit 1
+          elif [ "$PCT" -ge 85 ]; then
+            echo "::warning::firmware.bin is ${PCT}% of the app slot"
+          fi
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            apps/nfc-attender-fw/.pio/build/esp32dev/firmware.bin
+            apps/nfc-attender-fw/.pio/build/esp32dev/firmware.elf
+          retention-days: 14
+
+  enclosure:
+    name: Enclosure geometry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # Catches a .scad that stops parsing, produces a non-manifold mesh, or
+      # references a parameter that no longer exists. A non-manifold part
+      # slices into garbage, and finding that out at the makerspace instead of
+      # in CI costs a booking.
+      #
+      # `--check` also fails when stl/PARAMS.sha256 disagrees with
+      # params.scad, i.e. when the committed STLs were exported from different
+      # parameters than the ones in the tree. It is a hash rather than a mesh
+      # comparison on purpose: this runner has OpenSCAD 2021.01 while local
+      # machines have a 2026 snapshot, and binary STL is not reproducible
+      # across them. Fix by running ./export.sh locally and committing stl/.
+      - name: Install OpenSCAD
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openscad xvfb
+
+      - name: Check all parts render
+        run: xvfb-run -a ./export.sh --check
+        working-directory: apps/nfc-attender-fw/hardware/enclosure

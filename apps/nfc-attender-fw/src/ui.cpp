@@ -26,7 +26,7 @@ constexpr uint32_t kSplashMs = 1500;
 Adafruit_SSD1306 g_oled(kWidth, kHeight, &Wire, /*reset=*/-1);
 bool g_have_oled = false;
 
-enum class Mode { Boot, Idle, Action, Unknown };
+enum class Mode { Boot, Idle, Action, Unknown, WaitingClock, Provisioning };
 
 struct State {
   Mode mode = Mode::Boot;
@@ -35,6 +35,9 @@ struct State {
   char name[64] = {0};
   bool queued_offline = false;  // sticks until next non-Queued event
   bool network_error = false;
+  int pending = 0;              // queued scans not yet accepted by PocketBase
+  char ap_ssid[32] = {0};
+  char ap_pw[24] = {0};
   bool dirty = true;
 };
 
@@ -53,6 +56,9 @@ const char* verdict_for(Event ev) {
     case Event::AlreadyIn:      return "Already in";
     case Event::ScanLocked:     return "Locked";
     case Event::UnknownCard:    return "Unknown card";
+    // ASCII only: the SSD1306 classic font has no em dash.
+    case Event::ScanBusy:       return "Busy - tap again";
+    case Event::WaitingClock:   return "No clock yet";
     default:                    return "";
   }
 }
@@ -152,15 +158,68 @@ void render_idle() {
 
   draw_centered("LearnLife", 0, 1);
 
+  // Before NTP lands, the ESP32's clock reads 1970 (there is no DS3231 in
+  // this build). Showing that as a confident "01:00" would be worse than
+  // useless — a guide would have no reason to suspect anything is wrong.
+  // Show placeholders instead, so the state is legible from across the desk.
+  if (!time_sync::is_synced()) {
+    draw_centered("--:--", 18, 3);
+    draw_centered("Waiting for clock", 52, 1);
+    render_overlay();
+    g_oled.display();
+    return;
+  }
+
   char clk[8];
   format_clock(clk, sizeof(clk));
   draw_centered(clk, 18, 3);
 
-  char date[24];
-  format_date(date, sizeof(date));
-  draw_centered(date, 52, 1);
+  if (g_st.pending > 0) {
+    // Replaces the date line rather than squeezing in beside it. The date is
+    // decoration; scans sitting undelivered is the thing a guide needs to see,
+    // because otherwise a device that records but never uploads looks exactly
+    // like one that is working.
+    char pend[24];
+    std::snprintf(pend, sizeof(pend), "%d waiting to send", g_st.pending);
+    draw_centered(pend, 52, 1);
+  } else {
+    char date[24];
+    format_date(date, sizeof(date));
+    draw_centered(date, 52, 1);
+  }
 
   render_overlay();
+  g_oled.display();
+}
+
+// Shown when a card is tapped while the clock is still untrusted. The
+// important word is "Not recorded" — the learner must know to come back,
+// because nothing was written to PocketBase.
+void render_waiting_clock() {
+  g_oled.clearDisplay();
+  g_oled.setTextColor(SSD1306_WHITE);
+
+  draw_centered("Waiting for clock", 4, 1);
+  g_oled.drawLine(0, 15, kWidth - 1, 15, SSD1306_WHITE);
+  draw_centered("NOT", 22, 2);
+  draw_centered("RECORDED", 42, 2);
+
+  render_overlay();
+  g_oled.display();
+}
+
+// Setup mode. Two pieces of information, and the password is the one being
+// typed into a phone, so it gets the larger type.
+void render_provisioning() {
+  g_oled.clearDisplay();
+  g_oled.setTextColor(SSD1306_WHITE);
+
+  draw_centered("SETUP - join WiFi", 0, 1);
+  g_oled.drawLine(0, 10, kWidth - 1, 10, SSD1306_WHITE);
+  draw_centered(g_st.ap_ssid, 15, 1);
+  draw_centered("password:", 28, 1);
+  draw_centered(g_st.ap_pw, 40, 2);
+
   g_oled.display();
 }
 
@@ -201,12 +260,16 @@ void render_action() {
   g_oled.display();
 }
 
+// Shared by UnknownCard and ScanBusy: both are "nothing was recorded"
+// verdicts with no learner name, so they use one render path and are told
+// apart by g_st.last_action.
 void render_unknown() {
+  const bool busy = g_st.last_action == Event::ScanBusy;
   g_oled.clearDisplay();
   g_oled.setTextColor(SSD1306_WHITE);
-  draw_centered("?", 0, 4);
-  draw_centered("Unknown card", 44, 1);
-  draw_centered("Card not in roster", 56, 1);
+  draw_centered(busy ? "!" : "?", 0, 4);
+  draw_centered(verdict_for(busy ? Event::ScanBusy : Event::UnknownCard), 44, 1);
+  draw_centered(busy ? "Not recorded - retry" : "Card not in roster", 56, 1);
   render_overlay();
   g_oled.display();
 }
@@ -218,6 +281,8 @@ void redraw() {
     case Mode::Idle:    render_idle();    break;
     case Mode::Action:  render_action();  break;
     case Mode::Unknown: render_unknown(); break;
+    case Mode::WaitingClock: render_waiting_clock(); break;
+    case Mode::Provisioning: render_provisioning(); break;
   }
   g_st.dirty = false;
   g_last_redraw_ms = millis();
@@ -264,7 +329,16 @@ void show(Event ev, const char* learner_name) {
       break;
 
     case Event::UnknownCard:
+    case Event::ScanBusy:
       g_st.mode = Mode::Unknown;
+      // render_unknown() reads this to pick its label.
+      g_st.last_action = ev;
+      g_st.mode_until_ms = millis() + kFeedbackMs;
+      g_st.queued_offline = false;
+      break;
+
+    case Event::WaitingClock:
+      g_st.mode = Mode::WaitingClock;
       g_st.mode_until_ms = millis() + kFeedbackMs;
       g_st.queued_offline = false;
       break;
@@ -289,6 +363,23 @@ void show(Event ev, const char* learner_name) {
   }
   g_st.dirty = true;
   redraw();
+}
+
+void show_provisioning(const std::string& ssid, const std::string& password) {
+  std::strncpy(g_st.ap_ssid, ssid.c_str(), sizeof(g_st.ap_ssid) - 1);
+  g_st.ap_ssid[sizeof(g_st.ap_ssid) - 1] = '\0';
+  std::strncpy(g_st.ap_pw, password.c_str(), sizeof(g_st.ap_pw) - 1);
+  g_st.ap_pw[sizeof(g_st.ap_pw) - 1] = '\0';
+  g_st.mode = Mode::Provisioning;
+  g_st.mode_until_ms = 0;   // persistent: it must stay readable while typing
+  g_st.dirty = true;
+  redraw();
+}
+
+void set_pending_count(int n) {
+  if (g_st.pending == n) return;
+  g_st.pending = n;
+  g_st.dirty = true;
 }
 
 void set_network_error(bool on) {
