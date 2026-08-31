@@ -1,7 +1,8 @@
 // LearnLife NFC Attender — tolerance test coupon
 // ==============================================
 //
-// PRINT THIS SECOND (after antenna_tiles.scad, before any enclosure part).
+// PRINT THIS FIRST — it is the only print the enclosure genuinely depends on.
+// (antenna_tiles.scad is an optional diagnostic; see its header.)
 // One plate, 120 x 90 mm, 30-45 minutes.
 //
 // ── WHY ──────────────────────────────────────────────────────────────────
@@ -21,7 +22,13 @@
 //  1. CALIBRATION BLOCK — measure the raised 20 mm square with calipers in
 //     both X and Y. If it measures 20.15, your printer runs 0.15 oversize:
 //     set `xy_comp = 0.15`. If it measures dead on, leave it at 0.
-//     Do this FIRST — it is the master correction the rest inherit.
+//     Do this FIRST. It is consumed by cut() in params.scad, which widens
+//     every bore, slot and aperture in base/lid/stand so they print on size.
+//
+//     Note what it does NOT touch: the four fit_* numbers and screw_pilot_d
+//     below. Those are read off THIS coupon, which is printed uncompensated,
+//     so they already contain your printer's offset — the real parts use them
+//     verbatim. Compensating them twice would loosen every fit by xy_comp.
 //
 //  2. SCREW BOSSES — drive an M3 self-tapping screw into each of the three
 //     pilot holes (2.3 / 2.5 / 2.7 mm). You want the one that cuts its own

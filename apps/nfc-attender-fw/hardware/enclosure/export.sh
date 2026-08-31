@@ -18,6 +18,15 @@
 # STL, not a source file they'd have to install OpenSCAD to render. Committing
 # both means the printable artefact is always one download away, and a
 # reviewer can see the geometry without a toolchain.
+#
+# stl/PARAMS.sha256 is the staleness gate. CI only checks that the sources
+# RENDER, never that the committed STLs match them, so a makerspace handed
+# base.stl could print a box sized for parameters nobody uses any more. A
+# byte-diff against a fresh render is the wrong test: local OpenSCAD is a 2026
+# snapshot and CI's Ubuntu package is 2021.01, and binary STL output is not
+# reproducible across them. Hashing params.scad is version-independent — it
+# answers exactly the question that matters, "were these STLs exported from
+# these parameters?"
 
 set -euo pipefail
 
@@ -28,8 +37,8 @@ cd "$(dirname "$0")"
 # are gated on the caliper measurements in docs/measurements.md, so a fresh
 # checkout legitimately has only the two test prints.
 PARTS=(
-  antenna_tiles   # print FIRST — fixes lid_t, needs no measurements
-  coupon          # print SECOND — fixes the five tolerance parameters
+  antenna_tiles   # OPTIONAL diagnostic — only if read range disappoints
+  coupon          # print FIRST — fixes the five tolerance parameters
   base
   lid
   stand
@@ -48,6 +57,27 @@ if ! command -v openscad >/dev/null 2>&1; then
   echo "       brew install --cask openscad@snapshot" >&2
   exit 1
 fi
+
+# A full export vs a single named part. Only a full run may stamp or verify
+# the params hash: a partial run leaves every other STL untouched, so blessing
+# the hash from one would claim the whole directory is current when it is not.
+FULL_RUN=0
+[[ $# -eq 0 ]] && FULL_RUN=1
+
+PARAMS_HASH_FILE="stl/PARAMS.sha256"
+
+# macOS ships shasum, CI's Ubuntu ships sha256sum. Probe rather than assume,
+# the same way the --export-format and --backend checks below do.
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    echo "error: neither shasum nor sha256sum found — cannot check stl/ freshness" >&2
+    exit 1
+  fi
+}
 
 echo "openscad: $(openscad --version 2>&1 | head -1)"
 mkdir -p stl
@@ -152,6 +182,37 @@ for part in "${PARTS[@]}"; do
   rm -f "$log"
   # (--check output lands in TMPWORK, cleaned up by the EXIT trap)
 done
+
+# ── stl/ freshness gate ──────────────────────────────────────────────────
+#
+# Answers "were the committed STLs exported from the current params.scad?"
+# without comparing meshes, which would be hopeless across OpenSCAD versions.
+if [[ $FULL_RUN -eq 1 ]]; then
+  params_hash="$(sha256_of params.scad)"
+
+  if [[ $CHECK_ONLY -eq 1 ]]; then
+    if [[ ! -f "$PARAMS_HASH_FILE" ]]; then
+      echo "  FAIL    ${PARAMS_HASH_FILE} is missing — run ./export.sh and commit stl/"
+      failed=$((failed + 1))
+    else
+      recorded="$(cut -d' ' -f1 < "$PARAMS_HASH_FILE")"
+      if [[ "$recorded" != "$params_hash" ]]; then
+        echo "  FAIL    stl/ is stale — params.scad changed since the last export"
+        echo "            recorded ${recorded}"
+        echo "            current  ${params_hash}"
+        echo "            run ./export.sh and commit the regenerated stl/"
+        failed=$((failed + 1))
+      else
+        echo "  ok      ${PARAMS_HASH_FILE} matches params.scad"
+      fi
+    fi
+  elif [[ $failed -eq 0 ]]; then
+    # Only stamp a clean export. Blessing the hash after a failed render would
+    # mark a half-written stl/ as current.
+    printf '%s  params.scad\n' "$params_hash" > "$PARAMS_HASH_FILE"
+    echo "  ok      stamped ${PARAMS_HASH_FILE}"
+  fi
+fi
 
 echo
 echo "rendered ${rendered}, skipped ${skipped}, failed ${failed}"

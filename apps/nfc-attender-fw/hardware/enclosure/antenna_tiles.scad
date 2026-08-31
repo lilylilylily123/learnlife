@@ -1,9 +1,15 @@
 // LearnLife NFC Attender — antenna thickness test tiles
 // =====================================================
 //
-// PRINT THIS FIRST. Before the enclosure exists, before you own calipers,
-// before any measurement has been taken. It is deliberately standalone — it
-// does not include params.scad and depends on nothing.
+// OPTIONAL — a diagnostic, not a prerequisite. In the stacked layout the
+// PN532 sits directly under the lid, so the card ends up 3.8 mm from the
+// coil, and deleting the antenna pocket entirely only reaches 5.8 mm; a rig
+// that reads at 30-50 mm will not notice either. See
+// docs/measurements.md "Antenna tile ladder" for the full reasoning.
+//
+// Print it only if read range disappoints once assembled and you want to rule
+// lid thickness in or out. It is deliberately standalone — it does not
+// include params.scad and depends on nothing.
 //
 // ── WHAT IT ANSWERS ──────────────────────────────────────────────────────
 //

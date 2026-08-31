@@ -171,5 +171,5 @@ module foot_recesses() {
   for (x = [foot_inset, W - foot_inset])
     for (y = [foot_inset, D - foot_inset])
       translate([x, y, -0.01])
-        cylinder(h = foot_recess_h, d = foot_d);
+        cylinder(h = foot_recess_h, d = cut(foot_d));
 }

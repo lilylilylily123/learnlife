@@ -206,7 +206,7 @@ module screw_holes() {
     translate([p[0], p[1], -0.5])
       cylinder(h = lid_h + 1, d = screw_pilot_d + 1.2);
     translate([p[0], p[1], lid_h - screw_head_h])
-      cylinder(h = screw_head_h + 0.1, d = screw_head_d);
+      cylinder(h = screw_head_h + 0.1, d = cut(screw_head_d));
   }
 }
 
@@ -220,7 +220,7 @@ module buzzer_grille() {
       translate([ix(buz_pos_x) - span / 2 + i * sound_hole_pitch,
                  iy(buz_pos_y) - span / 2 + j * sound_hole_pitch,
                  -0.5])
-        cylinder(h = lid_h + 1, d = sound_hole_d);
+        cylinder(h = lid_h + 1, d = cut(sound_hole_d));
 }
 
 // ══ TOP-FACE GRAPHICS ════════════════════════════════════════════════════

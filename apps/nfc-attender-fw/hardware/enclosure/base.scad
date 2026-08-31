@@ -162,13 +162,13 @@ module corner_bosses() {
 module pn532_posts() {
   for (p = pn_post_positions())
     translate([p[0], p[1], floor_t - 0.01])
-      pcb_post(pn_post_h + 0.01, pn_hole_d + 3.0, pn_hole_d - 0.6);
+      pcb_post(pn_post_h + 0.01, pn_hole_d + 3.0, cut(pn_hole_d - 0.6));
 }
 
 module breakout_posts() {
   for (p = stb_post_positions())
     translate([p[0], p[1], floor_t - 0.01])
-      pcb_post(stb_standoff_h + 0.01, stb_hole_d + 3.0, stb_hole_d - 0.6);
+      pcb_post(stb_standoff_h + 0.01, stb_hole_d + 3.0, cut(stb_hole_d - 0.6));
 }
 
 // A shallow ring on the floor holding the piezo disc flat, face UP.
@@ -188,10 +188,10 @@ module buzzer_ring() {
     difference() {
       cylinder(h = buz_h * 0.6 + 0.01, d = collar_d);
       translate([0, 0, 1.2])
-        cylinder(h = buz_h, d = buz_d + 2 * 0.3);
+        cylinder(h = buz_h, d = cut(buz_d + 2 * 0.3));
       // Notch so the leads can exit sideways without being pinched.
-      translate([-1.75, 0, 1.2])
-        cube([3.5, collar_d, buz_h]);
+      translate([-cut(3.5) / 2, 0, 1.2])
+        cube([cut(3.5), collar_d, buz_h]);
     }
 }
 
@@ -222,10 +222,10 @@ module wago_bay() {
 module front_wall_cuts() {
   // Display window. Sized from the measured ACTIVE area plus a margin, not
   // from the glass — framing the glass would show the inactive border.
-  translate([ix(oled_pos_x) - oled_win_l / 2,
+  translate([ix(oled_pos_x) - cut(oled_win_l) / 2,
              -0.5,
-             floor_t + oled_z - oled_win_w / 2])
-    cube([oled_win_l, wall_t + 1, oled_win_w]);
+             floor_t + oled_z - cut(oled_win_w) / 2])
+    cube([cut(oled_win_l), wall_t + 1, cut(oled_win_w)]);
 
 }
 
@@ -256,11 +256,13 @@ module back_wall_cuts() {
   // Convection vents. The ESP32 runs warm in a sealed box; these sit high on
   // the back wall where warm air collects.
   translate([ext_x / 2, ext_y - wall_t, floor_t + box_iz - vent_slot_l - 4])
-    vent_slots(vent_slot_n, vent_slot_w, vent_slot_l, vent_slot_gap, wall_t);
+    vent_slots(vent_slot_n, cut(vent_slot_w), vent_slot_l, vent_slot_gap,
+               wall_t);
 
   // Zip-tie slots either side of the bridge.
   translate([ext_x / 2, ext_y - wall_t, floor_t + 2])
-    ziptie_holes(22, 3.5, 6, wall_t);
+    ziptie_holes(ziptie_spacing, cut(ziptie_slot_w), cut(ziptie_slot_h),
+                 wall_t);
 }
 
 // ══ OPTIONAL SIDE-WALL FEATURES ══════════════════════════════════════════
@@ -270,19 +272,19 @@ module back_wall_cuts() {
 module reset_button_hole() {
   translate([ext_x - wall_t - 0.5, ext_y - button_y_offset, floor_t + button_z])
     rotate([0, 90, 0])
-      cylinder(h = wall_t + 1, d = button_hole_d);
+      cylinder(h = wall_t + 1, d = cut(button_hole_d));
 }
 
 module power_switch_hole() {
   translate([ext_x - wall_t - 0.5, ext_y - switch_y_offset, floor_t + switch_z])
     rotate([0, 90, 0])
-      cylinder(h = wall_t + 1, d = switch_hole_d);
+      cylinder(h = wall_t + 1, d = cut(switch_hole_d));
 }
 
 module led_hole() {
   translate([ix(led_x_offset), -0.5, floor_t + led_z])
     rotate([-90, 0, 0])
-      cylinder(h = wall_t + 1, d = led_hole_d);
+      cylinder(h = wall_t + 1, d = cut(led_hole_d));
 }
 
 // ══ UNDERSIDE ════════════════════════════════════════════════════════════
@@ -293,5 +295,5 @@ module foot_recesses() {
   for (x = [foot_inset, ext_x - foot_inset])
     for (y = [foot_inset, ext_y - foot_inset])
       translate([x, y, -0.01])
-        cylinder(h = foot_recess_h, d = foot_d);
+        cylinder(h = foot_recess_h, d = cut(foot_d));
 }

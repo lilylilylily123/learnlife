@@ -71,6 +71,8 @@ Steps 1–3 are independent of each other and of the breakout.
 | `base.scad` | The tray. Holds every module; has the OLED window, USB cutout, vents. |
 | `stand.scad` | 15° wedge cradle the box drops into. Separate, so the tilt is a cheap reprint. |
 | `lid.scad` | Featureless plate. Thin over the antenna, TAP CARD label, screws down. |
+| `retainer.scad` | Two collars that gang each peripheral's four dupont housings into one block. Standalone — clips to the connector, not the box. |
+| `clamp.scad` | External cable saddle. The back-wall zip tie pins the USB cable into its groove. |
 | `assembly.scad` | **Not printable.** Preview of base + lid + mock modules — look at this before booking a printer. |
 | `lib/layout_checks.scad` | Clearance asserts that run on every render. See below. |
 | `export.sh` | Renders every part to `stl/`. `--check` parses without writing. |
@@ -78,11 +80,8 @@ Steps 1–3 are independent of each other and of the breakout.
 | `stl/` | Generated STLs, committed so a makerspace never needs the toolchain. |
 | `docs/measurements.md` | Caliper worksheet — fill in, then copy into `params.scad`. |
 
-Parts still to be written: `retainer.scad` (a bar that stops dupont housings
-backing out of the peripheral headers) and `clamp.scad` (an external cable
-clamp, belt-and-braces over the moulded zip-tie bridge). Neither is needed for a
-working device and neither depends on the breakout board. `export.sh` skips
-them until they exist.
+Every part in the table renders. `export.sh` still skips a missing `.scad`
+silently, so adding a part later needs no change to the script.
 
 ## The layout is checked, not eyeballed
 
@@ -209,15 +208,21 @@ them regardless of what the bare board does.
 
 **Known limit:** this secures the ESP32 end of every wire, not both ends. The
 peripheral end is still a dupont housing on a header pin, which is what the
-printed retainer bar addresses. A soldered perfboard remains strictly more
+printed retainer collars (`retainer.scad`) address. A soldered perfboard
+remains strictly more
 robust — `hardware/production-enclosure-v1` has that design if it's ever worth
 the iron and the hours.
 
 **Fastening is M3 self-tapping screws into printed bosses.** Heat-set brass
 inserts are the better long-term joint, but they need a soldering iron and an
 insert tip. Self-tappers survive dozens of open/close cycles, comfortably more
-than this device's service life. `use_heatset_inserts` in `params.scad` switches
-over if you end up buying an iron anyway.
+than this device's service life.
+
+⚠️ `use_heatset_inserts`, `insert_d` and `insert_depth` are declared in
+`params.scad` but **not yet
+wired**: `base.scad` always makes self-tapper bosses regardless of the flag.
+Switching to inserts today means editing `corner_bosses()`, not flipping the
+flag.
 
 ## Materials
 

@@ -41,14 +41,34 @@ layer_h  = 0.2;             // layer height — lid_t should be a multiple of th
 
 xy_comp  = 0.00;            // [COUPON] global XY size correction.
                             // Print the 20 mm calibration square, measure it.
-                            // If it comes out 20.15, set this to 0.15 and every
-                            // pocket in the design widens to compensate.
+                            // If it comes out 20.15, set this to 0.15.
                             // Positive = printer prints oversize.
+
+// Apply xy_comp to a CUT dimension — a bore diameter, a slot width, an
+// aperture. A printer that prints 0.15 mm oversize leaves every hole 0.15 mm
+// UNDERSIZE, because the surplus material encroaches from both sides, so a cut
+// is modelled xy_comp larger than nominal and comes out on size.
+//
+// WHERE THIS IS USED: cuts whose printed size has to match a physical part or
+// a functional aperture — screw bores into plastic, panel-mount hardware
+// holes, rubber-foot recesses, the piezo seat, vents, sound holes, zip-tie
+// slots, the OLED window, the screw-head counterbore.
+//
+// WHERE IT IS DELIBERATELY NOT USED, and must not be added:
+//   * Outer walls and overall size. The box would grow by the same amount.
+//   * Anything sized from fit_pcb / fit_lip / fit_usb / screw_pilot_d. Those
+//     five numbers are chosen by test-fitting a REAL part into an
+//     UNCOMPENSATED printed coupon, so they already contain the printer's
+//     offset. Adding xy_comp on top would loosen every one of those fits by
+//     exactly xy_comp — a snug drop-in becomes a rattle.
+function cut(d) = d + xy_comp;
 
 fit_pcb  = 0.35;            // [COUPON] per-side clearance around any PCB in a pocket
 fit_lip  = 0.25;            // [COUPON] lid lip <-> base groove clearance
 fit_usb  = 0.60;            // [COUPON] clearance around the USB-C connector opening
-fit_post = 0.20;            // [COUPON] clearance on screw-post outer diameters
+fit_post = 0.20;            // [COUPON] clearance on screw-post outer diameters.
+                            // Declared for a future press-fit post variant;
+                            // nothing consumes it yet.
 
 screw_pilot_d = 2.5;        // [COUPON] pilot hole for an M3 self-tapping screw.
                             // Too big = strips, too small = splits the boss.
@@ -370,10 +390,38 @@ sound_hole_n = 4;           // grid is n x n, cut through the LID above
                             // the buzzer (see buz_pos_*)
 sound_hole_pitch = 3.2;
 
-// ── Cable ──
+// ── Cable / strain relief ──
 cable_od = 4.0;             // [MEASURE] USB cable outer diameter, for the
                             // strain-relief clamp groove
 
+// Back-wall zip-tie slots. Cut by base.scad, and clamp.scad has to sit
+// between the two runs of the tie that passes through them, so both files
+// read these rather than repeating literals.
+ziptie_spacing = 22.0;      // centre-to-centre of the two slots
+ziptie_slot_w  = 3.5;       // passes a standard 3.6 mm wide tie
+ziptie_slot_h  = 6.0;
+
+// External cable clamp (clamp.scad). A saddle that sits on the OUTSIDE of the
+// back wall; the same tie that runs through the two slots crosses it and pins
+// the cable into its groove, so a tug loads the box and not the USB socket.
+clamp_back_t = 2.0;         // material behind the cable groove
+clamp_h      = 20.0;        // cable length the saddle supports
+clamp_ear    = 3.0;         // material each side of the cable groove
+
+// Dupont retainer collars (retainer.scad). A collar that slides over a row of
+// individual dupont housings and gangs them into one block, so no single one
+// can walk off its header pin. Standalone — it does not touch the enclosure,
+// which is why it needs nothing from the bench layout.
+dupont_pitch     = 2.54;    // header pitch, fixed by the connector standard
+dupont_n         = 4;       // pins per peripheral: VCC, GND, SDA, SCL
+dupont_housing_w = 2.60;    // [MEASURE] one housing across the row. Standard
+                            // moulding is ~2.54-2.6; clones vary.
+dupont_housing_d = 2.60;    // [MEASURE] housing depth, normal to the row
+retainer_grip_h  = 6.0;     // how much of the housing height the collar grips
+retainer_wall_t  = 1.6;     // collar wall — 4 perimeters at a 0.4 nozzle
+retainer_grip    = -0.10;   // per-side interference. NEGATIVE on purpose: the
+                            // collar must grip, not drop off. Loosen toward 0
+                            // if it will not push on by hand.
 
 // ══ LID GRAPHICS ═════════════════════════════════════════════════════════
 // Harvested from the production-enclosure-v1 branch, which had these right.

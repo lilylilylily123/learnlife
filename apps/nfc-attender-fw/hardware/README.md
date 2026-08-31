@@ -134,8 +134,11 @@ Three that get botched most often:
 
 ### 3. Print the test pieces
 
-`antenna_tiles.stl` first (sets lid thickness), then `coupon.stl` (sets five
-tolerance parameters). Both are described in
+`coupon.stl` — it sets five tolerance parameters and is the only test print
+the enclosure actually depends on. `antenna_tiles.stl` is an **optional
+diagnostic**: the stacked layout already puts the card 3.8 mm from the coil,
+and deleting the lid pocket entirely only reaches 5.8 mm, so print it only if
+read range disappoints once assembled. Both are described in
 [`enclosure/README.md`](enclosure/README.md). Neither needs measurements.
 
 ### 4. Bench-test the new module set
@@ -164,7 +167,8 @@ into the front-wall pocket → buzzer into its chimney.
 
 Per the table above. **Keep wires clear of the antenna footprint** — a
 conductive path close and parallel to the coil detunes it. Fit the dupont
-retainer bar.
+retainer collars (`enclosure/stl/retainer.stl`) — push one over each
+peripheral's four housings so they lift as a block, not one at a time.
 
 ### 8. Provision
 
@@ -182,8 +186,9 @@ confirm all three land in PocketBase.**
 
 ### 10. Close up
 
-Four screws → strain-relief clamp and zip tie → seat in the stand → feet →
-label the box.
+Four screws → cable into the external clamp (`enclosure/stl/clamp.stl`), zip
+tie through the two back-wall slots and over the clamp → seat in the stand →
+feet → label the box.
 
 ### 11. Register the device
 
