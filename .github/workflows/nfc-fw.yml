@@ -104,11 +104,12 @@ jobs:
       - name: Build firmware
         run: pio run -e esp32dev
 
-      # Image size is a live constraint, not trivia. The build is ~1.04 MB
-      # against a 1.25 MB app slot on the default partition table — 83% full —
-      # and OTA support needs two app slots. Once a custom partitions.csv
-      # lands, `pio run` fails by itself when the image outgrows the slot, so
-      # this step doubles as an early-warning trend line before that point.
+      # Image size is a live constraint, not trivia. hardware/partitions.csv
+      # gives two 1536 KB app slots (OTA needs two, and they must be equal), so
+      # `pio run` already fails on its own if the image outgrows a slot. This
+      # step is the early-warning trend line ahead of that hard wall: it warns
+      # at 85% and fails at 95%, which leaves room for an OTA image that is
+      # slightly larger than the one currently running.
       - name: Report image size
         run: |
           BIN=.pio/build/esp32dev/firmware.bin
@@ -163,6 +164,13 @@ jobs:
       # references a parameter that no longer exists. A non-manifold part
       # slices into garbage, and finding that out at the makerspace instead of
       # in CI costs a booking.
+      #
+      # `--check` also fails when stl/PARAMS.sha256 disagrees with
+      # params.scad, i.e. when the committed STLs were exported from different
+      # parameters than the ones in the tree. It is a hash rather than a mesh
+      # comparison on purpose: this runner has OpenSCAD 2021.01 while local
+      # machines have a 2026 snapshot, and binary STL is not reproducible
+      # across them. Fix by running ./export.sh locally and committing stl/.
       - name: Install OpenSCAD
         run: |
           sudo apt-get update -qq

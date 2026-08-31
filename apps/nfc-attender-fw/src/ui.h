@@ -20,6 +20,9 @@ enum class Event {
   AlreadyIn,      // already checked in, day still in progress (no checkout yet)
   ScanLocked,     // 14:00–17:00 reject (state machine returned Locked)
   UnknownCard,
+  ScanBusy,       // scan queue full — the tap was NOT recorded, tap again.
+                  // Never silent: a learner who gets no feedback walks away
+                  // believing they signed in.
   WaitingClock,   // tapped before NTP set the clock — nothing was recorded.
                   // Without a DS3231 the device boots believing it is 1970,
                   // and 10:01 is the present/late boundary, so acting on an

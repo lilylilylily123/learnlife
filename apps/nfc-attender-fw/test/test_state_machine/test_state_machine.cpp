@@ -54,6 +54,8 @@ void test_check_in_present_at_9am() {
   TEST_ASSERT_EQUAL(static_cast<int>(Status::Present),
                     static_cast<int>(action.status));
   TEST_ASSERT_TRUE(!action.time_in_iso.empty());
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Present),
+                    static_cast<int>(action.arrival));
 }
 
 // 10:01 AM, no prior state → CheckIn, status = Late.
@@ -66,6 +68,51 @@ void test_check_in_late_at_1001() {
   TEST_ASSERT_EQUAL(static_cast<int>(ActionType::CheckIn),
                     static_cast<int>(action.type));
   TEST_ASSERT_EQUAL(static_cast<int>(Status::Late),
+                    static_cast<int>(action.status));
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Late),
+                    static_cast<int>(action.arrival));
+}
+
+// A learner a guide excused (jAbsent) who then taps in late keeps the
+// justified flag: arrival = late, status = jLate. attendance.ts:144-149.
+void test_check_in_inherits_jabsent_excusal() {
+  AttendanceState state;
+  state.status = Status::JAbsent;
+  auto now = make_local(2026, 4, 8, 10, 30);
+  auto action = compute_check_in_action(state, now, to_unix(now));
+
+  TEST_ASSERT_EQUAL(static_cast<int>(ActionType::CheckIn),
+                    static_cast<int>(action.type));
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Late),
+                    static_cast<int>(action.arrival));
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::JLate),
+                    static_cast<int>(action.status));
+}
+
+// Same for a prior jLate.
+void test_check_in_inherits_jlate_excusal() {
+  AttendanceState state;
+  state.status = Status::JLate;
+  auto now = make_local(2026, 4, 8, 10, 30);
+  auto action = compute_check_in_action(state, now, to_unix(now));
+
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Late),
+                    static_cast<int>(action.arrival));
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::JLate),
+                    static_cast<int>(action.status));
+}
+
+// Present is never justified: an excused learner arriving on time is plain
+// present, not "jPresent" (there is no such status). attendance.ts:16-17.
+void test_check_in_on_time_drops_excusal() {
+  AttendanceState state;
+  state.status = Status::JAbsent;
+  auto now = make_local(2026, 4, 8, 9, 0);
+  auto action = compute_check_in_action(state, now, to_unix(now));
+
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Present),
+                    static_cast<int>(action.arrival));
+  TEST_ASSERT_EQUAL(static_cast<int>(Status::Present),
                     static_cast<int>(action.status));
 }
 
@@ -225,6 +272,9 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_check_in_present_at_9am);
   RUN_TEST(test_check_in_late_at_1001);
+  RUN_TEST(test_check_in_inherits_jabsent_excusal);
+  RUN_TEST(test_check_in_inherits_jlate_excusal);
+  RUN_TEST(test_check_in_on_time_drops_excusal);
   RUN_TEST(test_no_action_when_already_checked_in_midmorning);
   RUN_TEST(test_lunch_out_at_1pm);
   RUN_TEST(test_lunch_in_after_out);

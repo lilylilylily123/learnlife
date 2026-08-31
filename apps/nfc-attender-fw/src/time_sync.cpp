@@ -7,8 +7,10 @@
 
 namespace llattender::time_sync {
 
-// TODO: DS3231 + NTP. For now use the ESP32's internal clock so the rest of
-// the firmware has a working timebase from the moment NTP first succeeds.
+// Timebase is NTP over WiFi plus the ESP32's internal clock. There is
+// deliberately no DS3231 fitted (README.md "Hardware — not fitted"; the clock
+// gate in clock_gate.h covers the boot window instead, by refusing to record
+// taps until the clock is trustworthy).
 
 namespace {
 int g_override_hour = -1;
@@ -37,7 +39,7 @@ bool init() {
   //   ends last Sun of October at 03:00.
   setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", /*overwrite=*/1);
   tzset();
-  Serial.println("[time] init (TZ=Europe/Madrid; RTC stub)");
+  Serial.println("[time] init (TZ=Europe/Madrid)");
   return true;
 }
 

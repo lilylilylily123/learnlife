@@ -56,6 +56,8 @@ const char* verdict_for(Event ev) {
     case Event::AlreadyIn:      return "Already in";
     case Event::ScanLocked:     return "Locked";
     case Event::UnknownCard:    return "Unknown card";
+    // ASCII only: the SSD1306 classic font has no em dash.
+    case Event::ScanBusy:       return "Busy - tap again";
     case Event::WaitingClock:   return "No clock yet";
     default:                    return "";
   }
@@ -258,12 +260,16 @@ void render_action() {
   g_oled.display();
 }
 
+// Shared by UnknownCard and ScanBusy: both are "nothing was recorded"
+// verdicts with no learner name, so they use one render path and are told
+// apart by g_st.last_action.
 void render_unknown() {
+  const bool busy = g_st.last_action == Event::ScanBusy;
   g_oled.clearDisplay();
   g_oled.setTextColor(SSD1306_WHITE);
-  draw_centered("?", 0, 4);
-  draw_centered("Unknown card", 44, 1);
-  draw_centered("Card not in roster", 56, 1);
+  draw_centered(busy ? "!" : "?", 0, 4);
+  draw_centered(verdict_for(busy ? Event::ScanBusy : Event::UnknownCard), 44, 1);
+  draw_centered(busy ? "Not recorded - retry" : "Card not in roster", 56, 1);
   render_overlay();
   g_oled.display();
 }
@@ -323,7 +329,10 @@ void show(Event ev, const char* learner_name) {
       break;
 
     case Event::UnknownCard:
+    case Event::ScanBusy:
       g_st.mode = Mode::Unknown;
+      // render_unknown() reads this to pick its label.
+      g_st.last_action = ev;
       g_st.mode_until_ms = millis() + kFeedbackMs;
       g_st.queued_offline = false;
       break;

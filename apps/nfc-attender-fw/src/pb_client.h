@@ -110,6 +110,14 @@ bool ensure_today_row(const std::string& learner_id,
                       const std::string& date_yyyy_mm_dd,
                       AttendanceRow& out, bool& created);
 
+// Cache-only lookup of today's row. Returns false on a miss and performs NO
+// network I/O — safe to call from processor_task, which must never block on
+// TLS. A miss means no row existed server-side as of the last delta poll
+// (<=30 s old); network_task creates it during drain.
+bool lookup_today_row(const std::string& learner_id,
+                      const std::string& date_yyyy_mm_dd,
+                      AttendanceRow& out);
+
 // PATCH an existing attendance row with the fields produced by the state
 // machine. `fields_json` is a serialised object like {"time_in":"…","status":"present"}.
 bool patch_attendance(const std::string& attendance_id,

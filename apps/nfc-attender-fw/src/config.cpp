@@ -15,8 +15,11 @@
 
 namespace llattender::config {
 
-// TODO: full captive portal. For now load/save round-trips through Preferences
-// so wiring through main.cpp works.
+// Config is persisted in NVS via Preferences under the "llattender" namespace,
+// so it survives a repartition (nvs keeps its offset — see
+// hardware/partitions.csv). Provisioning is the captive portal in
+// run_web_provisioning() below, with run_serial_provisioning_fallback() as the
+// bring-up escape hatch.
 
 namespace {
 constexpr const char* kNs = "llattender";
@@ -267,10 +270,27 @@ bool run_serial_provisioning_fallback() {
   if (!url.empty()) c.pb_url = url;
   c.pb_email    = read_line("PB device email: ");
   c.pb_password = read_line("PB device password: ");
+
+  // The serial path is the bring-up escape hatch, so it is exactly when a
+  // permanently USB-only device hurts most. Without these two the unit gets
+  // ota::init bailing out ("no OTA password provisioned") and its hostname
+  // degrading to ll-attender-unknown — recoverable only by re-provisioning.
+  // Mirrors the same two lines in run_web_provisioning()'s /save handler.
+  if (c.device_id.empty()) c.device_id = derive_device_id();
+  if (c.ota_password.empty()) c.ota_password = random_password(12);
+
   if (!save(c)) {
     Serial.println("[config] save failed");
     return false;
   }
+
+  // The serial path's equivalent of the web confirmation page, and the only
+  // time the OTA password is ever displayed.
+  Serial.println("[config] ── WRITE THESE DOWN — shown only once ──");
+  Serial.printf("[config] OTA host:     ll-attender-%s.local\n",
+                c.device_id.c_str());
+  Serial.printf("[config] OTA password: %s\n", c.ota_password.c_str());
+  Serial.println("[config] ─────────────────────────────────────────");
   Serial.println("[config] saved — rebooting");
   delay(500);
   ESP.restart();

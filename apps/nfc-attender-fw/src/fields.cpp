@@ -65,6 +65,7 @@ std::string serialize_action(const CheckInAction& action) {
     case ActionType::CheckIn: {
       body += '{';
       emit_kv_string(body, "time_in", action.time_in_iso, /*first=*/true);
+      emit_kv_string(body, "arrival", status_to_str(action.arrival), /*first=*/false);
       emit_kv_string(body, "status", status_to_str(action.status), /*first=*/false);
       body += '}';
       return body;

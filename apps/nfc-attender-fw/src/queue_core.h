@@ -29,15 +29,21 @@
 
 namespace llattender::queue_core {
 
-// Caps. Reached only if the device is offline for a long stretch; at ~61
-// learners with a handful of taps each, a normal day is well under 200
-// entries and roughly 20 KB.
+// Caps. Reached only if the device is offline for a long stretch; at ~80
+// learners with up to five taps each (check-in, lunch out/in, late return,
+// check-out) a fully offline day is ~400 entries. A v1 line is ~120-200 B
+// (queue_format.h), so 400 entries is ~64 KB.
 //
-// LittleFS on the default partition has ~1.4 MB, so these are conservative on
-// purpose: the queue must never be the thing that fills the filesystem and
+// LittleFS is 0xe0000 = 896 KB under hardware/partitions.csv, so 64 KB is
+// ~7% of it: the queue must never be the thing that fills the filesystem and
 // takes the roster cache down with it.
-constexpr size_t kMaxEntries = 200;
-constexpr size_t kMaxBytes = 32 * 1024;
+//
+// The whole queue is RAM-resident (Queue::entries_), so 400 entries is ~80 KB
+// of heap in the worst case. That peak is reachable only while OFFLINE, when
+// no WiFiClientSecure is allocated, so it does not stack with the ~40 KB TLS
+// handshake peak. Confirm with the `heap` console command during the soak.
+constexpr size_t kMaxEntries = 400;
+constexpr size_t kMaxBytes = 64 * 1024;
 
 // The writer attempts one PocketBase write and reports what happened.
 using Writer = std::function<WriteOutcome(const queue::PendingScan&)>;

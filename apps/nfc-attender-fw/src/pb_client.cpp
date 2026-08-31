@@ -117,6 +117,11 @@ void persist_today_cache() {
   doc["date"] = g_today_date;
   auto items = doc["items"].to<JsonObject>();
   for (auto& kv : g_today_rows) {
+    // Skip provisional rows (empty `id`): they were inserted by
+    // update_today_cache_after_action on a cache miss and have no
+    // server-side row behind them yet. A mid-day reboot must re-derive them
+    // from the server prefetch rather than trust a rowless entry.
+    if (kv.second.id.empty()) continue;
     auto o = items[kv.first].to<JsonObject>();
     o["id"]                = kv.second.id;
     o["learner_id"]        = kv.second.learner_id;
@@ -523,6 +528,17 @@ bool fetch_roster(std::vector<LearnerRow>& out) {
   return true;
 }
 
+bool lookup_today_row(const std::string& learner_id,
+                      const std::string& date,
+                      AttendanceRow& out) {
+  Lock lk;
+  reset_cache_if_new_day(date);
+  auto cached = g_today_rows.find(learner_id);
+  if (cached == g_today_rows.end()) return false;
+  out = cached->second;
+  return true;
+}
+
 bool ensure_today_row(const std::string& learner_id,
                       const std::string& date,
                       AttendanceRow& out, bool& created) {
@@ -535,7 +551,12 @@ bool ensure_today_row(const std::string& learner_id,
 
   reset_cache_if_new_day(date);
   auto cached = g_today_rows.find(learner_id);
-  if (cached != g_today_rows.end()) {
+  // A provisional entry (empty `id`, inserted by
+  // update_today_cache_after_action on a cache miss) is a local prediction
+  // with no server row behind it. Both callers — the queue drain and the `w`
+  // console command — need a real record id, so fall through to the GET/POST
+  // and let the authoritative row replace the prediction.
+  if (cached != g_today_rows.end() && !cached->second.id.empty()) {
     out = cached->second;
     return true;
   }
@@ -596,7 +617,18 @@ void update_today_cache_after_action(const std::string& learner_id,
                                      const CheckInAction& action) {
   Lock lk;
   auto it = g_today_rows.find(learner_id);
-  if (it == g_today_rows.end()) return;  // nothing cached yet
+  if (it == g_today_rows.end()) {
+    // With the cache-only tap path (processor_task no longer calls
+    // ensure_today_row), a miss is the *normal* first-tap-of-the-day case.
+    // Insert a provisional row — no server `id` yet — so the learner's second
+    // tap reads the predicted post-action state instead of re-missing, running
+    // the state machine on an empty state and queueing a duplicate check-in.
+    // network_task fills in the real id when it drains the entry.
+    AttendanceRow fresh;
+    fresh.learner_id = learner_id;
+    fresh.date = g_today_date;
+    it = g_today_rows.emplace(learner_id, std::move(fresh)).first;
+  }
   AttendanceRow& row = it->second;
   switch (action.type) {
     case ActionType::CheckIn:

@@ -1,12 +1,19 @@
 // LearnLife NFC Attender — firmware bootstrap.
 //
 // setup() initialises every subsystem via its module header. loop() stays
-// empty; the real work runs in pinned FreeRTOS tasks so the NFC reader
-// keeps responding even when the network task is blocked on TLS.
+// empty; the real work runs in four pinned FreeRTOS tasks so the NFC reader
+// keeps responding even when the network task is blocked on TLS:
 //
-// Phase-1 wiring: the per-scan path is connected end-to-end, but the network
-// task currently logs and discards writes — pb_client and roster are stubs
-// until phases 2-3.
+//   nfc  (core 0, prio 5)  poll the PN532, debounce, emit UIDs
+//   proc (core 1, prio 4)  UID -> learner, clock gate, state machine, enqueue
+//   ui   (core 1, prio 3)  drive the OLED and buzzer
+//   net  (core 0, prio 3)  WiFi, NTP, PocketBase, OTA, queue drain
+//
+// The tap path never touches the network: proc reads the today-cache only
+// (pb_client::lookup_today_row) and appends to the durable queue, and net
+// creates rows, recomputes cache-miss entries against the authoritative row,
+// and PATCHes. That split is what keeps ~80 morning check-ins from serialising
+// behind one TLS handshake each.
 
 #ifndef LLATTENDER_NATIVE_BUILD
 
@@ -32,6 +39,7 @@
 #include "state_machine.h"
 #include "time_sync.h"
 #include "ui.h"
+#include "version.h"
 
 namespace {
 
@@ -96,7 +104,13 @@ ui::Event ui_event_for_action(const llattender::CheckInAction& a) {
     if (nfc::poll_uid(uid)) {
       ScanMsg m{};
       std::strncpy(m.uid_hex, uid.c_str(), sizeof(m.uid_hex) - 1);
-      xQueueSend(g_scan_q, &m, 0);
+      // Never drop a tap silently. Timeout stays 0 — nfc_task must keep
+      // polling the reader — but the learner has to be told, or they walk
+      // away believing they signed in.
+      if (xQueueSend(g_scan_q, &m, 0) != pdTRUE) {
+        Serial.println("[nfc] scan queue full — tap dropped");
+        post_ui(ui::Event::ScanBusy);
+      }
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
@@ -156,20 +170,19 @@ std::string format_yyyy_mm_dd(const std::tm& t) {
     auto now_unix = time_sync::now_unix();
     const std::string today = format_yyyy_mm_dd(now_local);
 
-    // Pull today's row from PocketBase so the state machine sees the real
-    // history (existing time_in, lunch_events, etc.). Synchronous TLS call
-    // adds ~1s of latency per scan — acceptable for phase 2; phase 3 swaps
-    // this for an on-disk snapshot refreshed by the network task.
+    // Cache-only. processor_task must never block on TLS: at ~80 learners the
+    // morning rush is ~80 consecutive cache misses, and a synchronous
+    // handshake per tap (a GET plus a POST, ~2 s) would overrun the scan
+    // queue and drop taps silently. A miss runs the state machine on an empty
+    // state — correct for a first tap of the day — and network_task creates
+    // the row during drain, where it also recomputes the action against the
+    // authoritative row (see the empty attendance_id branch below).
     pb_client::AttendanceRow row;
-    bool created = false;
     AttendanceState state;
     bool have_state = false;
-    if (WiFi.status() == WL_CONNECTED &&
-        pb_client::ensure_today_row(learner->id, today, row, created)) {
+    if (pb_client::lookup_today_row(learner->id, today, row)) {
       attendance_adapter::state_from_row(row, state);
       have_state = true;
-    } else {
-      Serial.println("[proc] offline — running state machine on empty state");
     }
 
     auto action = compute_check_in_action(state, now_local, now_unix);
@@ -326,12 +339,23 @@ constexpr int64_t kNtpRetryMs = 30000;
 
     if (online && queue::size() > 0) {
       queue::drain_ex([](const queue::PendingScan& s) -> WriteOutcome {
-        // Online scans already carry an attendance_id (populated by
-        // processor_task). Offline scans don't — for those we ensure the row
-        // exists before patching. Either way, only the patch fields are taken
-        // from the queued entry; the local state machine already produced
-        // them and the row's other fields stay untouched.
+        // Entries queued against a warm cache already carry an
+        // attendance_id and replay their original fields unchanged — those
+        // were computed against the authoritative row and are correct.
+        //
+        // Entries with no attendance_id were computed on a cache MISS, i.e.
+        // against an empty state, so they cannot have seen an excusal
+        // (jLate/jAbsent inheritance) or a time_in written by another client.
+        // For those we ensure the row exists and then recompute.
         std::string id = s.attendance_id;
+        std::string fields_json = s.fields_json;
+        // Set only on the recompute path. The cache must NOT be updated
+        // until the PATCH actually lands: an optimistic update followed by a
+        // RetryLater would leave the cache claiming a time_in that was never
+        // written, and the retry would then recompute to NoAction and DROP
+        // the check-in.
+        bool have_recomputed = false;
+        CheckInAction recomputed_action;
         if (id.empty()) {
           // Re-derive today from ts_unix so a queued entry that survives a
           // midnight rollover still hits its original date.
@@ -349,13 +373,33 @@ constexpr int64_t kNtpRetryMs = 30000;
             return WriteOutcome::RetryLater;
           }
           id = row.id;
+
+          // Recompute against the authoritative row rather than replaying
+          // fields computed from an empty state. This is what makes the
+          // jLate/jAbsent inheritance correct on a cold cache, and it drops a
+          // check-in whose precondition no longer holds instead of
+          // overwriting an existing time_in.
+          AttendanceState authoritative;
+          attendance_adapter::state_from_row(row, authoritative);
+          const auto recomputed =
+              compute_check_in_action(authoritative, tm, s.ts_unix);
+          if (recomputed.type == ActionType::NoAction ||
+              recomputed.type == ActionType::Locked) {
+            Serial.printf("[net] scan for learner %s no longer applicable — "
+                          "dropping\n", s.learner_id.c_str());
+            // Ok: drop the entry, nothing to write.
+            return WriteOutcome::Ok;
+          }
+          fields_json = fields::serialize_action(recomputed);
+          recomputed_action = recomputed;
+          have_recomputed = true;
         }
 
         // Classify by HTTP status rather than a bare bool. A 404 means the row
         // was deleted server-side and no number of retries will change that —
         // and because a failed drain stops at the head of the queue, retrying
         // it forever would block every scan queued behind it.
-        const int code = pb_client::patch_attendance_status(id, s.fields_json);
+        const int code = pb_client::patch_attendance_status(id, fields_json);
         if (code == 401) {
           // Token rejected. Drop it so the next cycle logs in again rather
           // than replaying a credential the server has already refused. The
@@ -364,6 +408,14 @@ constexpr int64_t kNtpRetryMs = 30000;
           pb_client::clear_token();
         }
         const WriteOutcome outcome = classify_http_status(code);
+        if (outcome == WriteOutcome::Ok && have_recomputed) {
+          // Now that the write has landed, fold the recomputed mutations onto
+          // the authoritative cache entry ensure_today_row installed, so a
+          // follow-up tap by this learner reads real state instead of a blank
+          // row.
+          pb_client::update_today_cache_after_action(s.learner_id,
+                                                    recomputed_action);
+        }
         if (outcome == WriteOutcome::PermanentFail) {
           Serial.printf("[net] giving up on scan for learner %s (HTTP %d) — "
                         "moved to dead-letter file\n",
@@ -433,11 +485,15 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[boot] LearnLife NFC Attender starting");
-  Serial.printf("[boot] build %s %s\n", __DATE__, __TIME__);
+  Serial.printf("[boot] version %s (build %s %s)\n",
+                llattender::kFirmwareVersion, __DATE__, __TIME__);
   Serial.printf("[boot] reset reason: %s\n",
                 reset_reason_str(esp_reset_reason()));
 
-  g_scan_q = xQueueCreate(8, sizeof(ScanMsg));
+  // 32 deep, not 8: the morning arrival rush at ~80 learners can burst faster
+  // than processor_task runs the state machine. ScanMsg is 24 B, so this
+  // costs well under 1 KB and absorbs the burst instead of dropping taps.
+  g_scan_q = xQueueCreate(32, sizeof(ScanMsg));
   g_ui_q = xQueueCreate(16, sizeof(UiMsg));
   g_flush_signal = xQueueCreate(4, sizeof(int64_t));
 
@@ -461,7 +517,6 @@ void setup() {
   if (!config::is_provisioned()) {
     post_ui(ui::Event::Boot, "Setup mode");
     config::run_provisioning();
-    // TODO: once provisioning is implemented this branch will reboot.
   }
 
   if (!nfc::init()) {
@@ -520,6 +575,7 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   q                queue depth + pending entries");
     Serial.println("[cli]   r                roster size + age");
     Serial.println("[cli]   ota              OTA hostname + upload command");
+    Serial.println("[cli]   v                firmware version + device identity");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
     Serial.println("[cli]   wifi <ssid>|<pw> update saved WiFi creds + reboot");
     Serial.println("[cli]   ?                this help");
@@ -559,6 +615,17 @@ void handle_console_line(const std::string& line) {
                   static_cast<unsigned>(ESP.getFreeHeap()),
                   static_cast<unsigned>(esp_get_minimum_free_heap_size()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    return;
+  }
+  if (line == "v") {
+    llattender::config::DeviceConfig c;
+    llattender::config::load(c);
+    Serial.printf("[cli] version %s (build %s %s)\n",
+                  llattender::kFirmwareVersion, __DATE__, __TIME__);
+    Serial.printf("[cli] device id: %s  name: %s\n",
+                  c.device_id.empty() ? "-" : c.device_id.c_str(),
+                  c.device_name.empty() ? "-" : c.device_name.c_str());
+    Serial.printf("[cli] pb url: %s\n", c.pb_url.c_str());
     return;
   }
   if (line == "ota") {

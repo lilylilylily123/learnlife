@@ -136,6 +136,23 @@ The interval is derived, not chosen: PocketHost allows **1000 requests/hour per
 IP**, and both devices plus the dashboard share the school's NAT. At 10 s that
 would be 720/h idle — 72% of budget. At 30 s it's 240/h.
 
+#### Request budget at ~80 learners, two terminals
+
+| Source | Requests/hour |
+|---|---|
+| Delta sync, 30 s, both devices, always on | 240 |
+| Morning rush: ~80 first taps × (GET + POST + PATCH) | ~240, in the arrival hour |
+| Lunch window: ~80 × 2 taps, cache hit + PATCH | ~160 |
+| Dashboard | negligible — realtime SSE, one long-lived connection, not polling |
+
+**Peak is the arrival hour at ~500/hour against 1000** — about 2× headroom.
+That headroom is the binding constraint on a third terminal, which would add
+120/h of delta sync plus its own share of taps. **Raise `kDeltaPollMs`
+(`main.cpp`) to 60000 before adding one.**
+
+Check the real figure in PocketBase → Settings → Logs after the first live
+morning. Expect ~500; investigate above ~800.
+
 ---
 
 ## Serial console
@@ -151,6 +168,7 @@ would be 720/h idle — 72% of budget. At 30 s it's 240/h.
 | `r` | Roster size and age |
 | `heap` | Free / minimum-ever / largest-block heap |
 | `ota` | OTA hostname and upload command |
+| `v` | Firmware version, build stamp, device id/name, PocketBase URL |
 | `w` | Wipe today's PocketBase row for the last-scanned learner |
 | `wifi <ssid>\|<pw>` | Update WiFi credentials and reboot |
 | `RESET` (within 2 s of boot) | Wipe NVS and re-enter provisioning |
@@ -163,7 +181,7 @@ across several 30 s polls. If it stops falling, memory is stable.
 ## Testing
 
 ```bash
-pio test -e native        # all 130
+pio test -e native        # all 134
 pio test -e native -f test_queue_core
 ```
 
@@ -205,6 +223,44 @@ It **cannot** be done over the air.
 offset so provisioning survives, but `/queue.jsonl` does not — **bring the
 device online and confirm `q` reports 0 pending before reflashing a unit that
 has been in service.**
+
+### Factory image — reflashing without the PlatformIO project
+
+CI publishes only `firmware.bin` + `firmware.elf`, which is **not** enough to
+flash a virgin board: the bootloader and the partition table have to be laid
+down too. Merge the four images into one file so a unit can be recovered from
+a machine that has nothing but `esptool.py`:
+
+```bash
+pio run -e esp32dev
+
+ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
+BOOT_APP0=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
+BUILD=.pio/build/esp32dev
+
+python3 "$ESPTOOL" --chip esp32 merge_bin -o factory-1.0.0.bin \
+    --flash_mode dio --flash_freq 40m --flash_size 4MB \
+    0x1000  "$BUILD/bootloader.bin" \
+    0x8000  "$BUILD/partitions.bin" \
+    0xe000  "$BOOT_APP0" \
+    0x10000 "$BUILD/firmware.bin"
+
+# Flash it:
+python3 "$ESPTOOL" --chip esp32 --port /dev/cu.usbserial-XXXX \
+    write_flash 0x0 factory-1.0.0.bin
+```
+
+`merge_bin` writes a single image starting at offset `0x0`, so `write_flash`
+takes **`0x0`**, not `0x1000`.
+
+⚠️ Flashing a factory image **erases NVS**: provisioning is lost and the unit
+re-enters setup mode. `pio run -t upload` preserves NVS — prefer it for a
+device already in service.
+
+The four offsets and `--flash_freq` are taken from what PlatformIO itself
+would use. Re-confirm with `pio run -e esp32dev -v` (it prints the exact
+`write_flash` argument list) if the board or framework version changes;
+`40m` is the DevKit V1 default.
 
 ### Provisioning
 
