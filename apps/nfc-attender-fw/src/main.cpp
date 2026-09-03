@@ -503,7 +503,16 @@ void setup() {
   } else {
     Serial.println("[fs] LittleFS mounted");
   }
+  // Before ui::init(), because the first Wire.begin() hands SDA/SCL to the
+  // I2C peripheral and enables the internal pull-ups, which would mask the
+  // external ones this is measuring.
+  nfc::probe_i2c_lines();
   ui::init();
+  // Bus inventory here, not inside nfc::init(): run_provisioning() below never
+  // returns on an unprovisioned unit, so anything printed after it is invisible
+  // on exactly the devices being set up for the first time. ui::init() has
+  // already brought Wire up.
+  nfc::scan_i2c();
   buzzer::init();
   time_sync::init();
 
@@ -541,8 +550,14 @@ void setup() {
   // than only after the next tap.
   ui::set_pending_count(queue::size());
 
+  // Bracketed deliberately: a marginal supply dies inside WiFi.mode() when the
+  // RF front-end powers up, long before any frame is sent. Without a line on
+  // each side of it, that failure is indistinguishable from a WiFi problem.
+  Serial.println("[wifi] powering radio");
   WiFi.mode(WIFI_STA);
+  Serial.println("[wifi] radio up");
   if (!cfg.wifi_ssid.empty()) {
+    Serial.printf("[wifi] associating with '%s'\n", cfg.wifi_ssid.c_str());
     WiFi.begin(cfg.wifi_ssid.c_str(), cfg.wifi_pw.c_str());
   }
   // Must happen before any task starts: pb_client's token, config snapshot and
@@ -572,8 +587,10 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   t off            clear override");
     Serial.println("[cli]   c                clear local today-cache");
     Serial.println("[cli]   heap             free / min-ever / largest block");
+    Serial.println("[cli]   i2c              scan the I2C bus for devices");
     Serial.println("[cli]   q                queue depth + pending entries");
-    Serial.println("[cli]   r                roster size + age");
+    Serial.println("[cli]   r                roster size + age + first entries");
+    Serial.println("[cli]   tap <uid>        inject a scan as if a card were read");
     Serial.println("[cli]   ota              OTA hostname + upload command");
     Serial.println("[cli]   v                firmware version + device identity");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
@@ -617,6 +634,10 @@ void handle_console_line(const std::string& line) {
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
     return;
   }
+  if (line == "i2c") {
+    llattender::nfc::scan_i2c();
+    return;
+  }
   if (line == "v") {
     llattender::config::DeviceConfig c;
     llattender::config::load(c);
@@ -657,6 +678,27 @@ void handle_console_line(const std::string& line) {
                     n, static_cast<long>(age),
                     llattender::roster::ready() ? "ready" : "NOT ready");
     }
+    llattender::roster::debug_dump();
+    return;
+  }
+  if (line.rfind("tap ", 0) == 0) {
+    // Push onto g_scan_q exactly as nfc_task does, so the injected scan takes
+    // the identical path: roster lookup, clock gate, state machine, queue,
+    // then network. The reader is the only part of the system this bypasses,
+    // which is what makes it useful while the hardware is broken.
+    std::string uid = line.substr(4);
+    while (!uid.empty() && uid.back() == ' ') uid.pop_back();
+    if (uid.empty() || uid.size() >= sizeof(ScanMsg::uid_hex)) {
+      Serial.println("[cli] usage: tap <uid-hex>  (see `r` for known UIDs)");
+      return;
+    }
+    ScanMsg m{};
+    std::strncpy(m.uid_hex, uid.c_str(), sizeof(m.uid_hex) - 1);
+    if (xQueueSend(g_scan_q, &m, 0) != pdTRUE) {
+      Serial.println("[cli] scan queue full — try again");
+      return;
+    }
+    Serial.printf("[cli] injected tap uid=%s\n", uid.c_str());
     return;
   }
   if (line == "c") {

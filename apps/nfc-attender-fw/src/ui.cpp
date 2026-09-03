@@ -292,8 +292,20 @@ void redraw() {
 
 bool init() {
   Wire.begin();  // safe to call again from nfc::init()
-  if (!g_oled.begin(SSD1306_SWITCHCAPVCC, kOledAddr)) {
+  // Probe the address ourselves before trusting the driver. Adafruit_SSD1306
+  // ::begin() never touches the bus to check: it returns false only if the
+  // framebuffer malloc fails, then blind-writes the init sequence with no ACK
+  // check. Left alone it reports "init ok" with no display attached, which is
+  // worse than no message at all — it certifies the I2C bus as healthy and
+  // sends whoever is debugging the PN532 looking at the wrong end of it.
+  Wire.beginTransmission(kOledAddr);
+  if (Wire.endTransmission() != 0) {
     Serial.println("[ui] SSD1306 not found at 0x3C — running headless");
+    g_have_oled = false;
+    return false;
+  }
+  if (!g_oled.begin(SSD1306_SWITCHCAPVCC, kOledAddr)) {
+    Serial.println("[ui] SSD1306 present at 0x3C but init failed — headless");
     g_have_oled = false;
     return false;
   }

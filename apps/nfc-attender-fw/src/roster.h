@@ -33,4 +33,9 @@ int count();
 // diagnosable instead of mysterious.
 std::time_t age_seconds();
 
+// Print the first `max_items` cached learners with their UIDs. Backs the `r`
+// console command: without a UID to hand, the `tap` injector is unusable, and
+// reading one off the dashboard means leaving the console.
+void debug_dump(int max_items = 5);
+
 }  // namespace llattender::roster

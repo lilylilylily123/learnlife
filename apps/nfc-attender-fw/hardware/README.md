@@ -201,11 +201,15 @@ firmware version, OTA password.
 
 | Symptom | Likely cause |
 |---|---|
-| `brownout` in the boot log | Supply or cable can't hold 5 V under TX peaks |
+| `brownout` in the boot log | Supply, cable or DevKit can't hold the 3V3 rail. Check where it dies: after `[wifi] radio up` means TX peaks, so suspect the supply and cable; *between* `[wifi] powering radio` and `[wifi] radio up` it failed on the RF front-end powering up — only ~100 mA, before any frame is sent — which a healthy board survives on any USB port. Strip to a bare DevKit; if it still trips there, swap the DevKit |
 | Every card reads "Unknown card" | Roster never fetched — check `r` on the console |
 | "Waiting for clock" persists | NTP blocked. Check UDP/123 isn't firewalled |
 | Cards read intermittently | Loose dupont at the peripheral end, or metal near the coil |
 | Read range poor through the lid | `lid_t` too thick, or a PCB too close to the antenna |
+| `[nfc] PN532 not found on I2C bus` | Read the `[i2c]` scan printed just above it — it runs every boot, before the PN532 is probed. `0x24` missing while other addresses are listed → PN532 DIP switches not at 1=ON/2=OFF, or its own dupont pair / press-fit header. `no devices` → the shared SDA/SCL/3V3/GND run, but note it also reads `no devices` when nothing at all is plugged in |
+| No `[nfc]` line at all in the boot log | Device is unprovisioned — `config::run_provisioning()` blocks in the captive portal and reboots before `nfc::init()` runs. The `[i2c]` scan and pullup probe still run first, so the bus is diagnosable without finishing setup |
+| `[i2c] line pullups: ... ABSENT` + `open circuit` | Nothing powered on that line. A press-fit or unsoldered PN532 header kills all four connections at once and is the single most likely cause — see the warning above. Also check the VCC jumper is in `3V3` not `VIN`, and that cut-and-stripped dupont wires aren't broken inside the insulation |
+| `[i2c] line pullups: ... HELD LOW` | Not an open circuit — something is dragging the line to ground. Reversed VCC/GND at the module, or a bent pin bridging a neighbour |
 | `[ui] SSD1306 not found` | I²C wiring, or the OLED is at `0x3D` not `0x3C` |
 | OTA "no password provisioned" | Re-provision (type `RESET` at boot) to generate one |
 | Queue climbing, never draining | Check `q` for dead letters; check the device account still has role `lg` |
