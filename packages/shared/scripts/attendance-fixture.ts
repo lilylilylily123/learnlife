@@ -87,6 +87,20 @@ export interface FixtureDivergenceEntry {
   decision: string;
   masked_by?: string;
   masking_note?: string;
+  /**
+   * How a divergence with no per-case `divergence` block is held in place.
+   * Every registered divergence must be pinned by SOMETHING — either at least
+   * one case referencing it, or this.
+   */
+  pinned_by?: string;
+  /**
+   * Set when the port omits a whole field rather than producing a different
+   * action. The C++ harness skips exactly this key when comparing and reports
+   * the divergence once, instead of marking every affected case divergent and
+   * drowning out the per-case signal. Read from the fixture so the key name
+   * lives in one place.
+   */
+  cpp_skips_field?: string;
 }
 
 export interface AttendanceFixture {
@@ -148,6 +162,7 @@ export function normalizeAction(
         action: "check_in",
         time_in: stamp(action.fields.time_in),
         arrival: action.fields.arrival,
+        justified: action.fields.justified,
         status: action.fields.status,
       };
     case "lunch_event": {

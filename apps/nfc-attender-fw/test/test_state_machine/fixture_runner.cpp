@@ -45,6 +45,19 @@ std::string g_msg;
 
 std::vector<std::string> g_divergent;
 
+// Field names the port omits entirely, read from the fixture's divergence
+// registry (`cpp_skips_field`). Skipping one named key and reporting the
+// divergence once beats marking every affected case divergent, which would
+// drown out the per-case signal. The name lives in the fixture, not here, so
+// deleting it there immediately stops excusing the port.
+std::vector<std::string> g_skipped_fields;
+
+bool is_skipped(const char* key) {
+  for (const std::string& s : g_skipped_fields) {
+    if (s == key) return true;
+  }
+  return false;
+}
 
 const char* msg(const std::string& s) {
   g_msg = s;
@@ -302,11 +315,12 @@ void compare(const std::string& id, JsonObjectConst want, const Actual& got,
         break;
       }
     }
-    if (handled) continue;
+    if (handled || is_skipped(key)) continue;
     TEST_FAIL_MESSAGE(msg(
         id + ": fixture expects field \"" + std::string(key) +
-        "\" but this harness does not compare it. Add it to compare() in "
-        "fixture_runner.cpp."));
+        "\" but this harness does not compare it. Either add it to compare() "
+        "in fixture_runner.cpp, or register a divergence with "
+        "cpp_skips_field set to that name."));
   }
 }
 
@@ -427,6 +441,53 @@ void test_d2a_mask_holds() {
   }
 }
 
+/**
+ * D5 report and guard.
+ *
+ * The spec's check_in emits time_in + arrival + justified + status, so the
+ * split pair and the legacy enum are coherent by construction. This port has
+ * no justified field at all: CheckInAction does not carry one and
+ * fields.cpp:67-69 PATCHes only time_in, arrival and status, leaving whatever
+ * the row already held. That reproduces, from the device, exactly the
+ * self-contradicting row the TypeScript side was just fixed to stop writing.
+ *
+ * Recorded rather than fixed: the firmware was out of scope for that change,
+ * and altering what the device writes ships to physical hardware. The
+ * comparator skips the one named key so every other field stays compared.
+ *
+ * The guard half: the skip is only legitimate while the port genuinely has no
+ * such field. If someone adds it, the fixture must stop excusing the port, so
+ * this fails the moment the count of skipped fields stops matching the count
+ * of divergences that declare one.
+ */
+void test_d5_justified_unported() {
+  JsonObjectConst d5 = g_doc["divergences"]["D5"];
+  TEST_ASSERT_FALSE_MESSAGE(d5.isNull(),
+                            "divergence D5 is missing from the fixture registry");
+  TEST_ASSERT_EQUAL_STRING_MESSAGE(
+      "justified", d5["cpp_skips_field"] | "",
+      "D5 no longer names `justified` as the field this port omits");
+
+  size_t declared = 0;
+  for (JsonPairConst entry : g_doc["divergences"].as<JsonObjectConst>()) {
+    const char* f = entry.value()["cpp_skips_field"] | "";
+    if (f[0] != '\0') declared++;
+  }
+  TEST_ASSERT_EQUAL_size_t_MESSAGE(
+      declared, g_skipped_fields.size(),
+      "skipped-field list disagrees with the divergence registry");
+
+  std::printf("\n  KNOWN DIVERGENT D5 - this port does not write `justified`.\n");
+  std::printf("    spec check_in writes: time_in, arrival, justified, status\n");
+  std::printf("    this port writes:     time_in, arrival, status"
+              "  (fields.cpp:67-69)\n");
+  std::printf("    Consequence: a device tap on a justified learner leaves the\n"
+              "    split pair and the legacy enum contradicting each other, the\n"
+              "    same defect just fixed on the TypeScript side.\n");
+  std::printf("    Skipped key(s) during comparison:");
+  for (const std::string& s : g_skipped_fields) std::printf(" %s", s.c_str());
+  std::printf("\n\n");
+}
 
 void test_absence_sweep_is_unported() {
   // D4: findLearnersToMarkAbsent has no C++ counterpart, so these cases cannot
@@ -521,6 +582,11 @@ void run_all() {
   g_cases = g_doc["cases"].as<JsonArrayConst>();
   g_sweep = g_doc["absence_sweep"]["cases"].as<JsonArrayConst>();
 
+  // Collect the fields the fixture excuses this port from writing.
+  for (JsonPairConst entry : g_doc["divergences"].as<JsonObjectConst>()) {
+    const char* field = entry.value()["cpp_skips_field"] | "";
+    if (field[0] != '\0') g_skipped_fields.push_back(field);
+  }
 
   UnityDefaultTestRun(test_fixture_loaded, "fixture/loaded", __LINE__);
   UnityDefaultTestRun(test_thresholds_match_the_port, "fixture/thresholds", __LINE__);
@@ -532,6 +598,7 @@ void run_all() {
   }
 
   UnityDefaultTestRun(test_d2a_mask_holds, "fixture/guard_D2a_mask", __LINE__);
+  UnityDefaultTestRun(test_d5_justified_unported, "fixture/report_D5_unported", __LINE__);
   UnityDefaultTestRun(test_absence_sweep_is_unported, "fixture/report_D4_unported", __LINE__);
   UnityDefaultTestRun(test_divergence_report, "fixture/report_divergences", __LINE__);
 }

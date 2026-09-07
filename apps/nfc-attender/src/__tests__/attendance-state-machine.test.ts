@@ -19,6 +19,7 @@ function blankState(overrides: Partial<AttendanceState> = {}): AttendanceState {
     lunch_in: null,
     status: null,
     lunch_status: null,
+    justified: false,
     ...overrides,
   };
 }
@@ -83,7 +84,60 @@ describe("computeCheckInAction — morning check-in", () => {
     expect(action.type).toBe("check_in");
     if (action.type !== "check_in") return;
     expect(action.fields.arrival).toBe("late");
+    expect(action.fields.justified).toBe(true);
     expect(action.fields.status).toBe("jLate");
+  });
+
+  it("recovers a justification recorded only in the justified column", () => {
+    // justifyAttendance on a row with no arrival yet writes justified: true
+    // and leaves status null, because deriveStatus(null, true) is null.
+    // Decoding the legacy enum alone would silently drop that excusal.
+    const action = computeCheckInAction(
+      blankState({ justified: true, status: null }),
+      at(11, 0),
+    );
+    expect(action.type).toBe("check_in");
+    if (action.type !== "check_in") return;
+    expect(action.fields.arrival).toBe("late");
+    expect(action.fields.justified).toBe(true);
+    expect(action.fields.status).toBe("jLate");
+  });
+
+  it("drops the excusal when the learner turns up on time", () => {
+    // There is no jPresent, so carrying justified: true onto a present day
+    // would leave the split pair and the legacy enum disagreeing.
+    const action = computeCheckInAction(
+      blankState({ status: "jAbsent", justified: true }),
+      at(9, 0),
+    );
+    expect(action.type).toBe("check_in");
+    if (action.type !== "check_in") return;
+    expect(action.fields.arrival).toBe("present");
+    expect(action.fields.justified).toBe(false);
+    expect(action.fields.status).toBe("present");
+  });
+
+  it("writes a triple that round-trips through deriveStatus/splitStatus", () => {
+    // The coherence invariant the write path depends on: decode the legacy
+    // enum and you get back exactly the split pair written beside it.
+    const states: Partial<AttendanceState>[] = [
+      {},
+      { status: "jAbsent" },
+      { status: "jLate" },
+      { status: "absent" },
+      { justified: true },
+      { justified: true, status: "jAbsent" },
+    ];
+    for (const s of states) {
+      for (const t of [at(9, 0), at(11, 0)]) {
+        const action = computeCheckInAction(blankState(s), t);
+        if (action.type !== "check_in") continue;
+        const { arrival, justified, status } = action.fields;
+        const label = `${JSON.stringify(s)} @ ${t.getHours()}:00`;
+        expect(deriveStatus(arrival, justified), label).toBe(status);
+        expect(splitStatus(status), label).toEqual({ arrival, justified });
+      }
+    }
   });
 });
 

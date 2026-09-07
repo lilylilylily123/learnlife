@@ -175,9 +175,59 @@ const CASES: CaseInput[] = [
     id: "check_in/on_time_arrival_drops_excusal",
     desc:
       "Arriving on time cannot be justified — a prior jAbsent collapses to " +
-      "plain present, since there is no jPresent.",
+      "plain present, since there is no jPresent. The emitted `justified` is " +
+      "false, NOT the inherited true: present + justified is the pair " +
+      "pb-client's schema notes call meaningless, and writing true here is how " +
+      "an already-justified row used to end up with a stale excusal on a day " +
+      "the learner was on time.",
     now: mon(9, 15),
     state: { status: "jAbsent" },
+  },
+  {
+    id: "check_in/legacy_jabsent_row_with_justified_column_false",
+    desc:
+      "The reported bug. A pre-migration row carries status jAbsent while the " +
+      "`justified` column is still false. The action must emit justified: true " +
+      "so the write cannot leave arrival late / justified false / status jLate " +
+      "— a triple where summarizeAttendance counts an UNJUSTIFIED late while " +
+      "every legacy reader sees jLate.",
+    now: mon(10, 30),
+    state: { status: "jAbsent", justified: false },
+  },
+  {
+    id: "check_in/modern_justified_column_without_derived_status",
+    desc:
+      "justifyAttendance on a row with no arrival yet writes justified: true " +
+      "and leaves status null, because deriveStatus(null, true) is null. " +
+      "Reading the legacy enum alone would miss that and silently drop the " +
+      "excusal, so the state machine reads the real field first.",
+    now: mon(10, 30),
+    state: { justified: true },
+    divergence: {
+      refs: ["D5"],
+      note:
+        "The read half of D5. The port's AttendanceState carries no justified " +
+        "field, so it can only decode the legacy enum — which is null here — " +
+        "and derives status \"late\" where the spec derives \"jLate\". This is " +
+        "the one case where the port's inability to see the column changes an " +
+        "actual value rather than just omitting one, so it is marked per-case " +
+        "instead of being covered by the skipped-field mechanism.",
+      cpp: {
+        action: "check_in",
+        time_in: NOW,
+        arrival: "late",
+        status: "late",
+      },
+    },
+  },
+  {
+    id: "check_in/modern_justified_column_on_time_drops_excusal",
+    desc:
+      "Same modern row, but the learner arrives on time. The excusal is " +
+      "dropped rather than carried onto a present day, keeping the triple a " +
+      "fixpoint of deriveStatus/splitStatus.",
+    now: mon(9, 15),
+    state: { justified: true },
   },
   {
     id: "check_in/friday_late_10_01",
@@ -630,6 +680,7 @@ function blankState(overrides: Partial<AttendanceState> = {}): AttendanceState {
     lunch_in: null,
     status: null,
     lunch_status: null,
+    justified: false,
     ...overrides,
   };
 }
@@ -736,6 +787,35 @@ const DIVERGENCES: Record<string, FixtureDivergenceEntry> = {
       "The device can never mark anyone absent. The absence_sweep cases below " +
       "run against the spec only; the C++ harness reports them as unported.",
     observable_today: false,
+    pinned_by:
+      "absence_sweep.cases — the Vitest harness runs them against the spec; " +
+      "the C++ harness reports them as unported.",
+    decision: "UNDECIDED",
+  },
+  D5: {
+    title: "The C++ port neither reads nor writes the `justified` column",
+    ts: "AttendanceState carries `justified`, so check_in recovers an excusal recorded only in that column, and emits time_in + arrival + justified + status — a triple that round-trips through deriveStatus/splitStatus (packages/shared/src/attendance.ts)",
+    cpp: "AttendanceState has no justified field, so prior justification can only be decoded from the legacy `status` enum; CheckInAction has no justified field either, and fields.cpp PATCHes only time_in, arrival and status (apps/nfc-attender-fw/src/fields.cpp:67-69)",
+    impact:
+      "Two halves. WRITE: a device tap on a justified learner leaves the " +
+      "`justified` column at whatever it already held, reproducing exactly the " +
+      "self-contradicting row the TypeScript side was just fixed to stop " +
+      "writing — against the same PocketBase collection. READ: an excusal " +
+      "recorded only in the column (justifyAttendance on a row with no arrival " +
+      "yet leaves status null) is invisible to the port, which then derives " +
+      "`late` where the spec derives `jLate`. Recorded rather than fixed " +
+      "because the firmware was out of scope for this change and altering what " +
+      "the device writes ships to physical hardware. The fix is the same shape " +
+      "as the TypeScript one: add `justified` to the C++ AttendanceState and " +
+      "CheckInAction, read it alongside the enum, and emit it from fields.cpp.",
+    observable_today: true,
+    cpp_skips_field: "justified",
+    pinned_by:
+      "WRITE half: the C++ harness skips exactly the `justified` key and " +
+      "reports D5 once, so every other field stays compared instead of ten " +
+      "check_in cases all going divergent. READ half: pinned per-case by " +
+      "check_in/modern_justified_column_without_derived_status. The Vitest " +
+      "harness asserts the key IS present on every check_in.",
     decision: "UNDECIDED",
   },
 };

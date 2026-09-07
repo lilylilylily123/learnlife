@@ -62,6 +62,16 @@ export interface AttendanceState {
   lunch_in: string | null; // legacy — used before lunch_events array was introduced
   status: AttendanceStatus | null;
   lunch_status: AttendanceStatus | null;
+  /**
+   * The modern justification flag. Required, not optional: the state machine
+   * used to infer prior justification from the legacy `status` enum alone,
+   * which silently lost a justification recorded on a row whose `status` was
+   * never derived (e.g. `justifyAttendance` on a record with no `arrival`
+   * yet, which yields `justified: true` with `status: null`). Reading the
+   * real field first and falling back to the enum matches what the dashboard's
+   * manual "morning-in" path already does.
+   */
+  justified: boolean;
 }
 
 /**
@@ -79,13 +89,23 @@ export interface AttendanceState {
 export type CheckInAction =
   | {
       type: "check_in";
-      // `arrival` is the source of truth; `status` is written alongside it
-      // so legacy consumers keep working. A learner who was auto-marked
-      // absent by the cutoff sweep and then scans in will have arrival flipped
-      // back to present/late here — they showed up, so absent no longer holds.
+      // `arrival` is the source of truth; `justified` and `status` are written
+      // alongside it so the split pair and the legacy enum can never disagree.
+      // A learner who was auto-marked absent by the cutoff sweep and then scans
+      // in will have arrival flipped back to present/late here — they showed
+      // up, so absent no longer holds.
+      //
+      // All three are emitted together deliberately. Emitting `arrival` and
+      // `status` while leaving `justified` to whatever the row already held
+      // produced rows that contradicted themselves in both directions: a
+      // legacy `jAbsent` row became `arrival: "late", justified: false,
+      // status: "jLate"`, and an already-justified row whose learner then
+      // arrived on time became `arrival: "present", justified: true`, a pair
+      // the schema calls meaningless.
       fields: {
         time_in: string;
         arrival: ArrivalStatus;
+        justified: boolean;
         status: AttendanceStatus;
       };
     }
@@ -144,13 +164,30 @@ export function computeCheckInAction(
     // Preserve any prior justification: if a guide had marked the learner
     // absent-but-justified before they actually showed up, we still want
     // their late arrival to inherit the excused flag.
+    //
+    // Read the real `justified` field first and only fall back to decoding the
+    // legacy enum. The enum alone is not sufficient: `justifyAttendance` on a
+    // row with no `arrival` yet writes `justified: true` with `status: null`,
+    // and a pre-migration row can carry `status: "jAbsent"` with the
+    // `justified` column still false. Mirrors the dashboard's manual
+    // "morning-in" path in apps/nfc-attender/src/app/page.tsx.
     const wasJustified =
-      state.status === "jLate" || state.status === "jAbsent";
+      state.justified === true ||
+      state.status === "jLate" ||
+      state.status === "jAbsent";
     const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
+
+    // Derive `justified` back out of the status we just derived, rather than
+    // writing `wasJustified` straight through. That makes the emitted triple a
+    // fixpoint of deriveStatus/splitStatus, which is exactly what "coherent"
+    // means here — and it drops the flag for an on-time arrival, since
+    // "present" has no justified counterpart (there is no jPresent, and
+    // pb-client's schema notes call present + justified meaningless).
+    const justified = splitStatus(status).justified;
 
     return {
       type: "check_in",
-      fields: { time_in: now.toISOString(), arrival, status },
+      fields: { time_in: now.toISOString(), arrival, justified, status },
     };
   }
 

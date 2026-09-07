@@ -22,7 +22,7 @@ import { toast } from "./components/Toast";
 import { KeyboardHelpOverlay } from "./components/KeyboardHelpOverlay";
 import { buildDemoAttendanceMap } from "@/lib/demo-data";
 import type { Student } from "./types";
-import { deriveStatus } from "@learnlife/shared";
+import { deriveStatus, splitStatus } from "@learnlife/shared";
 import {
   TIME_THRESHOLDS,
   type ArrivalStatus,
@@ -584,13 +584,19 @@ export default function AttendancePage() {
           );
           const isLate = now.getTime() >= lateTime.getTime();
           const arrival: ArrivalStatus = isLate ? "late" : "present";
-          // Preserve any prior justification — see state-machine for the
-          // same invariant when an NFC scan beats a pre-marked jAbsent.
+          // Preserve any prior justification — same invariant the state
+          // machine applies when an NFC scan beats a pre-marked jAbsent.
           const wasJustified =
             attendance.justified === true ||
             attendance.status === "jLate" ||
             attendance.status === "jAbsent";
           const status = deriveStatus(arrival, wasJustified) as AttendanceStatus;
+          // Derive the flag back out of the status rather than writing
+          // `wasJustified` straight through, so the triple round-trips through
+          // deriveStatus/splitStatus. Writing wasJustified directly stranded a
+          // true flag on an on-time arrival, which has no jPresent to justify
+          // and left the split pair disagreeing with the enum.
+          const justified = splitStatus(status).justified;
           const timestamp = now.toISOString();
 
           updateAttendanceState((prev) => ({
@@ -599,7 +605,7 @@ export default function AttendancePage() {
               ...prev[id],
               time_in: timestamp,
               arrival,
-              justified: wasJustified,
+              justified,
               status,
             },
           }));
@@ -616,7 +622,7 @@ export default function AttendancePage() {
               fields: {
                 time_in: timestamp,
                 arrival,
-                justified: wasJustified,
+                justified,
                 status,
               },
             });

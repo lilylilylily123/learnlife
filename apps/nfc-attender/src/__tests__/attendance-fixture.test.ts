@@ -26,10 +26,17 @@
 import { describe, expect, it } from "vitest";
 import {
   computeCheckInAction,
+  deriveStatus,
   findLearnersToMarkAbsent,
+  splitStatus,
   type AttendanceState,
 } from "@learnlife/shared";
-import type { AttendanceRecord, Learner } from "@learnlife/pb-client";
+import type {
+  ArrivalStatus,
+  AttendanceRecord,
+  AttendanceStatus,
+  Learner,
+} from "@learnlife/pb-client";
 import {
   fixtureDate,
   loadAttendanceFixture,
@@ -64,14 +71,25 @@ describe("attendance fixture — metadata", () => {
     expect(fixture.thresholds.LATE_MINUTE).toBe(1);
   });
 
-  it("every declared divergence is exercised by at least one case", () => {
+  it("every declared divergence is pinned by something", () => {
     // Without this, deleting the last case for a divergence would silently
-    // drop the coverage that keeps it visible.
-    const referenced = new Set<string>([fixture.absence_sweep.divergence]);
-    for (const c of fixture.cases) {
-      for (const ref of c.divergence?.refs ?? []) referenced.add(ref);
+    // drop the coverage that keeps it visible. A divergence is pinned either
+    // by at least one case referencing it, or by an explicit `pinned_by`
+    // naming the mechanism that holds it (used for whole-field and
+    // whole-function gaps, which no single case can carry).
+    const unpinned: string[] = [];
+    for (const [ref, d] of Object.entries(fixture.divergences)) {
+      const byCase = fixture.cases.some((c) => c.divergence?.refs.includes(ref));
+      const byNote = Boolean(d.pinned_by);
+      if (!byCase && !byNote) unpinned.push(ref);
     }
-    expect([...referenced].sort()).toEqual(Object.keys(fixture.divergences).sort());
+    expect(unpinned, "divergences with neither a case nor a pinned_by").toEqual([]);
+  });
+
+  it("declares D5 as a field the C++ harness skips", () => {
+    // The C++ comparator reads this key name out of the fixture rather than
+    // hardcoding it, so drop the field here and the port stops being excused.
+    expect(fixture.divergences.D5.cpp_skips_field).toBe("justified");
   });
 
   it("every divergence block is well formed and still undecided", () => {
@@ -122,6 +140,33 @@ describe("attendance fixture — computeCheckInAction", () => {
     }
   });
 
+  it("every check_in emits a self-consistent (arrival, justified, status) triple", () => {
+    // The bug this fixture now guards: the action used to emit arrival and
+    // status but not justified, so the row it produced could contradict
+    // itself in either direction. The invariant is that the emitted triple is
+    // a fixpoint of deriveStatus/splitStatus — decode the legacy enum and you
+    // get back exactly the split pair that was written alongside it.
+    const checkIns = fixture.cases.filter((c) => c.expect.action === "check_in");
+    expect(checkIns.length, "no check_in cases in the fixture").toBeGreaterThan(0);
+
+    for (const c of checkIns) {
+      const arrival = c.expect.arrival as ArrivalStatus;
+      const justified = c.expect.justified as boolean;
+      const status = c.expect.status as AttendanceStatus;
+
+      expect(typeof justified, `${c.id}: check_in must emit justified`).toBe("boolean");
+      expect(deriveStatus(arrival, justified), `${c.id}: status disagrees with the pair`).toBe(
+        status,
+      );
+      expect(splitStatus(status), `${c.id}: the pair disagrees with status`).toEqual({
+        arrival,
+        justified,
+      });
+      if (arrival === "present") {
+        expect(justified, `${c.id}: present + justified is meaningless`).toBe(false);
+      }
+    }
+  });
 });
 
 describe("attendance fixture — findLearnersToMarkAbsent", () => {
