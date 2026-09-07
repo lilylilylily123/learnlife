@@ -109,6 +109,44 @@ void watch_lines(uint32_t window_ms) {
   }
   Serial.println("[i2c] watch window closed");
 }
+
+// Put the bus back in the idle state the line tests took it out of.
+//
+// line_has_pullup() has to drive the lines to measure them, and every slave
+// listening reads that as traffic: SDA falling while SCL is high is a START,
+// and the SCL pulse from the next test clocks a stale bit into whatever woke
+// up. The SSD1306 then decodes the following real address one bit out of step
+// and NACKs it. Measured on hardware: with the line tests in front of it, the
+// first transaction after Wire.begin() returns 2 (address NACK) and every
+// transaction after that returns 0; without them the first returns 0. That one
+// lost transaction is exactly the ACK test ui::init() uses to decide whether a
+// display is fitted, so the diagnostic was reporting the display it had just
+// disturbed as absent.
+//
+// Standard I2C recovery: release SDA, clock SCL nine times so a slave holding
+// a partial byte runs off the end of it and sees the NACK, then issue a real
+// STOP — SDA low, SCL released high, SDA released high. Bit-banged open-drain
+// throughout (drive low, or release and let the external pull-ups lift it),
+// because this runs before Wire.begin() owns the pins.
+void release_bus() {
+  pinMode(SDA, INPUT);
+  for (int i = 0; i < 9; ++i) {
+    pinMode(SCL, OUTPUT);
+    digitalWrite(SCL, LOW);
+    delayMicroseconds(10);
+    pinMode(SCL, INPUT);
+    delayMicroseconds(10);
+  }
+  pinMode(SCL, OUTPUT);
+  digitalWrite(SCL, LOW);
+  pinMode(SDA, OUTPUT);
+  digitalWrite(SDA, LOW);
+  delayMicroseconds(10);
+  pinMode(SCL, INPUT);
+  delayMicroseconds(10);
+  pinMode(SDA, INPUT);
+  delayMicroseconds(10);
+}
 }  // namespace
 
 void probe_i2c_lines() {
@@ -117,23 +155,29 @@ void probe_i2c_lines() {
   Serial.printf("[i2c] line pullups: SDA(D%u)=%s SCL(D%u)=%s\n",
                 static_cast<unsigned>(SDA), sda ? "present" : "ABSENT",
                 static_cast<unsigned>(SCL), scl ? "present" : "ABSENT");
-  if (sda && scl) return;
 
-  // No external pullup. Separate "nothing is there" from "something is holding
-  // the line down", because the first is a power/wiring gap and the second is
-  // a short or a reversed module.
-  for (uint8_t pin : {static_cast<uint8_t>(SDA), static_cast<uint8_t>(SCL)}) {
-    if (line_has_pullup(pin)) continue;
-    Serial.printf("[i2c]   D%u: %s\n", static_cast<unsigned>(pin),
-                  line_rises_on_internal_pullup(pin)
-                      ? "open circuit — no powered module on this line"
-                      : "HELD LOW — short to GND, reversed VCC/GND, or a bent "
-                        "pin bridging a neighbour");
+  if (!sda || !scl) {
+    // No external pullup. Separate "nothing is there" from "something is
+    // holding the line down", because the first is a power/wiring gap and the
+    // second is a short or a reversed module.
+    for (uint8_t pin : {static_cast<uint8_t>(SDA), static_cast<uint8_t>(SCL)}) {
+      if (line_has_pullup(pin)) continue;
+      Serial.printf("[i2c]   D%u: %s\n", static_cast<unsigned>(pin),
+                    line_rises_on_internal_pullup(pin)
+                        ? "open circuit — no powered module on this line"
+                        : "HELD LOW — short to GND, reversed VCC/GND, or a "
+                          "bent pin bridging a neighbour");
+    }
+    sweep_pullups();
+    // 10 s, not 60: long enough to press a suspect header and see it, short
+    // enough that a genuinely absent module doesn't hold every boot hostage.
+    watch_lines(10000);
   }
-  sweep_pullups();
-  // 10 s, not 60: long enough to press a suspect header and see it, short
-  // enough that a genuinely absent module doesn't hold every boot hostage.
-  watch_lines(10000);
+
+  // Unconditional, and the last thing this function does: every path above
+  // pulses the lines, and a bus left mid-byte costs the next transaction on it
+  // — which is ui::init()'s display probe.
+  release_bus();
 }
 
 void scan_i2c() {
