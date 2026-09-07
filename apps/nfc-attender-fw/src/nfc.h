@@ -27,8 +27,9 @@ void probe_i2c_lines();
 // (absent→present transition AND uid != previous uid), writes the lowercase
 // hex UID into `out` and returns true. Otherwise returns false.
 //
-// Designed to be called from the nfc_task in a tight loop with a small delay,
-// or from an IRQ-driven path in a future revision.
+// Called from nfc_task on a 50 ms loop (main.cpp). The PN532's IRQ line is
+// wired to nothing in this build — Adafruit_PN532 is constructed with
+// irq=-1 — so polling is the only path, not a placeholder for one.
 bool poll_uid(std::string& out_uid_hex);
 
 }  // namespace llattender::nfc

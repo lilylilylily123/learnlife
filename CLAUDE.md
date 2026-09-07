@@ -26,6 +26,8 @@ pnpm build:calendar       # Expo build
 # Quality
 pnpm lint                 # ESLint across all packages
 pnpm test                 # Run all tests across workspace
+pnpm typecheck            # tsc --noEmit across packages/* — the shared packages
+                          # ship no tests, so this is their only coverage
 
 # Per-app tests
 pnpm --filter nfc-attender test    # Vitest (jsdom)

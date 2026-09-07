@@ -78,18 +78,6 @@ bool append(const PendingScan& s) {
   return ok;
 }
 
-int drain(const std::function<bool(const PendingScan&)>& writer) {
-  Lock lk;
-  // Adapt the legacy bool-returning writer to the richer outcome the core
-  // wants. A plain `false` can't distinguish "retry later" from "never going
-  // to work", so it is treated as transient — the safe direction, since the
-  // alternative is discarding real attendance data. Callers that can tell the
-  // difference should use drain_ex().
-  return g_queue.drain([&](const PendingScan& s) {
-    return writer(s) ? WriteOutcome::Ok : WriteOutcome::RetryLater;
-  });
-}
-
 int drain_ex(const std::function<WriteOutcome(const PendingScan&)>& writer) {
   Lock lk;
   return g_queue.drain(writer);

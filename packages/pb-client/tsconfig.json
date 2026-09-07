@@ -1,6 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // The base config declares only "esnext", which has no host globals. This
+    // package is isomorphic — it runs in the browser (Next static export), in
+    // React Native, and in Node — and it uses `console` and `setTimeout`,
+    // which every one of those provides but the language itself does not.
+    // "dom" is the smallest lib that declares them. Do not move this into
+    // tsconfig.base.json: packages/shared is pure logic with no host globals,
+    // and letting it typecheck without them is what keeps it that way.
+    "lib": ["esnext", "dom"],
     "outDir": "./dist",
     "rootDir": "./src"
   },

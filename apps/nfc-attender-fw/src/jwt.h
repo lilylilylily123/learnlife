@@ -4,10 +4,11 @@
 //
 // ── WHY ──────────────────────────────────────────────────────────────────
 //
-// config.h has carried `token` and `token_expires` fields since Phase 1, and
-// config.cpp faithfully persists them — but pb_client keeps the bearer token
-// in RAM and logs in again on every boot and every reconnect. The fields have
-// never meant anything.
+// config.h carries `token` and `token_expires`, and config.cpp persists them.
+// They were dead weight until pb_client learned to reuse the saved token
+// instead of logging in on every boot and reconnect — see ensure_token() in
+// pb_client.cpp, which needs an expiry to decide whether the cached token is
+// still usable. That expiry is what this module extracts.
 //
 // Caching the token removes a full TLS login round-trip per boot, which
 // matters for three reasons: it is the slowest thing between power-on and the
