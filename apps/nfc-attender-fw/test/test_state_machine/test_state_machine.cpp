@@ -1,12 +1,21 @@
 // Native unit tests for compute_check_in_action.
-// Mirror the Vitest cases in
-//   apps/nfc-attender/src/__tests__/check-learner-in.test.ts
-// so a TS regression and a C++ regression land in the same place.
+//
+// Two layers run from this binary:
+//
+//  1. The hand-written cases below, which document the port's own behaviour
+//     (including the Locked branch, which has no counterpart in the spec).
+//  2. The shared cross-language fixture, driven by fixture_runner.cpp. It
+//     loads packages/shared/fixtures/attendance-state-machine.json — the same
+//     file the Vitest suite in apps/nfc-attender reads — so a drift between
+//     the C++ port and the TypeScript specification fails a build instead of
+//     silently mis-marking a learner.
 
 #include <unity.h>
 
+#include <cstdlib>
 #include <ctime>
 
+#include "fixture_runner.h"
 #include "state_machine.h"
 
 using llattender::ActionType;
@@ -269,6 +278,15 @@ void test_no_double_checkout() {
 }
 
 int main(int, char**) {
+  // Pin the wall clock before any mktime call. Both implementations read local
+  // time fields, so a host timezone with a DST transition inside a fixture
+  // date could renormalise an hour and surface as a phantom divergence. The
+  // Vitest suite pins TZ=UTC in its package.json script; doing it here rather
+  // than in the test runner's environment means it holds however this binary
+  // is invoked. fixture_runner asserts each case's wall clock survived.
+  setenv("TZ", "UTC", 1);
+  tzset();
+
   UNITY_BEGIN();
   RUN_TEST(test_check_in_present_at_9am);
   RUN_TEST(test_check_in_late_at_1001);
@@ -285,5 +303,9 @@ int main(int, char**) {
   RUN_TEST(test_lunch_return_beats_lock);
   RUN_TEST(test_friday_checkout_at_2pm);
   RUN_TEST(test_no_double_checkout);
+
+  // Shared cross-language fixture — one Unity case per fixture entry.
+  llattender_fixture::run_all();
+
   return UNITY_END();
 }

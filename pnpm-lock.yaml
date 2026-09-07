@@ -264,6 +264,9 @@ importers:
         specifier: workspace:*
         version: link:../pb-client
     devDependencies:
+      '@types/node':
+        specifier: ^20.19.39
+        version: 20.19.39
       typescript:
         specifier: ^5
         version: 5.9.3

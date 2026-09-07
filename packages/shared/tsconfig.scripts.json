@@ -1,0 +1,15 @@
+{
+  // The build tsconfig pins rootDir to ./src, so the fixture generator and its
+  // schema module would otherwise never be typechecked. They are load-bearing
+  // — the generator derives the attendance fixture both test suites read — so
+  // they get their own no-emit pass, wired into `pnpm typecheck`.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+}

@@ -12,8 +12,8 @@
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
     "tauri:build:windows": "tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "TZ=UTC vitest run",
+    "test:watch": "TZ=UTC vitest"
   },
   "dependencies": {
     "@radix-ui/react-icons": "^1.3.2",

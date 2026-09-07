@@ -10,6 +10,8 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
+    "gen:attendance-fixture": "TZ=UTC tsx packages/shared/scripts/generate-attendance-fixture.ts",
+    "check:attendance-fixture": "TZ=UTC tsx packages/shared/scripts/generate-attendance-fixture.ts --check",
     "clean": "pnpm -r exec rm -rf node_modules && rm -rf node_modules",
     "push:nfc": "git subtree push --prefix=apps/nfc-attender nfc-attender main",
     "push:calendar": "git subtree push --prefix=apps/ll-calendar ll-calendar main",
