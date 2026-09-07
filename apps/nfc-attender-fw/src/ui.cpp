@@ -319,8 +319,20 @@ bool init() {
   // check. Left alone it reports "init ok" with no display attached, which is
   // worse than no message at all — it certifies the I2C bus as healthy and
   // sends whoever is debugging the PN532 looking at the wrong end of it.
-  Wire.beginTransmission(kOledAddr);
-  if (Wire.endTransmission() != 0) {
+  //
+  // Three attempts, not one: an SSD1306 that has just had its lines pulsed
+  // NACKs exactly one address cycle before it answers normally (measured on
+  // hardware — see nfc::release_bus(), which exists to prevent that). A
+  // one-shot ACK test turns any such single lost transaction into a headless
+  // boot, and "SSD1306 not found at 0x3C" is documented as a wiring fault, so
+  // a false negative here costs an hour with a multimeter.
+  bool present = false;
+  for (int attempt = 0; attempt < 3 && !present; ++attempt) {
+    if (attempt) delay(5);
+    Wire.beginTransmission(kOledAddr);
+    present = Wire.endTransmission() == 0;
+  }
+  if (!present) {
     Serial.println("[ui] SSD1306 not found at 0x3C — running headless");
     g_have_oled = false;
     return false;
