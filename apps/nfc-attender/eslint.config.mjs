@@ -13,13 +13,23 @@ const eslintConfig = defineConfig([
       "react/no-danger-with-children": "error",
     },
   },
-  // Override default ignores of eslint-config-next.
+  // Overrides — does NOT extend — the default ignores of eslint-config-next,
+  // so anything omitted here is linted even if Next would have skipped it.
   globalIgnores([
-    // Default ignores of eslint-config-next:
+    // Default ignores of eslint-config-next, restated because of the above:
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Cargo's output directory for the Tauri shell. Not source: it holds
+    // generated JS assets emitted by tauri-codegen, some of them minified or
+    // binary, which ESLint reports as "Invalid character" and "File appears
+    // to be binary". It is gitignored, so CI lints a fresh checkout where the
+    // directory does not exist and has always passed — but anyone who has run
+    // a Tauri build locally got 90 errors from `pnpm lint`, which made the
+    // repo's own quality command unusable on exactly the machines that build
+    // the app.
+    "src-tauri/**",
   ]),
   {
     rules: {
