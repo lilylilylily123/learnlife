@@ -1,0 +1,55 @@
+name: "PocketBase Hooks: Syntax Check"
+
+# The files in pb_hooks/ are uploaded by hand to a hosted PocketBase instance
+# and are not part of the pnpm workspace, so nothing else in CI ever parses
+# them. Without this job a syntax error is only discoverable in production.
+# This is deliberately only a parse gate: `node --check` needs no install step
+# and no dependencies, and the hooks' actual runtime (PocketBase's goja) is not
+# available here.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "pb_hooks/**"
+      - ".github/workflows/pb-hooks-check.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "pb_hooks/**"
+      - ".github/workflows/pb-hooks-check.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Syntax check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # Fails the job if pb_hooks/ ever ends up empty, so a rename cannot
+      # silently turn this gate into a no-op.
+      - name: Check hook syntax
+        run: |
+          shopt -s nullglob
+          files=(pb_hooks/*.pb.js)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No pb_hooks/*.pb.js files found — has the directory moved?" >&2
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            echo "node --check $file"
+            node --check "$file"
+          done

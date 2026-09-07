@@ -7,8 +7,8 @@ deliberate consequence of a path-filter design that keeps a C++ firmware change
 out of a Node pipeline. But they are gaps, and knowing where they are is the
 difference between trusting a green tick and over-trusting it.
 
-Seven workflow files exist. Six live in `.github/workflows/` and run in this
-repository. The seventh, `apps/nfc-attender/.github/workflows/release.yml`, does
+Eight workflow files exist. Seven live in `.github/workflows/` and run in this
+repository. The eighth, `apps/nfc-attender/.github/workflows/release.yml`, does
 **not** run here — see [The app-local release workflow](#the-app-local-release-workflow).
 
 For how to set up a machine and what to run before pushing, see
@@ -20,10 +20,11 @@ For how to set up a machine and what to run before pushing, see
 
 | Workflow | Name | Trigger | Path filter | Jobs | What it proves |
 |---|---|---|---|---|---|
-| `calendar-test.yml` | Calendar: Test & Lint | push to `main`, PR to `main` | `apps/ll-calendar/**`, `packages/**`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json`, self | `test-and-lint` | Calendar app lints, the three shared packages typecheck, calendar jest suite passes |
-| `nfc-test-build.yml` | NFC Attender: Test Build | push to `main`, push tag `v*`, PR to `main` | `apps/nfc-attender/**`, `packages/**`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json`, self | `test-and-lint`, `build` (macOS aarch64 + Windows) | Dashboard lints, packages typecheck, Vitest passes, and the Rust + Next bundle compiles on both shipped platforms |
-| `nfc-fw.yml` | NFC Firmware: Test & Build | push to `main` or `hardware/**`, PR to `main` | `apps/nfc-attender-fw/**`, self | `native-tests`, `firmware-build`, `enclosure` | 134 host-side unit tests pass, the ESP32 image links and fits its OTA slot, and every enclosure part still renders |
-| `nfc-release.yml` | NFC Attender: Release | push tag `v*`, `workflow_dispatch` | none | `test`, `release` (macOS aarch64 + Windows) | A signed, bundled, published GitHub release for the desktop app |
+| `calendar-test.yml` | Calendar: Test & Lint | push to `main`, PR to `main` | `apps/ll-calendar/**`, `packages/**`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json`, self | `test-and-lint` | Calendar app lints, the three shared packages typecheck, the calendar app typechecks, the attendance fixture is in sync, calendar jest suite passes |
+| `nfc-test-build.yml` | NFC Attender: Test Build | push to `main`, push tag `v*`, PR to `main` | `apps/nfc-attender/**`, `packages/**`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json`, self | `test-and-lint`, `build` (macOS aarch64 + Windows) | Dashboard lints, packages typecheck, the attendance fixture is in sync, Vitest passes, and the Rust + Next bundle compiles on both shipped platforms |
+| `nfc-fw.yml` | NFC Firmware: Test & Build | push to `main` or `hardware/**`, PR to `main` | `apps/nfc-attender-fw/**`, `packages/shared/fixtures/**`, self | `native-tests`, `firmware-build`, `enclosure` | Host-side unit tests pass — including the shared attendance fixture run against the C++ port — the ESP32 image links and fits its OTA slot, and every enclosure part still renders |
+| `nfc-release.yml` | NFC Attender: Release | push tag `v*`, `workflow_dispatch` | none | `test`, `release` (macOS aarch64 + Windows) | A signed, bundled, published GitHub release for the desktop app, gated on lint + packages typecheck + fixture sync + Vitest |
+| `pb-hooks-check.yml` | PocketBase Hooks: Syntax Check | push to `main`, PR to `main` | `pb_hooks/**`, self | `syntax` | Every `pb_hooks/*.pb.js` parses under `node --check`. A syntax error no longer reaches production undetected |
 | `claude-code-review.yml` | Claude Code Review | PR `opened`, `synchronize`, `ready_for_review`, `reopened` | **none** | `claude-review` | An automated review comment on every PR — nothing about correctness |
 | `claude.yml` | Claude Code | `issue_comment`, `pull_request_review_comment`, `issues` (opened/assigned), `pull_request_review` — each gated on the body containing `@claude` | none | `claude` | Nothing. On-demand assistant, not a check |
 | `apps/nfc-attender/.github/workflows/release.yml` | Release Build | push tag `v*`, `workflow_dispatch` | none | `release` (macOS aarch64 + Windows) | Nothing in this repo — GitHub never reads it here |
@@ -62,7 +63,9 @@ half-written queue line after a power cut. Those cases are hardest to provoke on
 a device screwed shut on a wall. `platformio.ini`'s `native` environment
 compiles the pure modules against the host stdlib with
 `-DLLATTENDER_NATIVE_BUILD`, so they can be exercised in milliseconds on a
-runner. 134 Unity cases across 13 `test_*` directories.
+runner. 13 `test_*` directories, one of which now also drives the shared
+attendance fixture against the C++ port — see
+[The attendance fixture check](#the-attendance-fixture-check).
 
 **What it cannot defend.** Everything excluded from `build_src_filter` —
 anything that includes `Arduino.h`, touches WiFi, or writes LittleFS. Those files
@@ -155,13 +158,14 @@ Two jobs.
 
 **`test-and-lint`** on `ubuntu-latest`: pnpm via `pnpm/action-setup@v4` with no
 version input (so the root `packageManager: pnpm@10.33.0` decides), Node 22 with
-pnpm cache, `pnpm install --frozen-lockfile`, then three checks:
+pnpm cache, `pnpm install --frozen-lockfile`, then four checks:
 
 | Step | Command | Covers |
 |---|---|---|
 | Lint | `pnpm --filter nfc-attender lint` | `apps/nfc-attender` only |
 | Typecheck shared packages | `pnpm -r --filter "./packages/*" typecheck` | `pb-client`, `shared`, `design-tokens` |
-| Test | `pnpm --filter nfc-attender test` | Vitest, jsdom, 12 test files under `src/__tests__/` (plus `setup.ts`) |
+| Check attendance fixture is in sync | `pnpm check:attendance-fixture` | That the committed fixture still matches the TypeScript spec |
+| Test | `pnpm --filter nfc-attender test` | Vitest, jsdom, 13 test files under `src/__tests__/` (plus `setup.ts`) |
 
 The typecheck step carries a comment explaining why it is here rather than
 somewhere central: the shared packages define no `test` script, so their only
@@ -202,15 +206,18 @@ One job, `ubuntu-latest`, same pnpm/Node 22 setup, then:
 |---|---|
 | Lint | `pnpm --filter ll_calendar lint` (`expo lint`) |
 | Typecheck shared packages | `pnpm -r --filter "./packages/*" typecheck` |
+| Check attendance fixture is in sync | `pnpm check:attendance-fixture` |
+| Typecheck calendar app | `pnpm --filter ll_calendar typecheck` (`tsc --noEmit`) |
 | Test | `pnpm --filter ll_calendar test` (`TZ=UTC jest`) |
 
 `TZ=UTC` comes from the app's own `test` script, not the workflow. It matters
 because the calendar's date logic is boundary-sensitive and a runner in a
-different zone would produce different results than a developer's laptop.
+different zone would produce different results than a developer's laptop. The
+fixture check sets `TZ=UTC` itself, in the root script.
 
 There is no build job. The Expo app is never built for iOS, Android or web in
-CI — no EAS step, no `expo export`, no native compile. Lint plus one jest file is
-the entirety of its automated verification.
+CI — no EAS step, no `expo export`, no native compile, even though the app now
+defines a working `pnpm build`.
 
 ---
 
@@ -255,6 +262,86 @@ if this matters to you.
 
 ---
 
+## `pb-hooks-check.yml` — PocketBase hook syntax
+
+```
+actions/checkout@v5 -> setup-node@v5 (22) -> node --check pb_hooks/*.pb.js
+```
+
+One job, no `pnpm install`. `pb_hooks/` is outside the pnpm workspace and has no
+`package.json`, so there are no dependencies to fetch and nothing for `pnpm -r`
+to reach — which is exactly why the directory had no CI at all until this
+workflow existed.
+
+**What it proves.** That all three hook files parse as JavaScript. That is a
+narrow claim, and it is deliberately the narrowest useful one: the files are
+uploaded by hand through the PocketHost admin UI, PocketBase loads every
+`.pb.js` in the directory into one JS VM, and **a syntax error in any one of
+them takes hooks down for the whole instance** — including the `users` role-
+escalation guard and the atomic invite-redemption route. Before this workflow
+that was discoverable only in production, after a manual upload.
+
+**What it does not prove.** Nothing about behaviour. `node --check` parses; it
+does not execute, and it could not: the hooks call `$app`, `onRecordCreateRequest`
+and `BadRequestError`, which exist only inside PocketBase's goja runtime. There
+is no way to run them in CI without a PocketBase instance. So a hook that parses
+but rejects every RSVP, or silently stops enforcing role constraints, still ships
+green. The step also fails if the glob matches nothing, so renaming the directory
+cannot turn the gate into a silent no-op.
+
+Deployment remains manual and unverified — see
+[`pb_hooks/README.md`](../pb_hooks/README.md#upload-procedure).
+
+---
+
+## The attendance fixture check
+
+Not a workflow of its own — a step, `pnpm check:attendance-fixture`, that runs in
+all three TypeScript workflows next to the `Typecheck shared packages` step.
+
+`packages/shared/fixtures/attendance-state-machine.json` is committed and is the
+source of truth for **two** test harnesses:
+
+| Harness | Runs in |
+|---|---|
+| `apps/nfc-attender/src/__tests__/attendance-fixture.test.ts` (Vitest) | `nfc-test-build.yml`, `nfc-release.yml` |
+| `apps/nfc-attender-fw/test/test_state_machine/` (PlatformIO `native`) | `nfc-fw.yml` |
+
+Neither harness regenerates it. The check regenerates it in memory from the
+TypeScript spec and exits 1 if the committed copy differs, naming the cases that
+moved:
+
+```
+$ pnpm check:attendance-fixture
+packages/shared/fixtures/attendance-state-machine.json is up to date (41 cases, 9 sweep cases).
+```
+
+**What it defends.** Changing `packages/shared/src/attendance.ts` and
+re-baselining the fixture in the same commit would move the recorded C++
+divergences silently — the fixture would still be internally consistent and both
+suites would still be green, while the C++ port had drifted further from the
+spec without anyone being told. The check makes the regeneration deliberate:
+edit the spec and CI fails until you run `pnpm gen:attendance-fixture` and commit
+the result.
+
+**The chain this creates, which is the actual point.** Editing
+`packages/shared/src/attendance.ts` matches `packages/**`, so a TypeScript
+workflow runs and the fixture check fails as stale. Fixing that means
+regenerating, which touches `packages/shared/fixtures/**` — now in `nfc-fw.yml`'s
+path filter. So the firmware suite runs on the same commit, and the C++ port is
+checked against the new spec. **A spec change can no longer land without the C++
+side being exercised.** That closes the disjoint-filter gap described under
+[the attendance implementations](#the-attendance-rule-is-now-partly-cross-checked).
+
+**What it does not prove.** It compares the fixture against the spec. It does not
+compare implementations, and it does not fail on divergence: the six recorded
+divergences (`D1`–`D5`, including `D2a`) are all `"decision": "UNDECIDED"`, so
+they are *pinned as expected behaviour*, not treated as failures. A green tick
+means "the C++ port still diverges in exactly the six ways we wrote down", not
+"the two agree".
+
+---
+
 ## `claude.yml` and `claude-code-review.yml`
 
 Neither is a correctness check. Both use `anthropics/claude-code-action@v1` with
@@ -285,22 +372,26 @@ for those paths it is all there is.
 
 ## Path-filter topology
 
-Three workflows carry path filters, and together they partition the repo. The
+Four workflows carry path filters, and together they partition the repo. The
 partition is deliberate: the firmware has no use for a pnpm/Node/Rust pipeline,
 and widening the desktop app's filter to reach it would drag it through one. The
-comment at the top of `nfc-fw.yml` states exactly that reasoning.
+comment at the top of `nfc-fw.yml` states exactly that reasoning — and the one
+glob that now crosses the partition, `packages/shared/fixtures/**`, is narrow for
+the same reason: it is the single file the C++ suite actually reads, not
+`packages/**`.
 
-| Change touches | `calendar-test` | `nfc-test-build` | `nfc-fw` | `claude-code-review` (PRs) |
-|---|---|---|---|---|
-| `apps/ll-calendar/**` | yes | – | – | yes |
-| `apps/nfc-attender/**` | – | yes | – | yes |
-| `apps/nfc-attender-fw/**` | – | – | yes | yes |
-| `packages/**` | yes | yes | – | yes |
-| `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json` | yes | yes | – | yes |
-| `pb_hooks/**` | – | – | – | yes |
-| `docs/**` | – | – | – | yes |
-| `README.md`, `CLAUDE.md`, `.gitignore`, `package-lock.json` | – | – | – | yes |
-| `.github/workflows/claude*.yml`, `nfc-release.yml` | – | – | – | yes |
+| Change touches | `calendar-test` | `nfc-test-build` | `nfc-fw` | `pb-hooks-check` | `claude-code-review` (PRs) |
+|---|---|---|---|---|---|
+| `apps/ll-calendar/**` | yes | – | – | – | yes |
+| `apps/nfc-attender/**` | – | yes | – | – | yes |
+| `apps/nfc-attender-fw/**` | – | – | yes | – | yes |
+| `packages/**` (except the fixture) | yes | yes | – | – | yes |
+| `packages/shared/fixtures/**` | yes | yes | **yes** | – | yes |
+| `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `package.json`, `tsconfig.base.json` | yes | yes | – | – | yes |
+| `pb_hooks/**` | – | – | – | yes | yes |
+| `docs/**` | – | – | – | – | yes |
+| `README.md`, `CLAUDE.md`, `.gitignore`, `package-lock.json` | – | – | – | – | yes |
+| `.github/workflows/claude*.yml`, `nfc-release.yml` | – | – | – | – | yes |
 
 ### The `-fw` suffix is the whole trick
 
@@ -310,32 +401,40 @@ against the full path, and it requires the literal segment boundary
 The firmware was invisible to CI until `nfc-fw.yml` was added, and it stays
 outside the desktop pipeline by that one character.
 
-The mirror consequence is the important one: **a firmware-only change runs only
-`nfc-fw.yml`, and a `packages/`-only change never runs `nfc-fw.yml`.** The two
-sides of the attendance rule therefore never meet in a single run. See
-[the three implementations](#nothing-compares-the-three-attendance-implementations).
+The mirror consequence used to be the important one: a firmware-only change ran
+only `nfc-fw.yml`, and a `packages/`-only change never ran `nfc-fw.yml`, so the
+two sides of the attendance rule never met. That is now **partly** closed. The
+shared fixture is in both filter sets, so a commit that touches it starts both
+the TypeScript and the firmware suites. And because editing the spec makes the
+committed fixture stale — which the TypeScript workflows fail on — regenerating
+it is forced, and regenerating touches the fixture path. See
+[the attendance implementations](#the-attendance-rule-is-now-partly-cross-checked).
+
+A firmware-only change still runs only `nfc-fw.yml`, which is correct: it cannot
+affect the TypeScript spec.
 
 ### Paths no workflow covers
 
-Comparing the three filters against `git ls-files`, these tracked paths trigger
-no test or build workflow at all:
+Comparing the filters against `git ls-files`, these tracked paths trigger no test
+or build workflow at all:
 
 | Path | Files | Why it matters |
 |---|---|---|
-| `pb_hooks/**` | `README.md`, `users.pb.js`, `invites.pb.js`, `event_rsvps.pb.js` | Server-side authorisation logic. See below |
 | `tsconfig.base.json` | 1 | Now covered: added to the path filters of both TypeScript workflows, so editing it re-runs the only check the shared packages have |
-| `docs/**` | this file, `DEVELOPMENT.md`, `MONOREPO_ARCHITECTURE.md`, `RSVP_MIGRATION.md`, `SECURITY.md` | Docs only; no link checker exists |
+| `docs/**` | this file, `DEVELOPMENT.md`, `MONOREPO_ARCHITECTURE.md`, `RSVP_MIGRATION.md`, `POCKETBASE.md`, `SECURITY.md` | Docs only; no link checker exists |
 | `README.md`, `CLAUDE.md` | 2 | Docs only |
 | `package-lock.json` | 1 | Vestigial npm lockfile, contradicts `package.json` engines, read by nothing |
 | `.gitignore` | 1 | Harmless |
-| `.github/workflows/claude.yml`, `claude-code-review.yml`, `nfc-release.yml` | 3 | Each of the other three workflows lists itself in its own `paths`; these three do not, so editing a release or Claude workflow runs no verification |
+| `.github/workflows/claude.yml`, `claude-code-review.yml`, `nfc-release.yml` | 3 | The other workflows list themselves in their own `paths`; these three do not, so editing a release or Claude workflow runs no verification |
 
-`pb_hooks/` is the one that can cause real damage. It is server-side JavaScript
+`pb_hooks/**` used to head this list. It now has
+[`pb-hooks-check.yml`](#pb-hooks-checkyml--pocketbase-hook-syntax), which parses
+every hook file. That is a real gate against the failure mode that takes the
+whole JS VM down, but it is only a parse: the hooks are server-side JavaScript
 running in PocketBase's own VM on PocketHost — the layer that re-enforces the
-`users` collection's role constraints. It has no workflow, no tests, no lint (it
-is outside the pnpm workspace, so `pnpm -r lint` and `pnpm -r test` never reach
-it), and no build. Deployment is a manual file upload through the PocketHost
-admin UI. **A hook regression is discoverable only in production.**
+`users` collection's role constraints — and nothing in CI executes them or
+verifies the manual upload. **A hook *logic* regression is still discoverable
+only in production.**
 
 ### Paths covered more heavily than they need to be
 
@@ -388,64 +487,97 @@ triggers `nfc-test-build.yml` — but no job in that workflow compiles it.
 `pnpm tauri build` builds `src-tauri` only. **The enroll CLI is never built by
 CI.**
 
-### `pb_hooks/` has no workflow, no tests, no lint
+### `pb_hooks/` is parsed, never executed
 
 Covered above under [Paths no workflow covers](#paths-no-workflow-covers).
-Restated here because it belongs on this list: three files of production
-authorisation logic with zero automated verification and a manual deploy.
+Restated here because it belongs on this list: `pb-hooks-check.yml` proves the
+three files parse, which is enough to stop a syntax error taking down the whole
+JS VM. It proves nothing about the authorisation logic those files contain, and
+deployment is still a manual upload nothing verifies.
 
-### Nothing compares the three attendance implementations
+### The attendance rule is now partly cross-checked
 
-The attendance rule exists three times:
+This item used to read "nothing compares the three attendance implementations".
+That is no longer accurate, but the correction is narrower than it sounds. The
+rule exists **four** times, and the shared fixture harnesses **two** of them:
 
-| Implementation | File | Checked by |
+| Implementation | File | Runs against the fixture? |
 |---|---|---|
-| Canonical TypeScript | `packages/shared/src/attendance.ts` (`computeCheckInAction`) | `tsc` in both TS workflows; behaviourally, whatever the app suites exercise |
-| Hand-duplicated `deriveStatus` | `packages/pb-client/src/queries/attendance.ts` | Same |
-| C++ port | `apps/nfc-attender-fw/src/state_machine.cpp` | `pio test -e native`, in `nfc-fw.yml` |
+| Canonical TypeScript — the spec | `packages/shared/src/attendance.ts` | **Yes**, via `attendance-fixture.test.ts` (Vitest) |
+| C++ port | `apps/nfc-attender-fw/src/state_machine.cpp` | **Yes**, via the PlatformIO `native` suite |
+| Hand-duplicated `deriveStatus` | `packages/pb-client/src/queries/attendance.ts` | **No** — listed in the fixture's `implementations`, harnessed by nothing |
+| Hand-duplicated `splitStatus` | `packages/pb-client/scripts/backfill-arrival.ts` | **No** — same |
 
-The second carries a `MUST STAY IN SYNC WITH packages/shared/src/attendance.ts:deriveStatus`
-banner explaining that it is duplicated to avoid a package cycle — `shared`
-imports `TIME_THRESHOLDS` from `pb-client`, so `pb-client` importing `shared`
-would close the loop. The comment instructs the author to change both and re-run
-both suites. That instruction is enforced by nothing.
+**What is now genuinely covered.** `packages/shared/fixtures/attendance-state-machine.json`
+is committed, and both the Vitest and the C++ suites read that same file — so the
+spec and the C++ port are compared against one shared set of 41 cases (plus 9
+sweep cases). The disjoint-filter problem is closed too: the fixture path is in
+`nfc-fw.yml`'s filter as well as both TypeScript workflows', and
+`pnpm check:attendance-fixture` fails when the committed fixture no longer matches
+the spec. Editing the spec therefore forces a regeneration, and the regeneration
+touches the path that starts the firmware suite. A spec change can no longer land
+without the C++ side running on the same commit. See
+[The attendance fixture check](#the-attendance-fixture-check).
 
-The third is described in `CLAUDE.md` as "verified against the same fixtures",
-but there is no shared fixture file in the repo, and structurally there cannot be
-a shared run: the C++ side executes in `nfc-fw.yml` (filter
-`apps/nfc-attender-fw/**`) and the TS side in the two TS workflows (filters
-`apps/ll-calendar/**` / `apps/nfc-attender/**` / `packages/**`). Those filter sets
-are **disjoint**. A change to `packages/shared/src/attendance.ts` never starts
-the firmware tests; a change to `state_machine.cpp` never starts the TS ones. No
-job ever holds both implementations' results.
+**What is still not covered, and matters most.** The fixture *records* divergence
+rather than forbidding it. All six entries in its `divergences` block — `D1`
+through `D5`, including the masked `D2a` — carry `"decision": "UNDECIDED"`, and
+both harnesses assert the divergent behaviour as expected. So:
 
-So: three implementations of one specification, no cross-check, and a divergence
-would show up as one device marking a learner late while the dashboard says
-present.
+- A green tick means **"the C++ port still diverges in exactly the six recorded
+  ways"**, not "the two agree". Those six include real production-visible
+  behaviour: `D1`, a one-minute window at 16:59 where the dashboard checks a
+  learner out and the reader refuses the tap; `D2`, a learner who never returned
+  from lunch being checked out on one path and left checked in on the other; and
+  `D3`, an afternoon no-scan window that exists only on the device.
+- `D4` records that `findLearnersToMarkAbsent` was never ported at all, so the
+  sweep cases run against the spec only and the device can never mark anyone
+  absent.
+- The two `pb-client` duplicates remain enforced by comment alone. The
+  `MUST STAY IN SYNC WITH packages/shared/src/attendance.ts:deriveStatus` banner
+  explains the duplication exists to avoid a package cycle — `shared` imports
+  `TIME_THRESHOLDS` from `pb-client`, so `pb-client` importing `shared` would
+  close the loop — and instructs the author to change both. **Nothing enforces
+  that.** A fixture case cannot catch it, because no harness calls those copies.
 
-### A calendar `.tsx` test is silently never collected
+So the honest summary is: two of four implementations are now pinned against one
+shared fixture and cannot drift silently, six known divergences between them are
+documented and frozen rather than fixed, and the other two implementations are
+still on the honour system.
 
-`apps/ll-calendar/package.json` sets:
+### The calendar `.tsx` collection trap is closed
+
+`apps/ll-calendar/package.json` used to set `testMatch: ["**/__tests__/**/*.test.ts"]`
+— `.ts` only — so adding `__tests__/whatever.test.tsx` produced no failure and no
+warning: jest simply did not collect it and the workflow reported green on a
+suite that never ran the file. It now reads:
 
 ```json
-"testMatch": ["**/__tests__/**/*.test.ts"]
+"testMatch": [
+  "**/__tests__/**/*.test.ts",
+  "**/__tests__/**/*.test.tsx"
+]
 ```
 
-`.ts` only. Adding `__tests__/whatever.test.tsx` produces no failure and no
-warning — jest simply does not collect it, and the workflow reports green on a
-suite that never ran your file. Today `apps/ll-calendar/__tests__/` holds exactly
-one file, `calendar-utils.test.ts`, so nothing is currently being dropped; the
-trap is set for the first component test anyone writes.
+Both extensions are collected. `apps/ll-calendar/__tests__/` holds three files
+today (`calendar-utils.test.ts`, `rsvp-errors.test.ts`,
+`expand-events-start-boundary.test.ts`).
 
-The dashboard has no such problem: `apps/nfc-attender/vitest.config.ts` sets no
-`include`, so Vitest's default picks up `.tsx`, and 3 of its 12 test files
+What remains true is the layer below: the `ts-jest` transform still sets
+`"diagnostics": false`, so a type error never surfaces during a test run.
+`pnpm --filter ll_calendar typecheck` is now a separate step in
+`calendar-test.yml` and is the only thing that reads the app's own types.
+
+The dashboard never had this problem: `apps/nfc-attender/vitest.config.ts` sets
+no `include`, so Vitest's default picks up `.tsx`, and 3 of its 13 test files
 are `.tsx`.
 
 ### The Expo app is never built
 
 `calendar-test.yml` has no build job. No `expo export`, no EAS build, no iOS or
-Android compile anywhere in CI. A change that lints and passes one jest file can
-still fail to bundle.
+Android compile anywhere in CI. The app does now define `pnpm build`
+(`expo export --platform web`, verified working), but no workflow runs it, so a
+change that lints, typechecks and passes its tests can still fail to bundle.
 
 ### `packages/*` are never linted
 

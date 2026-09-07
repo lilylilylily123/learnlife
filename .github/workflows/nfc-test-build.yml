@@ -65,6 +65,14 @@ jobs:
       - name: Typecheck shared packages
         run: pnpm -r --filter "./packages/*" typecheck
 
+      # The Vitest suite below and the C++ suite in nfc-fw.yml both read
+      # packages/shared/fixtures/attendance-state-machine.json. This step
+      # regenerates it from the TypeScript spec in memory and fails if the
+      # committed copy differs, so changing the spec cannot silently
+      # re-baseline the recorded C++ divergences along with it.
+      - name: Check attendance fixture is in sync
+        run: pnpm check:attendance-fixture
+
       - name: Test
         run: pnpm --filter nfc-attender test
 

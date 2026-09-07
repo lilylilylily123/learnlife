@@ -43,6 +43,15 @@ jobs:
       - name: Typecheck shared packages
         run: pnpm -r --filter "./packages/*" typecheck
 
+      # Same reasoning as the typecheck above, applied to the fixture: without
+      # it a release can be published from a tree whose committed fixture no
+      # longer matches the TypeScript spec, which means the recorded C++
+      # divergences are stale and the shipped app's attendance behaviour is not
+      # the one the fixture claims. This workflow is tag-triggered with no path
+      # filter, so the check always runs.
+      - name: Check attendance fixture is in sync
+        run: pnpm check:attendance-fixture
+
       - name: Test
         run: pnpm --filter nfc-attender test
 
