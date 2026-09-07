@@ -37,6 +37,12 @@ jobs:
       - name: Lint
         run: pnpm --filter nfc-attender lint
 
+      # Same gate as nfc-test-build.yml. Without it a release can be published
+      # while packages/* has type errors, since the shared packages define no
+      # test script and tsc is their only direct check.
+      - name: Typecheck shared packages
+        run: pnpm -r --filter "./packages/*" typecheck
+
       - name: Test
         run: pnpm --filter nfc-attender test
 

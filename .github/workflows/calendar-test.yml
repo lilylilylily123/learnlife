@@ -10,6 +10,9 @@ on:
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
       - "package.json"
+      # Every packages/*/tsconfig.json extends it, so editing it changes the
+      # semantics of the only check those packages have.
+      - "tsconfig.base.json"
       - ".github/workflows/calendar-test.yml"
   pull_request:
     branches:
@@ -20,6 +23,7 @@ on:
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
       - "package.json"
+      - "tsconfig.base.json"
       - ".github/workflows/calendar-test.yml"
 
 concurrency:
