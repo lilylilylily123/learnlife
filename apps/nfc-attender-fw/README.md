@@ -12,7 +12,7 @@ CSV export. This device is the **tap terminal**.
 ## Quick start
 
 ```bash
-# Native unit tests (no hardware needed) — 130 cases
+# Native unit tests (no hardware needed) — 134 cases
 pio test -e native
 
 # Build
@@ -167,8 +167,10 @@ morning. Expect ~500; investigate above ~800.
 | `q` | Queue depth, pending entries, dead-letter size |
 | `r` | Roster size and age |
 | `heap` | Free / minimum-ever / largest-block heap |
+| `i2c` | Scan the I²C bus and name what answers. The same scan the boot log prints |
+| `tap <uid>` | Inject a scan as if a card were read. Takes the identical path — roster lookup, clock gate, state machine, queue, network — so the whole pipeline is exercisable with a broken or absent reader |
 | `ota` | OTA hostname and upload command |
-| `v` | Firmware version, build stamp, device id/name, PocketBase URL |
+| `v` | Firmware version, build stamp, device id/name, PocketBase URL, and whether the PN532 came up |
 | `w` | Wipe today's PocketBase row for the last-scanned learner |
 | `wifi <ssid>\|<pw>` | Update WiFi credentials and reboot |
 | `RESET` (within 2 s of boot) | Wipe NVS and re-enter provisioning |

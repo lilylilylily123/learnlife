@@ -55,6 +55,12 @@ jobs:
       - name: Lint
         run: pnpm --filter nfc-attender lint
 
+      # The shared packages have no test script of their own — their only
+      # coverage is whatever the apps exercise transitively. tsc is the one
+      # check that reads all of them, so it runs in both TS workflows.
+      - name: Typecheck shared packages
+        run: pnpm -r --filter "./packages/*" typecheck
+
       - name: Test
         run: pnpm --filter nfc-attender test
 

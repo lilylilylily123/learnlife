@@ -8,6 +8,10 @@ out/
 .next/
 .expo/
 build/
+# tsconfig.base.json sets composite: true, so every package emits one of
+# these next to its tsconfig. They are per-machine incremental caches and
+# churn on every `pnpm typecheck`.
+*.tsbuildinfo
 
 # Tauri
 src-tauri/target/

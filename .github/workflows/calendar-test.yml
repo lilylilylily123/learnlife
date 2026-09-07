@@ -53,5 +53,11 @@ jobs:
       - name: Lint
         run: pnpm --filter ll_calendar lint
 
+      # See the note in nfc-test-build.yml: the shared packages ship no tests,
+      # so tsc is the only check that covers them, and both workflows trigger
+      # on packages/**.
+      - name: Typecheck shared packages
+        run: pnpm -r --filter "./packages/*" typecheck
+
       - name: Test
         run: pnpm --filter ll_calendar test

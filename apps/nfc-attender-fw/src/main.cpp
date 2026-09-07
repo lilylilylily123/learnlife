@@ -64,6 +64,11 @@ QueueHandle_t g_flush_signal = nullptr;  // any-value signal to wake the network
 // to remember IDs.
 std::string g_last_learner_id;
 
+// Did the PN532 come up? Reported by `v`, because on a unit with no OLED
+// fitted the boot line scrolls away and the glyph has nowhere to render —
+// leaving no way to ask a device whether its reader is alive.
+bool g_nfc_ok = false;
+
 void post_ui(ui::Event ev, const char* name = "") {
   UiMsg m{};
   m.event = ev;
@@ -281,7 +286,10 @@ constexpr int64_t kNtpRetryMs = 30000;
           config::load(c);
           ota::init(c.device_id, c.ota_password);
         }
-        // First-online roster refresh; in phase 3 also drain on schedule.
+        // Roster refresh, on the offline→online edge ONLY. Attendance rows
+        // are delta-polled every kDeltaPollMs, the roster is not — so a
+        // learner added or re-carded mid-day does not reach a device that has
+        // stayed online, until a WiFi flap or a reboot. Known gap.
         std::vector<pb_client::LearnerRow> items;
         if (pb_client::ensure_token() && pb_client::fetch_roster(items)) {
           roster::replace(items);
@@ -503,7 +511,16 @@ void setup() {
   } else {
     Serial.println("[fs] LittleFS mounted");
   }
+  // Before ui::init(), because the first Wire.begin() hands SDA/SCL to the
+  // I2C peripheral and enables the internal pull-ups, which would mask the
+  // external ones this is measuring.
+  nfc::probe_i2c_lines();
   ui::init();
+  // Bus inventory here, not inside nfc::init(): run_provisioning() below never
+  // returns on an unprovisioned unit, so anything printed after it is invisible
+  // on exactly the devices being set up for the first time. ui::init() has
+  // already brought Wire up.
+  nfc::scan_i2c();
   buzzer::init();
   time_sync::init();
 
@@ -519,9 +536,14 @@ void setup() {
     config::run_provisioning();
   }
 
-  if (!nfc::init()) {
-    Serial.println("[boot] NFC init failed — continuing in degraded mode");
-    ui::set_network_error(true);  // reuse the error indicator for now
+  g_nfc_ok = nfc::init();
+  if (!g_nfc_ok) {
+    Serial.println("[boot] NFC init failed — no tap will be recorded until "
+                   "this is fixed. Check the [i2c] scan above.");
+    // Its own indicator, not the network one: network_task clears that flag
+    // the moment WiFi comes up, which used to make a dead reader look
+    // perfectly healthy a few seconds into boot.
+    ui::set_reader_error(true);
   }
 
   // Roster and queue come up BEFORE WiFi, and that ordering is the point.
@@ -541,8 +563,14 @@ void setup() {
   // than only after the next tap.
   ui::set_pending_count(queue::size());
 
+  // Bracketed deliberately: a marginal supply dies inside WiFi.mode() when the
+  // RF front-end powers up, long before any frame is sent. Without a line on
+  // each side of it, that failure is indistinguishable from a WiFi problem.
+  Serial.println("[wifi] powering radio");
   WiFi.mode(WIFI_STA);
+  Serial.println("[wifi] radio up");
   if (!cfg.wifi_ssid.empty()) {
+    Serial.printf("[wifi] associating with '%s'\n", cfg.wifi_ssid.c_str());
     WiFi.begin(cfg.wifi_ssid.c_str(), cfg.wifi_pw.c_str());
   }
   // Must happen before any task starts: pb_client's token, config snapshot and
@@ -572,8 +600,10 @@ void handle_console_line(const std::string& line) {
     Serial.println("[cli]   t off            clear override");
     Serial.println("[cli]   c                clear local today-cache");
     Serial.println("[cli]   heap             free / min-ever / largest block");
+    Serial.println("[cli]   i2c              scan the I2C bus for devices");
     Serial.println("[cli]   q                queue depth + pending entries");
-    Serial.println("[cli]   r                roster size + age");
+    Serial.println("[cli]   r                roster size + age + first entries");
+    Serial.println("[cli]   tap <uid>        inject a scan as if a card were read");
     Serial.println("[cli]   ota              OTA hostname + upload command");
     Serial.println("[cli]   v                firmware version + device identity");
     Serial.println("[cli]   w                wipe PB row for last-scanned learner");
@@ -617,6 +647,10 @@ void handle_console_line(const std::string& line) {
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
     return;
   }
+  if (line == "i2c") {
+    llattender::nfc::scan_i2c();
+    return;
+  }
   if (line == "v") {
     llattender::config::DeviceConfig c;
     llattender::config::load(c);
@@ -626,6 +660,9 @@ void handle_console_line(const std::string& line) {
                   c.device_id.empty() ? "-" : c.device_id.c_str(),
                   c.device_name.empty() ? "-" : c.device_name.c_str());
     Serial.printf("[cli] pb url: %s\n", c.pb_url.c_str());
+    Serial.printf("[cli] reader: %s\n",
+                  g_nfc_ok ? "PN532 ok"
+                           : "FAULT — PN532 did not init, no tap is recorded");
     return;
   }
   if (line == "ota") {
@@ -657,6 +694,27 @@ void handle_console_line(const std::string& line) {
                     n, static_cast<long>(age),
                     llattender::roster::ready() ? "ready" : "NOT ready");
     }
+    llattender::roster::debug_dump();
+    return;
+  }
+  if (line.rfind("tap ", 0) == 0) {
+    // Push onto g_scan_q exactly as nfc_task does, so the injected scan takes
+    // the identical path: roster lookup, clock gate, state machine, queue,
+    // then network. The reader is the only part of the system this bypasses,
+    // which is what makes it useful while the hardware is broken.
+    std::string uid = line.substr(4);
+    while (!uid.empty() && uid.back() == ' ') uid.pop_back();
+    if (uid.empty() || uid.size() >= sizeof(ScanMsg::uid_hex)) {
+      Serial.println("[cli] usage: tap <uid-hex>  (see `r` for known UIDs)");
+      return;
+    }
+    ScanMsg m{};
+    std::strncpy(m.uid_hex, uid.c_str(), sizeof(m.uid_hex) - 1);
+    if (xQueueSend(g_scan_q, &m, 0) != pdTRUE) {
+      Serial.println("[cli] scan queue full — try again");
+      return;
+    }
+    Serial.printf("[cli] injected tap uid=%s\n", uid.c_str());
     return;
   }
   if (line == "c") {

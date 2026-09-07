@@ -26,17 +26,13 @@ bool init();
 // Append a pending write to the on-disk queue. Returns false on disk error.
 bool append(const PendingScan& s);
 
-// Drain queued entries by calling `writer` on each. If `writer` returns true,
-// the entry is removed from the queue. If false, drain stops and the entry
-// (and everything after it) stays for the next attempt.
+// Drain queued entries by calling `writer` on each, removing the ones it
+// reports as written. Stops at the first entry that must be retried, leaving
+// it and everything after it for the next attempt; a `Permanent` outcome
+// moves the entry to `/queue.dead.jsonl` instead of blocking the head of the
+// queue forever.
 //
 // Returns the number of entries successfully drained.
-int drain(const std::function<bool(const PendingScan&)>& writer);
-
-// Drain with full outcome reporting. Preferred over drain(): a plain bool
-// can't distinguish "the network blipped" from "this row was deleted and the
-// write will 404 forever", and the latter would otherwise be retried
-// indefinitely at the head of the queue, blocking every scan behind it.
 int drain_ex(const std::function<WriteOutcome(const PendingScan&)>& writer);
 
 // Number of entries still pending.

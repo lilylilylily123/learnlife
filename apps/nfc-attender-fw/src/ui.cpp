@@ -35,6 +35,7 @@ struct State {
   char name[64] = {0};
   bool queued_offline = false;  // sticks until next non-Queued event
   bool network_error = false;
+  bool reader_error = false;    // PN532 never came up; nothing can be recorded
   int pending = 0;              // queued scans not yet accepted by PocketBase
   char ap_ssid[32] = {0};
   char ap_pw[24] = {0};
@@ -108,6 +109,15 @@ void draw_wifi_error(int16_t x, int16_t y) {
   g_oled.drawLine(x + 8, y + 0, x + 0, y + 8, SSD1306_WHITE);
 }
 
+// Tiny card-with-X glyph: a card outline crossed out. Drawn top-LEFT, unlike
+// the WiFi indicator top-right, because the two faults are independent and
+// both have to be readable at once.
+void draw_reader_error(int16_t x, int16_t y) {
+  g_oled.drawRoundRect(x, y + 1, 10, 7, 2, SSD1306_WHITE);
+  g_oled.drawLine(x + 1, y + 2, x + 8, y + 6, SSD1306_WHITE);
+  g_oled.drawLine(x + 8, y + 2, x + 1, y + 6, SSD1306_WHITE);
+}
+
 // Four vertical bars at increasing heights; fill the first N based on RSSI
 // strength (0..4). Drawn 9 px tall, 10 px wide overall.
 void draw_wifi_bars(int16_t x, int16_t y, int strength) {
@@ -132,6 +142,11 @@ int wifi_strength_from_rssi(int rssi) {
 }
 
 void render_overlay() {
+  // Steady, not blinking, and drawn before the early return below so a
+  // network outage can never hide it. The WiFi glyph blinks because
+  // connectivity comes back by itself; a reader fault does not.
+  if (g_st.reader_error) draw_reader_error(0, 0);
+
   if (g_st.network_error) {
     if ((millis() / 500) & 1) draw_wifi_error(kWidth - 10, 0);
     return;
@@ -174,7 +189,13 @@ void render_idle() {
   format_clock(clk, sizeof(clk));
   draw_centered(clk, 18, 3);
 
-  if (g_st.pending > 0) {
+  if (g_st.reader_error) {
+    // Outranks the pending count: undelivered scans are taps that were
+    // recorded and will arrive late, whereas a dead reader means no tap is
+    // being recorded at all. Spelled out in words rather than left to the
+    // corner glyph, because this is the state a guide must escalate.
+    draw_centered("READER FAULT", 52, 1);
+  } else if (g_st.pending > 0) {
     // Replaces the date line rather than squeezing in beside it. The date is
     // decoration; scans sitting undelivered is the thing a guide needs to see,
     // because otherwise a device that records but never uploads looks exactly
@@ -292,8 +313,20 @@ void redraw() {
 
 bool init() {
   Wire.begin();  // safe to call again from nfc::init()
-  if (!g_oled.begin(SSD1306_SWITCHCAPVCC, kOledAddr)) {
+  // Probe the address ourselves before trusting the driver. Adafruit_SSD1306
+  // ::begin() never touches the bus to check: it returns false only if the
+  // framebuffer malloc fails, then blind-writes the init sequence with no ACK
+  // check. Left alone it reports "init ok" with no display attached, which is
+  // worse than no message at all — it certifies the I2C bus as healthy and
+  // sends whoever is debugging the PN532 looking at the wrong end of it.
+  Wire.beginTransmission(kOledAddr);
+  if (Wire.endTransmission() != 0) {
     Serial.println("[ui] SSD1306 not found at 0x3C — running headless");
+    g_have_oled = false;
+    return false;
+  }
+  if (!g_oled.begin(SSD1306_SWITCHCAPVCC, kOledAddr)) {
+    Serial.println("[ui] SSD1306 present at 0x3C but init failed — headless");
     g_have_oled = false;
     return false;
   }
@@ -386,6 +419,16 @@ void set_network_error(bool on) {
   Serial.printf("[ui] network_error=%d\n", on ? 1 : 0);
   if (g_st.network_error == on) return;
   g_st.network_error = on;
+  g_st.dirty = true;
+}
+
+void set_reader_error(bool on) {
+  // Logged unconditionally, because on a headless unit — no OLED fitted, or
+  // one that failed its own probe — the serial line is the only place this
+  // fault can surface at all.
+  Serial.printf("[ui] reader_error=%d\n", on ? 1 : 0);
+  if (g_st.reader_error == on) return;
+  g_st.reader_error = on;
   g_st.dirty = true;
 }
 

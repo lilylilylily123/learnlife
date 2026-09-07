@@ -143,6 +143,23 @@ std::time_t age_seconds() {
   return now > g_loaded_at ? now - g_loaded_at : 0;
 }
 
+void debug_dump(int max_items) {
+  Lock lk;
+  if (g_items.empty()) {
+    Serial.println("[roster] empty");
+    return;
+  }
+  int shown = 0;
+  for (const auto& l : g_items) {
+    if (shown >= max_items) break;
+    Serial.printf("[roster]   %-24s uid=%s\n", l.name.c_str(),
+                  l.nfc_id.empty() ? "(no card)" : l.nfc_id.c_str());
+    ++shown;
+  }
+  const int rest = static_cast<int>(g_items.size()) - shown;
+  if (rest > 0) Serial.printf("[roster]   ... and %d more\n", rest);
+}
+
 }  // namespace llattender::roster
 
 #endif  // LLATTENDER_NATIVE_BUILD

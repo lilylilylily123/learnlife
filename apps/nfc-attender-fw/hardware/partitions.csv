@@ -32,9 +32,9 @@
 # credentials, the PocketBase device account, and the device id are all still
 # there after reflashing. You do not have to re-run the captive portal.
 #
-# littlefs MOVES, so its contents are LOST and it is reformatted on first boot
-# (main.cpp mounts with formatOnFail=true). That means /roster.txt,
-# /queue.jsonl and /today.json are wiped.
+# The filesystem partition MOVES, so its contents are LOST and it is
+# reformatted on first boot (main.cpp mounts with formatOnFail=true). That
+# means /roster.txt, /queue.jsonl and /today.json are wiped.
 #
 #   -> The roster and today-cache re-fetch automatically. No action needed.
 #   -> The QUEUE DOES NOT. Any scans still waiting to reach PocketBase are
@@ -47,16 +47,24 @@
 #   0x00e000  otadata     8 KB   which app slot to boot
 #   0x010000  app0     1536 KB   firmware slot A
 #   0x190000  app1     1536 KB   firmware slot B (OTA target)
-#   0x310000  littlefs  896 KB   roster, queue, today-cache
+#   0x310000  spiffs    896 KB   roster, queue, today-cache — LittleFS-formatted
 #   0x3f0000  coredump   64 KB   panic dumps, readable with esp-coredump
 #
 # App partitions must start on a 64 KB boundary; data partitions on 4 KB.
 # Offsets above satisfy both and tile the 4 MB exactly with no gaps.
+#
+# The filesystem row is NAMED "spiffs" even though it holds LittleFS, and that
+# is deliberate. Arduino's LittleFS.begin() selects the partition by LABEL,
+# defaulting to "spiffs"; the SubType column has no littlefs value to use
+# instead. Naming it "littlefs" reads better and silently breaks the mount —
+# esp_littlefs reports `partition "spiffs" could not be found`, main.cpp falls
+# into the formatOnFail path, fails that too, and the device runs with no
+# persistence at all: no durable queue, no offline roster.
 #
 # Name,     Type, SubType,  Offset,   Size,     Flags
 nvs,        data, nvs,      0x9000,   0x5000,
 otadata,    data, ota,      0xe000,   0x2000,
 app0,       app,  ota_0,    0x10000,  0x180000,
 app1,       app,  ota_1,    0x190000, 0x180000,
-littlefs,   data, spiffs,   0x310000, 0xe0000,
+spiffs,     data, spiffs,   0x310000, 0xe0000,
 coredump,   data, coredump, 0x3f0000, 0x10000,

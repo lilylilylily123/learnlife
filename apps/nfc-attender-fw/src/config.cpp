@@ -153,8 +153,9 @@ std::string ap_ssid() {
   return buf;
 }
 
-// HTML form served at the AP's root. Inline CSS for a clean mobile look —
-// LittleFS isn't wired up yet so embedding in PROGMEM is the simplest path.
+// HTML form served at the AP's root. Inline CSS and a PROGMEM string rather
+// than a file on LittleFS: provisioning has to work on a unit whose
+// filesystem failed to mount, which is exactly when the setup page matters.
 const char* kFormHtml = R"HTML(<!doctype html>
 <html lang="en">
 <head>
