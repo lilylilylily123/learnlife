@@ -10,7 +10,7 @@ import {
   invites as invitesQ,
   rsvp as rsvpQ,
 } from "@learnlife/pb-client";
-import { computeRsvpAction, promoteFromWaitlist } from "@learnlife/shared";
+import { parsePBDate } from "@learnlife/shared";
 export { expandEvents } from "@learnlife/shared";
 export type {
   CalRecord,
@@ -207,15 +207,24 @@ export async function fetchMyRsvp(
 }
 
 /**
- * Submit an RSVP with client-side capacity + waitlist enforcement.
+ * Submit an RSVP. The server owns the outcome.
  *
- * NOTE: this is a stop-gap. The intended design is a PocketBase JS hook on
- * `event_rsvps` (see docs/RSVP_MIGRATION.md and pb_hooks/event_rsvps.pb.js),
- * which would enforce capacity atomically on the server. Pockethost's free
- * tier doesn't run custom hooks, so we do the math here. There's a small
- * race window where two simultaneous "Going" submissions can both think
- * they got the last seat — acceptable for low-concurrency usage but worth
- * fixing if/when hooks become available.
+ * `pb_hooks/event_rsvps.pb.js` reads `status` as the user's *intent*
+ * ("going" | "not_going") and computes the persisted `status` and
+ * `position` itself, rewriting "going" to "waitlisted" when the event is
+ * full. Capacity is a read-then-write, so only the server can make it
+ * atomic — two learners submitting "Going" at once would both read the same
+ * going-count and both conclude a seat was free. The client must therefore
+ * never compute the final status, and the hook rejects the request outright
+ * if it tries. `rsvpQ.submitRsvp` sends intent only, which is the contract.
+ *
+ * CLIENT-ONLY ENFORCEMENT BELOW — load-bearing, do not delete as redundant.
+ * `applyRsvpRules` returns early for `not_going` (it clears `position` and
+ * stops), so on a withdrawal the server checks nothing beyond ownership:
+ * not `rsvp_enabled`, not `rsvp_deadline`. These two guards are the only
+ * enforcement that path has. They are deliberately scoped to `not_going`;
+ * on the "going" path the hook enforces both itself, and repeating the
+ * check here would only add a stale second opinion and a round-trip.
  */
 export async function submitRsvp(input: {
   eventId: string;
@@ -223,140 +232,30 @@ export async function submitRsvp(input: {
   userId: string;
   choice: "going" | "not_going";
 }) {
-  const [calRecord, roster, existing] = await Promise.all([
-    calendarQ.getCalendarEntry(pb, input.eventId),
-    rsvpQ.fetchRsvpsForOccurrence(pb, input.eventId, input.occurrenceDate),
-    rsvpQ.fetchMyRsvp(pb, input.eventId, input.occurrenceDate, input.userId),
-  ]);
-
-  if (!calRecord.rsvp_enabled) {
-    throw new Error("RSVP is not enabled for this event");
-  }
-
-  // Compute the actor's final status against the current roster.
-  const decision = computeRsvpAction({
-    current: roster.map((r) => ({
-      id: r.id,
-      user: r.user,
-      status: r.status,
-      position: r.position,
-    })),
-    actorUserId: input.userId,
-    choice: input.choice,
-    rules: {
-      capacity:
-        calRecord.capacity != null && calRecord.capacity > 0
-          ? calRecord.capacity
-          : null,
-      allowWaitlist: calRecord.allow_waitlist !== false,
-      deadline: calRecord.rsvp_deadline ?? null,
-    },
-    now: new Date(),
-  });
-
-  if (!decision.accepted) {
-    if (decision.reason === "deadline_passed") {
-      throw new Error("RSVP deadline has passed.");
+  if (input.choice === "not_going") {
+    const calRecord = await calendarQ.getCalendarEntry(pb, input.eventId);
+    if (!calRecord.rsvp_enabled) {
+      throw new Error("RSVP is not enabled for this event.");
     }
-    throw new Error("This event is full.");
-  }
-
-  // Persist the final status/position. The pb-client query treats `status`
-  // as either intent or final state — server hook (if running) would
-  // re-validate; without a hook, we trust this.
-  const wasGoing = existing?.status === "going";
-  const isStillGoing = decision.status === "going";
-
-  const payload = {
-    event: input.eventId,
-    occurrence_date: input.occurrenceDate,
-    user: input.userId,
-    status: decision.status,
-    position: decision.position,
-    responded_at: new Date().toISOString(),
-  };
-
-  const result = existing
-    ? await pb.collection("event_rsvps").update(existing.id, payload)
-    : await pb.collection("event_rsvps").create(payload);
-
-  // If we just dropped from "going" to anything else, attempt to promote
-  // the front of the waitlist into the freed spot. Each promotion is a
-  // separate update — best-effort, swallow individual failures so one
-  // promotion blocking doesn't roll back the actor's submission.
-  if (wasGoing && !isStillGoing) {
-    await promoteWaitlistAfterDeparture(
-      input.eventId,
-      input.occurrenceDate,
-      calRecord.capacity ?? null,
-    );
-  }
-
-  return result;
-}
-
-export async function cancelRsvp(rsvpId: string) {
-  // Look up the row so we know whether to promote the waitlist after
-  // deletion. PB returns the record on delete only in newer versions, so
-  // fetch first to be safe.
-  let priorStatus: string | null = null;
-  let eventId: string | null = null;
-  let occurrenceDate: string | null = null;
-  let capacity: number | null = null;
-  try {
-    const rec = await pb.collection("event_rsvps").getOne(rsvpId);
-    priorStatus = rec.status;
-    eventId = rec.event;
-    occurrenceDate = rec.occurrence_date || null;
-    if (eventId) {
-      const cal = await calendarQ.getCalendarEntry(pb, eventId);
-      capacity = cal.capacity != null && cal.capacity > 0 ? cal.capacity : null;
+    if (
+      calRecord.rsvp_deadline &&
+      new Date() > parsePBDate(calRecord.rsvp_deadline)
+    ) {
+      throw new Error("RSVPs are closed for this event.");
     }
-  } catch {
-    // If lookup fails, we still try the delete; just skip promotion.
   }
 
-  await rsvpQ.cancelRsvp(pb, rsvpId);
-
-  if (priorStatus === "going" && eventId) {
-    await promoteWaitlistAfterDeparture(eventId, occurrenceDate, capacity);
-  }
+  return rsvpQ.submitRsvp(pb, input);
 }
 
 /**
- * Refresh the roster after a "going" user leaves and apply any promotions
- * the math says are now warranted. Best-effort: failures on individual
- * promotion updates are logged but don't throw, so one stuck row doesn't
- * block the others.
+ * Remove the user's RSVP entirely.
+ *
+ * No pre-read and no client-side promotion: the hook's
+ * `onRecordAfterDeleteSuccess` handler runs `maybePromoteWaitlist`, which
+ * promotes the front of the waitlist into the freed seat and renumbers the
+ * rest inside the same request.
  */
-async function promoteWaitlistAfterDeparture(
-  eventId: string,
-  occurrenceDate: string | null,
-  capacity: number | null,
-) {
-  if (capacity === null) return;
-  try {
-    const remaining = await rsvpQ.fetchRsvpsForOccurrence(pb, eventId, occurrenceDate);
-    const patches = promoteFromWaitlist(
-      remaining.map((r) => ({
-        id: r.id,
-        user: r.user,
-        status: r.status,
-        position: r.position,
-      })),
-      capacity,
-    );
-    await Promise.all(
-      patches.map((p) =>
-        pb
-          .collection("event_rsvps")
-          .update(p.id, { status: p.status, position: p.position })
-          .catch((err) => {
-            console.warn("[rsvp] promotion failed for", p.id, err?.message);
-          }),
-      ),
-    );
-  } catch (err) {
-    console.warn("[rsvp] could not run waitlist promotion", err);
-  }
+export async function cancelRsvp(rsvpId: string) {
+  return rsvpQ.cancelRsvp(pb, rsvpId);
 }
