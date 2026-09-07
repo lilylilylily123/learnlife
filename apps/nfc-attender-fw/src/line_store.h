@@ -45,7 +45,12 @@ class LineStore {
 
   // Atomically replace the entire contents. Used for compaction after a
   // drain. "Atomically" here means: either the old contents or the new ones
-  // survive a power cut, never a half-written mixture.
+  // survive a power cut, never a half-written mixture, and never nothing.
+  //
+  // That last clause is the load-bearing one, and it is why the LittleFS
+  // implementation is a two-phase rename rather than the shorter
+  // remove-then-rename: the short version has an instant where the only
+  // complete copy sits under a temp name nothing looks for on boot.
   virtual bool replace_all(const std::vector<std::string>& lines) = 0;
 
   // Approximate bytes on disk. Used to enforce a size cap without reading
@@ -133,7 +138,13 @@ class LittleFsLineStore : public LineStore {
   bool clear() override;
 
  private:
+  // Roll a power-cut-interrupted replace_all forward or back. Idempotent and
+  // self-triggering: every public method calls it, and the first call per
+  // boot does the work. const because size_bytes() is.
+  void recover() const;
+
   const char* path_;
+  mutable bool recovered_ = false;
 };
 
 }  // namespace llattender

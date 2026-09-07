@@ -64,6 +64,11 @@ QueueHandle_t g_flush_signal = nullptr;  // any-value signal to wake the network
 // to remember IDs.
 std::string g_last_learner_id;
 
+// Did the PN532 come up? Reported by `v`, because on a unit with no OLED
+// fitted the boot line scrolls away and the glyph has nowhere to render —
+// leaving no way to ask a device whether its reader is alive.
+bool g_nfc_ok = false;
+
 void post_ui(ui::Event ev, const char* name = "") {
   UiMsg m{};
   m.event = ev;
@@ -281,7 +286,10 @@ constexpr int64_t kNtpRetryMs = 30000;
           config::load(c);
           ota::init(c.device_id, c.ota_password);
         }
-        // First-online roster refresh; in phase 3 also drain on schedule.
+        // Roster refresh, on the offline→online edge ONLY. Attendance rows
+        // are delta-polled every kDeltaPollMs, the roster is not — so a
+        // learner added or re-carded mid-day does not reach a device that has
+        // stayed online, until a WiFi flap or a reboot. Known gap.
         std::vector<pb_client::LearnerRow> items;
         if (pb_client::ensure_token() && pb_client::fetch_roster(items)) {
           roster::replace(items);
@@ -528,9 +536,14 @@ void setup() {
     config::run_provisioning();
   }
 
-  if (!nfc::init()) {
-    Serial.println("[boot] NFC init failed — continuing in degraded mode");
-    ui::set_network_error(true);  // reuse the error indicator for now
+  g_nfc_ok = nfc::init();
+  if (!g_nfc_ok) {
+    Serial.println("[boot] NFC init failed — no tap will be recorded until "
+                   "this is fixed. Check the [i2c] scan above.");
+    // Its own indicator, not the network one: network_task clears that flag
+    // the moment WiFi comes up, which used to make a dead reader look
+    // perfectly healthy a few seconds into boot.
+    ui::set_reader_error(true);
   }
 
   // Roster and queue come up BEFORE WiFi, and that ordering is the point.
@@ -647,6 +660,9 @@ void handle_console_line(const std::string& line) {
                   c.device_id.empty() ? "-" : c.device_id.c_str(),
                   c.device_name.empty() ? "-" : c.device_name.c_str());
     Serial.printf("[cli] pb url: %s\n", c.pb_url.c_str());
+    Serial.printf("[cli] reader: %s\n",
+                  g_nfc_ok ? "PN532 ok"
+                           : "FAULT — PN532 did not init, no tap is recorded");
     return;
   }
   if (line == "ota") {

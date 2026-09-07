@@ -43,6 +43,19 @@ void show(Event ev, const char* learner_name = nullptr);
 // is currently being displayed.
 void set_network_error(bool on);
 
+// Toggle the persistent reader-fault indicator.
+//
+// Deliberately NOT a reuse of set_network_error, which is what this was
+// before: network_task clears that flag on every WiFi state change
+// (main.cpp), so a device whose PN532 never came up showed a clean screen
+// within seconds of boot. A dead reader is the one fault that makes the
+// device completely useless while looking completely fine — nothing is
+// recorded, and no learner or guide has any reason to suspect it.
+//
+// Nothing clears this: nfc::init() runs once and there is no re-probe, so
+// the fault is as permanent as the flag.
+void set_reader_error(bool on);
+
 // How many scans are waiting to reach PocketBase. Shown on the idle screen
 // when non-zero.
 //
