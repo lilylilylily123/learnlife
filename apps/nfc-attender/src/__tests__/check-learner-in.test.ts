@@ -62,6 +62,8 @@ function blankAttendance(overrides: Record<string, unknown> = {}) {
     lunch_events: null,
     status: null,
     lunch_status: null,
+    arrival: null,
+    justified: false,
     collectionId: "col1",
     collectionName: "attendance",
     created: "2026-04-08T08:00:00Z",
@@ -120,6 +122,99 @@ describe("checkLearnerIn", () => {
     expect(result?.type).toBe("check_in");
     expect(result?.status).toBe("late");
     expect(lastUpdateFields()).toMatchObject({ status: "late" });
+  });
+
+  // ── Regression: the write must never leave the row contradicting itself ──
+  //
+  // checkLearnerIn writes action.fields verbatim through a raw attendance
+  // update, so any field the state machine omits keeps whatever the row
+  // already held. When `justified` was omitted, a learner marked jAbsent who
+  // then tapped in ended up arrival "late" / justified false / status "jLate":
+  // summarizeAttendance reads the split pair and counted an UNJUSTIFIED late,
+  // while every legacy consumer reading `status` saw jLate.
+
+  it("writes justified: true when a legacy jAbsent row's learner taps in late", async () => {
+    // Pre-migration shape: the enum says justified, the column does not.
+    const existing = blankAttendance({ status: "jAbsent", justified: false });
+    mockBatchUpdateAttendance.mockResolvedValueOnce({
+      attendance: existing,
+      existing,
+      created: false,
+    });
+
+    const result = await checkLearnerIn("ABCD1234", {
+      testTime: new Date("2026-04-08T10:30:00"),
+      testDate: "2026-04-08",
+    });
+
+    expect(result?.type).toBe("check_in");
+    expect(lastUpdateFields()).toMatchObject({
+      arrival: "late",
+      justified: true,
+      status: "jLate",
+    });
+  });
+
+  it("writes justified: false when an excused learner turns up on time", async () => {
+    // The other direction: leaving `justified` untouched here would strand a
+    // true flag on a present day, which has no jPresent to justify.
+    const existing = blankAttendance({
+      status: "jAbsent",
+      arrival: "absent",
+      justified: true,
+    });
+    mockBatchUpdateAttendance.mockResolvedValueOnce({
+      attendance: existing,
+      existing,
+      created: false,
+    });
+
+    const result = await checkLearnerIn("ABCD1234", {
+      testTime: new Date("2026-04-08T09:00:00"),
+      testDate: "2026-04-08",
+    });
+
+    expect(result?.type).toBe("check_in");
+    expect(lastUpdateFields()).toMatchObject({
+      arrival: "present",
+      justified: false,
+      status: "present",
+    });
+  });
+
+  it("always writes all three of arrival, justified and status together", async () => {
+    // The structural guarantee: whatever the prior row looked like, the write
+    // never sets a subset that could disagree with the fields it left behind.
+    for (const prior of [
+      {},
+      { status: "jAbsent", justified: false },
+      { status: "jLate", justified: true },
+      { justified: true },
+      { status: "absent", arrival: "absent" },
+    ]) {
+      mockUpdate.mockClear();
+      const existing = blankAttendance(prior);
+      mockBatchUpdateAttendance.mockResolvedValueOnce({
+        attendance: existing,
+        existing,
+        created: false,
+      });
+
+      await checkLearnerIn("ABCD1234", {
+        testTime: new Date("2026-04-08T10:30:00"),
+        testDate: "2026-04-08",
+      });
+
+      const written = lastUpdateFields();
+      const label = JSON.stringify(prior);
+      expect(written, label).not.toBeNull();
+      expect(Object.keys(written as object).sort(), label).toEqual([
+        "arrival",
+        "justified",
+        "status",
+        "time_in",
+      ]);
+    }
   });
 
   it("does not re-check-in if already checked in", async () => {

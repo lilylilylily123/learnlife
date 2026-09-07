@@ -12,6 +12,16 @@ name: "NFC Firmware: Test & Build"
 # Note the firmware directory is excluded from the pnpm workspace on purpose
 # (see pnpm-workspace.yaml) — it is a C++ project, not a package. Nothing here
 # runs pnpm.
+#
+# The filters below also include the shared attendance fixture. The native test
+# suite loads packages/shared/fixtures/attendance-state-machine.json (see
+# test/test_state_machine/fixture_runner.h) and asserts the C++ port against it,
+# so a commit touching only that file changes what this suite checks. Without
+# the extra glob such a commit would skip this workflow and C++ drift would land
+# unnoticed — the exact failure the fixture exists to prevent. Note it is the
+# fixture path specifically, not `packages/**`: the firmware reads that one JSON
+# file and nothing else in the workspace, and the point of this split is filters
+# that match what a job actually consumes.
 
 on:
   push:
@@ -20,12 +30,14 @@ on:
       - "hardware/**"
     paths:
       - "apps/nfc-attender-fw/**"
+      - "packages/shared/fixtures/**"
       - ".github/workflows/nfc-fw.yml"
   pull_request:
     branches:
       - main
     paths:
       - "apps/nfc-attender-fw/**"
+      - "packages/shared/fixtures/**"
       - ".github/workflows/nfc-fw.yml"
 
 concurrency:

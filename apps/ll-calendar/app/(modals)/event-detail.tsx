@@ -20,6 +20,7 @@ import {
   getCalendarEntry,
   submitRsvp,
 } from "@/lib/pocketbase";
+import { mapRsvpError } from "@/lib/errors";
 import { countRsvps } from "@learnlife/shared";
 import type {
   CalRecord,
@@ -180,10 +181,10 @@ export default function EventDetailModal() {
         choice,
       });
       await loadAll();
-    } catch (err: any) {
-      // Server hook throws BadRequestError with a useful .message — surface it.
-      const msg = err?.message ?? "Could not save your RSVP. Please try again.";
-      Alert.alert("RSVP failed", msg);
+    } catch (err: unknown) {
+      // Never surface a raw PB body: the hook's rejections are mapped to our
+      // own copy, everything else to a neutral string.
+      Alert.alert("RSVP failed", mapRsvpError(err));
     } finally {
       setSubmitting(null);
     }
@@ -195,8 +196,8 @@ export default function EventDetailModal() {
     try {
       await cancelRsvp(myRsvp.id);
       await loadAll();
-    } catch (err: any) {
-      Alert.alert("Couldn't clear RSVP", err?.message ?? "Please try again.");
+    } catch (err: unknown) {
+      Alert.alert("Couldn't clear RSVP", mapRsvpError(err));
     } finally {
       setSubmitting(null);
     }
@@ -321,11 +322,11 @@ export default function EventDetailModal() {
               {/* User-facing status feedback */}
               {myRsvp?.status === "waitlisted" && myRsvp.position != null && (
                 <Text style={s.rsvpFeedback}>
-                  You're #{myRsvp.position} on the waitlist
+                  {"You're"} #{myRsvp.position} on the waitlist
                 </Text>
               )}
               {myRsvp?.status === "going" && (
-                <Text style={s.rsvpFeedback}>You're going 🎉</Text>
+                <Text style={s.rsvpFeedback}>{"You're going 🎉"}</Text>
               )}
               {deadlinePassed && (
                 <Text style={s.rsvpFeedback}>

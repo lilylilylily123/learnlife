@@ -12,7 +12,7 @@ CSV export. This device is the **tap terminal**.
 ## Quick start
 
 ```bash
-# Native unit tests (no hardware needed) — 134 cases
+# Native unit tests (no hardware needed) — 181 cases
 pio test -e native
 
 # Build
@@ -28,9 +28,21 @@ pio run -e esp32dev_ota -t upload \
     --upload-flags --auth=<ota-password>
 ```
 
+All `pio` commands in this file run from `apps/nfc-attender-fw/`.
+
 ⚠️ **First flash of any device must be over USB.** The custom partition table
 (`hardware/partitions.csv`) cannot be applied over the air. See
 [Deployment](#deployment).
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [`docs/SOURCE_MAP.md`](docs/SOURCE_MAP.md) | Per-module reference for all 46 files in `src/`: exported API, pure/hardware side, covering test suite, invariants. Includes the `main.cpp` boot order and its load-bearing ordering constraints |
+| [`docs/TESTING.md`](docs/TESTING.md) | How to run the 13 suites, what each covers, how the host build works, and the procedure for adding a pure module without it being silently skipped |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Runbook for a device in service: provisioning, the boot log line by line, the full console reference, OTA, factory reset, factory-image recovery, symptom-to-cause, and the known gaps |
+| [`hardware/README.md`](hardware/README.md) | BOM, wiring table, assembly runbook, and the wiring/I²C troubleshooting table |
+| [`hardware/enclosure/README.md`](hardware/enclosure/README.md) | Parametric OpenSCAD case, test prints, print settings |
 
 ---
 
@@ -95,11 +107,14 @@ machine) → UI event + durable queue append → `net` drains to PocketBase.
 `LLATTENDER_NATIVE_BUILD`):
 
 `main` · `nfc` · `ui` · `buzzer` · `time_sync` · `config` · `pb_client` ·
-`queue` · `roster` · `ota` · `line_store.cpp` · `pb_ca.h`
+`queue` · `roster` · `ota` · `line_store.cpp` · `pb_ca.h` · `version.h`
 
 The split is deliberate: every non-trivial decision lives in a pure module with
 tests, and the Arduino files are thin adapters. That's what makes a power cut
 mid-compaction or a corrupt queue line testable at all.
+
+**Per-module reference — API, covering test suite, invariants, and the
+`main.cpp` boot order: [`docs/SOURCE_MAP.md`](docs/SOURCE_MAP.md).**
 
 ---
 
@@ -178,17 +193,31 @@ morning. Expect ~500; investigate above ~800.
 `heap` is how you verify the streaming parser is holding: watch **min ever**
 across several 30 s polls. If it stops falling, memory is stable.
 
+Worked detail for every command, plus the boot log line by line:
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
 ---
 
 ## Testing
 
 ```bash
-pio test -e native        # all 134
+pio test -e native        # all 181
 pio test -e native -f test_queue_core
 ```
 
 Covers pure logic only. Anything touching Arduino, WiFi or LittleFS is compiled
 out — those paths are verified on-device (see [Verification](#verification)).
+
+47 of those 181 cases come from the shared-fixture harness — 41 entries in
+`packages/shared/fixtures/attendance-state-machine.json` plus six guard and
+report cases. That fixture is the same file the Vitest suite in
+`apps/nfc-attender` reads. The attendance rule is implemented
+four times across this repo, and the copies had already drifted; a case both
+harnesses run is now a case where drift fails a build. Known TS/C++
+divergences are pinned rather than hidden — they report `KNOWN DIVERGENT`
+instead of failing. Six are recorded, including one (D5) that reproduces on
+the device path a self-contradicting write the dashboard was just fixed to
+stop making. See [`docs/TESTING.md`](docs/TESTING.md#the-cross-language-attendance-fixture).
 
 ⚠️ `build_src_filter` and `test_filter` in `platformio.ini` are **explicit
 allow-lists**. A new pure module missing from both is silently never compiled
@@ -198,6 +227,9 @@ CI (`.github/workflows/nfc-fw.yml`) runs the tests, builds the firmware with a
 size gate against the app partition, and renders every enclosure part headless
 to catch a non-manifold mesh before it costs a makerspace booking.
 
+What each of the 13 suites covers, and the procedure for adding a pure module
+without it being silently skipped: [`docs/TESTING.md`](docs/TESTING.md).
+
 ---
 
 ## Deployment
@@ -205,7 +237,8 @@ to catch a non-manifold mesh before it costs a makerspace booking.
 ### PocketBase account
 
 One `users` record **per device**, role **`lg`** — required, because `learners`
-and `attendance` restrict reads to `lg`/`admin` (see `pb_hooks/README.md`).
+and `attendance` restrict reads to `lg`/`admin` (see
+[`../../pb_hooks/README.md`](../../pb_hooks/README.md)).
 
 Separate accounts per device so a lost unit can be revoked without
 re-provisioning the other, and so PocketBase logs distinguish them. If the
@@ -230,39 +263,9 @@ has been in service.**
 
 CI publishes only `firmware.bin` + `firmware.elf`, which is **not** enough to
 flash a virgin board: the bootloader and the partition table have to be laid
-down too. Merge the four images into one file so a unit can be recovered from
-a machine that has nothing but `esptool.py`:
-
-```bash
-pio run -e esp32dev
-
-ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
-BOOT_APP0=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
-BUILD=.pio/build/esp32dev
-
-python3 "$ESPTOOL" --chip esp32 merge_bin -o factory-1.0.0.bin \
-    --flash_mode dio --flash_freq 40m --flash_size 4MB \
-    0x1000  "$BUILD/bootloader.bin" \
-    0x8000  "$BUILD/partitions.bin" \
-    0xe000  "$BOOT_APP0" \
-    0x10000 "$BUILD/firmware.bin"
-
-# Flash it:
-python3 "$ESPTOOL" --chip esp32 --port /dev/cu.usbserial-XXXX \
-    write_flash 0x0 factory-1.0.0.bin
-```
-
-`merge_bin` writes a single image starting at offset `0x0`, so `write_flash`
-takes **`0x0`**, not `0x1000`.
-
-⚠️ Flashing a factory image **erases NVS**: provisioning is lost and the unit
-re-enters setup mode. `pio run -t upload` preserves NVS — prefer it for a
-device already in service.
-
-The four offsets and `--flash_freq` are taken from what PlatformIO itself
-would use. Re-confirm with `pio run -e esp32dev -v` (it prints the exact
-`write_flash` argument list) if the board or framework version changes;
-`40m` is the DevKit V1 default.
+down too. The `esptool merge_bin` recipe that produces a single recoverable
+image, and the warning that flashing it erases NVS, are in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#factory-image--recovering-a-device-from-a-machine-with-only-esptool).
 
 ### Provisioning
 
@@ -275,6 +278,10 @@ would use. Re-confirm with `pio run -e esp32dev -v` (it prints the exact
 
 Setup mode times out after 10 minutes and reboots.
 
+There is also a serial-prompt fallback for when AP mode itself is broken: press
+any key within 3 s of the setup banner. Both paths, step by step, in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#provisioning).
+
 ### Updating a deployed device
 
 ```bash
@@ -284,6 +291,9 @@ pio run -e esp32dev_ota -t upload \
 ```
 
 OTA is disabled entirely if no password was provisioned — it fails closed.
+
+Failure modes, and what to do when the password is lost:
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#ota-updates).
 
 ---
 
@@ -303,15 +313,23 @@ On-device checks the host tests can't cover:
 
 The durability test is also the demo.
 
+⚠️ The clock-gate and offline-roster checks need an **already provisioned**
+device. `nfc::init()` runs after `config::run_provisioning()`, which never
+returns on an unprovisioned unit — so a fresh board has no reader and no tap
+path at all. Provision first. This and eight other verified gaps are listed in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md#known-gaps).
+
 ---
 
 ## Known limitations
 
 - **Card cloning.** UID-only auth is trivially cloneable. See
-  `docs/SECURITY.md` (audit H-2) — unchanged from the Tauri app.
+  [`docs/SECURITY.md`](../../docs/SECURITY.md) at the repo root (audit H-2) —
+  unchanged from the Tauri app.
 - **Credentials in NVS are plaintext.** Anyone with physical access and
   `esptool` can read the PocketBase device password. Mitigated by per-device
-  accounts (revoke one without touching the other); see `docs/SECURITY.md`.
+  accounts (revoke one without touching the other); see
+  [`docs/SECURITY.md`](../../docs/SECURITY.md).
 - **Power cut + router down together.** The device boots in seconds, the router
   takes minutes; during that window taps are refused rather than mis-recorded.
   An RTC would close this.
@@ -324,11 +342,15 @@ The durability test is also the demo.
 ## Layout
 
 ```
-src/                     firmware (see Source map above)
-test/                    13 Unity suites, native only
+src/                     firmware — 46 files (docs/SOURCE_MAP.md)
+test/                    13 Unity suites, 181 cases, native only
+docs/
+  SOURCE_MAP.md          per-module reference
+  TESTING.md             how to run and extend the suites
+  OPERATIONS.md          runbook for a device in service
 hardware/
   partitions.csv         flash layout — USB-only, read the warnings
-  README.md              BOM, wiring, assembly
+  README.md              BOM, wiring, assembly, wiring troubleshooting
   enclosure/             parametric OpenSCAD case + test prints
 .github/workflows/nfc-fw.yml   (at repo root) tests, build, size gate
 ```

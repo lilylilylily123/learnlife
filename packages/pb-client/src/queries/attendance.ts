@@ -37,7 +37,13 @@ export interface ListAttendanceResult {
   date: string; // The resolved date (single-day queries) or a "from..to" label for ranges.
 }
 
-/** Returns today as a YYYY-MM-DD string in the local timezone. */
+/**
+ * Returns today as a YYYY-MM-DD string in **UTC**, not local time —
+ * toISOString() is always UTC. West of Greenwich after 00:00 UTC (any evening
+ * in the Americas) this is tomorrow's date, so an un-dated query there can
+ * miss the records it just wrote. Callers that need the operator's local day
+ * must pass `date` explicitly.
+ */
 function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }

@@ -4,6 +4,32 @@ Operational follow-ups from the security audit. Each section closes a finding
 that can't be solved by a code change alone — it requires a deployment or
 admin-console action.
 
+Vocabulary: [`GLOSSARY.md`](GLOSSARY.md). Backend schema and access rules:
+[`POCKETBASE.md`](POCKETBASE.md).
+
+## Status at a glance
+
+| Item | Applies to | State |
+|---|---|---|
+| [NFC card hardening (H-2)](#nfc-card-hardening-audit-h-2) | Both terminals | **Open** — UID-only auth is cloneable; NTAG 424 DNA vs kiosk PIN undecided |
+| [Device credentials at rest](#standalone-device-credentials-at-rest-open-decision) | `apps/nfc-attender-fw` | **Open decision** — plaintext in NVS, accepted and documented; a dedicated `device` role was deferred |
+| [Firmware update path](#standalone-device-firmware-update-path) | `apps/nfc-attender-fw` | Operational notes; OTA fails closed with no password |
+| [Tauri release signing key (H-8)](#tauri-release-signing-key-audit-h-8) | `apps/nfc-attender` | **Open** — inventory and rotation runbook not written |
+| [PocketBase admin hardening (L-8)](#pocketbase-admin-hardening-audit-l-8) | Backend | **Open** — checklist is unverified against the live instance |
+
+Two further risks are documented elsewhere because they are architectural
+rather than operational, and both are load-bearing:
+
+- **Collection API rules are largely not in this repo.** The device's `attendance`
+  write permission exists only as PocketHost admin-UI state — unversioned and
+  unreviewed. See [`POCKETBASE.md`](POCKETBASE.md).
+- **`pb_hooks/` is uploaded by hand** and covered by no workflow, no tests and
+  no lint, so a hook regression is only discoverable in production. See
+  [`../pb_hooks/README.md`](../pb_hooks/README.md).
+- **The pinned CA.** The firmware pins GTS Root R4 (`src/pb_ca.h`); if
+  PocketHost changes certificate authority, every device goes offline at once
+  until reflashed.
+
 ---
 
 ## NFC card hardening (audit H-2)

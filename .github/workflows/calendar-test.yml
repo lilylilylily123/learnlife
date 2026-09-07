@@ -10,6 +10,9 @@ on:
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
       - "package.json"
+      # Every packages/*/tsconfig.json extends it, so editing it changes the
+      # semantics of the only check those packages have.
+      - "tsconfig.base.json"
       - ".github/workflows/calendar-test.yml"
   pull_request:
     branches:
@@ -20,6 +23,7 @@ on:
       - "pnpm-workspace.yaml"
       - "pnpm-lock.yaml"
       - "package.json"
+      - "tsconfig.base.json"
       - ".github/workflows/calendar-test.yml"
 
 concurrency:
@@ -58,6 +62,18 @@ jobs:
       # on packages/**.
       - name: Typecheck shared packages
         run: pnpm -r --filter "./packages/*" typecheck
+
+      # Guards the committed cross-language fixture against silent
+      # re-baselining: it regenerates from the TypeScript spec in memory and
+      # fails if the checked-in JSON differs, naming the cases that moved.
+      # Lives beside the typecheck for the same reason — packages/* ship no
+      # tests, so these two steps are the only direct coverage they get, and
+      # both TS workflows trigger on packages/**.
+      - name: Check attendance fixture is in sync
+        run: pnpm check:attendance-fixture
+
+      - name: Typecheck calendar app
+        run: pnpm --filter ll_calendar typecheck
 
       - name: Test
         run: pnpm --filter ll_calendar test

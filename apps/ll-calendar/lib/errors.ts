@@ -63,3 +63,42 @@ export function mapInviteError(err: unknown): string {
   if (e.status && e.status >= 500) return "Server error. Please try again shortly.";
   return "That code didn't work. Check with your facilitator.";
 }
+
+/**
+ * RSVP-specific copy. The `event_rsvps` hook rejects with a small, fixed set
+ * of hand-written `BadRequestError` messages, and those distinctions matter
+ * to the user — "this event is full" and "RSVPs have closed" are different
+ * problems with different responses, and `mapPbError` would flatten both to
+ * the generic 400 string.
+ *
+ * We match against the known sentences rather than echoing `err.message`, so
+ * an unrecognised payload still cannot reach the UI. Anything we do not
+ * recognise falls through to `mapPbError`.
+ *
+ * The first two branches also catch the client-only guards `submitRsvp`
+ * raises on the `not_going` path (see the note there). Those are plain
+ * `Error`s with no `status`, so they must be matched here — falling through
+ * would let `mapPbError` read the missing status as 0 and report a network
+ * failure that did not happen.
+ *
+ * Keep in sync with the throws in `pb_hooks/event_rsvps.pb.js` and in
+ * `submitRsvp`.
+ */
+export function mapRsvpError(err: unknown): string {
+  const raw = pick(err).message ?? "";
+
+  if (raw.includes("deadline has passed") || raw.includes("RSVPs are closed")) {
+    return "RSVPs are closed for this event.";
+  }
+  if (raw.includes("waitlist is disabled")) {
+    return "This event is full.";
+  }
+  if (raw.includes("RSVP is not enabled")) {
+    return "RSVP isn't open for this event.";
+  }
+  if (raw.includes("on behalf of another user")) {
+    return "You can only change your own RSVP.";
+  }
+
+  return mapPbError(err, "Could not save your RSVP. Please try again.");
+}

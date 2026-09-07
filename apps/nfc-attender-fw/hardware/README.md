@@ -66,8 +66,8 @@ even have mounting holes?" problem.
 **Honest limit:** this secures the ESP32 end of every wire, not both. The
 peripheral end is still a dupont housing on a header pin, which is what the
 printed retainer bar addresses. A soldered perfboard remains strictly more
-robust; `hardware/production-enclosure-v1` has that design if it ever becomes
-worth the iron and the hours.
+robust; the git **branch** `hardware/production-enclosure-v1` (not a directory
+in this tree) has that design if it ever becomes worth the iron and the hours.
 
 ---
 

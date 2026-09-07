@@ -69,7 +69,7 @@ export default function RegisterScreen() {
         return;
       }
       // Auth state change is picked up by AuthContext automatically
-      router.replace("/(tabs)/");
+      router.replace("/(tabs)");
     } catch (error: unknown) {
       Alert.alert("Error", mapPbError(error, "We couldn't create your account. Please try again."));
     } finally {

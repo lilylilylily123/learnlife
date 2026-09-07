@@ -22,7 +22,18 @@ import { expandEvents, makeDateKey, formatTimeRange, CalRecord } from "../lib/ca
 const YEAR = 2026;
 const MONTH = 3; // April (0-indexed)
 
-/** Build a minimal CalRecord, with sensible defaults overrideable per-test. */
+/**
+ * Build a minimal CalRecord, with sensible defaults overrideable per-test.
+ *
+ * The default `start` is Apr 12, and several one-off cases below depend on
+ * that exact day, so it must stay.
+ *
+ * `start` is LOAD-BEARING for weekly cases: `expandEvents` will not emit an
+ * occurrence before a series' own start date, so a weekly fixture left on the
+ * Apr 12 default silently loses every earlier weekday in the month. Weekly
+ * cases therefore override it with `WEEKLY_START` below. If you add one, do
+ * the same — keep `start` at or before the earliest day you assert.
+ */
 function makeRecord(overrides: Partial<CalRecord> = {}): CalRecord {
   return {
     id: "rec1",
@@ -39,6 +50,12 @@ function makeRecord(overrides: Partial<CalRecord> = {}): CalRecord {
     ...overrides,
   };
 }
+
+/**
+ * Early `start` for weekly fixtures — before every day asserted in April 2026,
+ * so a series expands across the whole month. See the note on `makeRecord`.
+ */
+const WEEKLY_START = "2026-04-01T09:00:00.000Z";
 
 // ─── makeDateKey ──────────────────────────────────────────────────────────────
 
@@ -92,6 +109,8 @@ describe("PocketBase space-separated datetime format", () => {
     const rec = makeRecord({
       recurrence: "weekly",
       recurrence_days: [0],
+      // Space format throughout, since that is what this block exercises.
+      start: "2026-04-01 09:00:00.000Z",
       recurrence_end: "2026-04-14 00:00:00.000Z",
     });
     const result = expandEvents([rec], YEAR, MONTH);
@@ -192,6 +211,7 @@ describe("expandEvents", () => {
       const rec = makeRecord({
         recurrence: "weekly",
         recurrence_days: [0], // Monday
+        start: WEEKLY_START,
       });
       const result = expandEvents([rec], YEAR, MONTH);
 
@@ -211,6 +231,7 @@ describe("expandEvents", () => {
       const rec = makeRecord({
         recurrence: "weekly",
         recurrence_days: [6], // Sunday
+        start: WEEKLY_START,
       });
       const result = expandEvents([rec], YEAR, MONTH);
 
@@ -225,6 +246,7 @@ describe("expandEvents", () => {
       const rec = makeRecord({
         recurrence: "weekly",
         recurrence_days: [0, 2], // Mon + Wed
+        start: WEEKLY_START,
       });
       const result = expandEvents([rec], YEAR, MONTH);
 
@@ -245,6 +267,7 @@ describe("expandEvents", () => {
         id: "myid",
         recurrence: "weekly",
         recurrence_days: [0], // Monday
+        start: WEEKLY_START,
       });
       const result = expandEvents([rec], YEAR, MONTH);
       expect(result["2026-4-6"][0].id).toBe("myid-2026-4-6");
@@ -256,6 +279,7 @@ describe("expandEvents", () => {
       const rec = makeRecord({
         recurrence: "weekly",
         recurrence_days: [0],
+        start: WEEKLY_START,
         recurrence_end: "2026-04-14",
       });
       const result = expandEvents([rec], YEAR, MONTH);
@@ -271,6 +295,7 @@ describe("expandEvents", () => {
       const rec = makeRecord({
         recurrence: "weekly",
         recurrence_days: [0],
+        start: WEEKLY_START,
         recurrence_end: "2026-04-13",
       });
       const result = expandEvents([rec], YEAR, MONTH);
@@ -308,6 +333,7 @@ describe("expandEvents", () => {
         title: "Weekly Class",
         recurrence: "weekly",
         recurrence_days: [0], // Monday
+        start: WEEKLY_START,
       });
       const result = expandEvents([oneOff, recurring], YEAR, MONTH);
       expect(result["2026-4-6"]).toHaveLength(2);

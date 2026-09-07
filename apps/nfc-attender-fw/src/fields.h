@@ -28,6 +28,13 @@ namespace llattender::fields {
 //   LateLunchReturn     → {"lunch_events":"[…]","lunch_status":"late"}
 //   CheckOut            → {"time_out":"…"}
 //   NoAction            → "" (empty)
+//
+// NB: the CheckIn bodies above are this port's field set, NOT the spec's. The
+// TS check_in also emits `justified` alongside arrival/status, so a device tap
+// on a justified learner leaves that column untouched and the row contradicts
+// itself — divergence D5, undecided. See
+// packages/shared/fixtures/attendance-state-machine.json and docs/TESTING.md.
+// Do not "align" either side without a decision on both.
 std::string serialize_action(const CheckInAction& action);
 
 // Build the lunch_events ARRAY (not an object) — emitted as compact JSON,

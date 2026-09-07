@@ -158,7 +158,7 @@ export default function InboxScreen() {
 
   const loading = !hasLoadedOnce && conversations.length === 0;
 
-  if (!isAuthenticated) return <Redirect href="/(tabs)/" />;
+  if (!isAuthenticated) return <Redirect href="/(tabs)" />;
 
   const unread = conversations.filter((c) => c.unread);
   const read = conversations.filter((c) => !c.unread);

@@ -6,12 +6,13 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json"
   },
   "dependencies": {
     "@learnlife/pb-client": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^20.19.39",
     "typescript": "^5"
   }
 }

@@ -1,0 +1,1769 @@
+{
+  "$comment": "GENERATED FILE — do not hand-edit. This committed JSON is the source of truth for both test suites; the generator is not run by either of them. Regenerate deliberately with `pnpm gen:attendance-fixture` and commit the diff. `pnpm check:attendance-fixture` fails when this file is stale.",
+  "schema_version": 1,
+  "generator": "packages/shared/scripts/generate-attendance-fixture.ts",
+  "spec": "packages/shared/src/attendance.ts",
+  "harnesses": [
+    "apps/nfc-attender/src/__tests__/attendance-fixture.test.ts (Vitest)",
+    "apps/nfc-attender-fw/test/test_state_machine/test_state_machine.cpp (PlatformIO, native env)"
+  ],
+  "implementations": [
+    "packages/shared/src/attendance.ts — the specification",
+    "apps/nfc-attender-fw/src/state_machine.cpp — C++ port for the ESP32 reader",
+    "packages/pb-client/src/queries/attendance.ts — duplicated deriveStatus",
+    "packages/pb-client/scripts/backfill-arrival.ts — duplicated splitStatus"
+  ],
+  "timezone": {
+    "policy": "UTC",
+    "why": "Both implementations read local wall-clock fields (Date.getHours, std::tm.tm_hour), so a host timezone with a DST transition inside a case's date could renormalise the hour and surface as a phantom divergence. Pinning both suites to UTC removes DST entirely.",
+    "ts": "TZ=UTC is set in apps/nfc-attender/package.json's test script, matching the existing convention in apps/ll-calendar.",
+    "cpp": "The native harness calls setenv(\"TZ\",\"UTC\",1)+tzset() in main before any mktime, so it holds however the binary is invoked.",
+    "belt_and_braces": "Both harnesses re-read hour/minute/weekday back off the clock they built and fail with an explicit message if it does not match this fixture, rather than asserting on a shifted time."
+  },
+  "conventions": {
+    "now": "Local wall clock. `month` is 1-based; `weekday` is Sun=0..Sat=6 and is asserted, not trusted.",
+    "$now": "Sentinel for the ISO-8601 rendering of this case's `now`. Each harness expands it locally, so no timestamp string has to agree across runtimes.",
+    "expect": "The specification's behaviour, derived by calling it. `action` names the outcome; every other key is a field that implementation must set. A key that is ABSENT must not be set — that negative is what pins D2a.",
+    "divergence": "Present only where the C++ port disagrees. `cpp` records the port's behaviour today in the same shape as `expect`. Each harness asserts against its own recorded side and reports KNOWN DIVERGENT, so both behaviours stay pinned while the product decision is outstanding. Unmarked cases must genuinely pass on both sides."
+  },
+  "thresholds": {
+    "LATE_HOUR": 10,
+    "LATE_MINUTE": 1,
+    "LUNCH_START_HOUR": 13,
+    "LUNCH_END_HOUR": 14,
+    "LUNCH_LATE_HOUR": 14,
+    "LUNCH_LATE_MINUTE": 1,
+    "CHECKOUT_HOUR": 16,
+    "CHECKOUT_MINUTE": 59,
+    "FRIDAY_CHECKOUT_HOUR": 14,
+    "FRIDAY_CHECKOUT_MINUTE": 0,
+    "ABSENT_HOUR": 10,
+    "ABSENT_MINUTE": 30
+  },
+  "known_shared_defects": [
+    {
+      "id": "DEAD_LUNCH_LATE_BRANCH",
+      "note": "Inside the lunch window lunch_status is computed as `now >= 14:01 ? late : present`, but that branch only runs while hour < 14, so the late arm is unreachable and the window always writes present. Present in BOTH implementations, therefore NOT a divergence and not marked as one. Pinned by lunch/in_at_13_30_writes_present_not_late and lunch/in_at_13_59_last_window_minute."
+    }
+  ],
+  "divergences": {
+    "D1": {
+      "title": "Non-Friday check-out time",
+      "ts": "16:59 — TIME_THRESHOLDS.CHECKOUT_HOUR=16, CHECKOUT_MINUTE=59 (packages/pb-client/src/constants.ts:28-29)",
+      "cpp": "17:00 — CHECKOUT_HOUR=17, CHECKOUT_MINUTE=0 (apps/nfc-attender-fw/src/state_machine.cpp:21-22)",
+      "impact": "For the whole of 16:59 the dashboard checks a learner out while the reader refuses the tap.",
+      "observable_today": true,
+      "decision": "UNDECIDED"
+    },
+    "D2": {
+      "title": "Check-out is evaluated before late-lunch-return, or after",
+      "ts": "check-out first (packages/shared/src/attendance.ts:218), so a learner still at lunch gets one combined write",
+      "cpp": "late-lunch-return first (apps/nfc-attender-fw/src/state_machine.cpp:129), so the same tap only closes the lunch",
+      "impact": "A learner who never returned from lunch is checked out by the dashboard but left checked in by the device — no time_out is ever recorded on the device path.",
+      "observable_today": true,
+      "decision": "UNDECIDED"
+    },
+    "D2a": {
+      "title": "The C++ CheckOut branch never writes the lunch fields",
+      "ts": "check_out closes an open lunch in the same write, setting lunch_events plus lunch_status='late' (packages/shared/src/attendance.ts:229-236)",
+      "cpp": "CheckOut populates time_out_iso only — lunch_events_after is left empty and set_lunch_status stays false (apps/nfc-attender-fw/src/state_machine.cpp:160-163)",
+      "impact": "Silent data loss on the device path, distinct from the ordering question in D2. A learner who checks out with an open lunch has that lunch closed and marked late on the dashboard and NEVER on the device, which keeps a dangling out event. Because the device has no other route to that write, the record can never converge.",
+      "observable_today": false,
+      "masked_by": "D2",
+      "masking_note": "No input can separate D2a from D2 today: the C++ late-lunch-return step catches every at-lunch state from 14:00 onward, and both check-out cutoffs are at or after 14:00, so the C++ CheckOut branch is never reached with an open lunch. Fixing D2 by reordering alone would unmask D2a and turn a wrong-action bug into a silent field-loss bug. The C++ harness therefore asserts the mask directly — see the D2a guard in test_state_machine.cpp.",
+      "decision": "UNDECIDED"
+    },
+    "D3": {
+      "title": "The 14:00-17:00 no-scan window",
+      "ts": "no equivalent — falls through to no_action (packages/shared/src/attendance.ts:260)",
+      "cpp": "ActionType::Locked rejects taps from an already-checked-in learner between 14:00 and LOCKED_END_HOUR=17 on non-Fridays (apps/nfc-attender-fw/src/state_machine.cpp:169-175)",
+      "impact": "Every stray afternoon tap is a silent no-op on one side and a visible rejection on the other.",
+      "observable_today": true,
+      "decision": "UNDECIDED"
+    },
+    "D4": {
+      "title": "findLearnersToMarkAbsent was never ported",
+      "ts": "implemented (packages/shared/src/attendance.ts:288)",
+      "cpp": "absent — no auto-absent sweep exists in the firmware at all",
+      "impact": "The device can never mark anyone absent. The absence_sweep cases below run against the spec only; the C++ harness reports them as unported.",
+      "observable_today": false,
+      "pinned_by": "absence_sweep.cases — the Vitest harness runs them against the spec; the C++ harness reports them as unported.",
+      "decision": "UNDECIDED"
+    },
+    "D5": {
+      "title": "The C++ port neither reads nor writes the `justified` column",
+      "ts": "AttendanceState carries `justified`, so check_in recovers an excusal recorded only in that column, and emits time_in + arrival + justified + status — a triple that round-trips through deriveStatus/splitStatus (packages/shared/src/attendance.ts)",
+      "cpp": "AttendanceState has no justified field, so prior justification can only be decoded from the legacy `status` enum; CheckInAction has no justified field either, and fields.cpp PATCHes only time_in, arrival and status (apps/nfc-attender-fw/src/fields.cpp:67-69)",
+      "impact": "Two halves. WRITE: a device tap on a justified learner leaves the `justified` column at whatever it already held, reproducing exactly the self-contradicting row the TypeScript side was just fixed to stop writing — against the same PocketBase collection. READ: an excusal recorded only in the column (justifyAttendance on a row with no arrival yet leaves status null) is invisible to the port, which then derives `late` where the spec derives `jLate`. Recorded rather than fixed because the firmware was out of scope for this change and altering what the device writes ships to physical hardware. The fix is the same shape as the TypeScript one: add `justified` to the C++ AttendanceState and CheckInAction, read it alongside the enum, and emit it from fields.cpp.",
+      "observable_today": true,
+      "cpp_skips_field": "justified",
+      "pinned_by": "WRITE half: the C++ harness skips exactly the `justified` key and reports D5 once, so every other field stays compared instead of ten check_in cases all going divergent. READ half: pinned per-case by check_in/modern_justified_column_without_derived_status. The Vitest harness asserts the key IS present on every check_in.",
+      "decision": "UNDECIDED"
+    }
+  },
+  "cases": [
+    {
+      "id": "check_in/present_09_00",
+      "desc": "First tap well before the late cutoff arrives as present.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 9,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "present",
+        "justified": false,
+        "status": "present"
+      }
+    },
+    {
+      "id": "check_in/present_10_00_last_on_time_minute",
+      "desc": "10:00 is the last on-time minute — the cutoff is 10:01, not 10:00.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "present",
+        "justified": false,
+        "status": "present"
+      }
+    },
+    {
+      "id": "check_in/late_10_01_first_late_minute",
+      "desc": "10:01 exactly is the first late minute.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 1,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": false,
+        "status": "late"
+      }
+    },
+    {
+      "id": "check_in/late_10_02",
+      "desc": "Past the cutoff stays late.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 2,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": false,
+        "status": "late"
+      }
+    },
+    {
+      "id": "check_in/jabsent_excusal_survives_as_jlate",
+      "desc": "A learner a guide had excused as jAbsent who then shows up keeps the excusal: arrival flips to late, status to jLate.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": "jAbsent",
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": true,
+        "status": "jLate"
+      }
+    },
+    {
+      "id": "check_in/jlate_excusal_survives_as_jlate",
+      "desc": "Same inheritance from a prior jLate.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 11,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": "jLate",
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": true,
+        "status": "jLate"
+      }
+    },
+    {
+      "id": "check_in/on_time_arrival_drops_excusal",
+      "desc": "Arriving on time cannot be justified — a prior jAbsent collapses to plain present, since there is no jPresent. The emitted `justified` is false, NOT the inherited true: present + justified is the pair pb-client's schema notes call meaningless, and writing true here is how an already-justified row used to end up with a stale excusal on a day the learner was on time.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 9,
+        "minute": 15,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": "jAbsent",
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "present",
+        "justified": false,
+        "status": "present"
+      }
+    },
+    {
+      "id": "check_in/legacy_jabsent_row_with_justified_column_false",
+      "desc": "The reported bug. A pre-migration row carries status jAbsent while the `justified` column is still false. The action must emit justified: true so the write cannot leave arrival late / justified false / status jLate — a triple where summarizeAttendance counts an UNJUSTIFIED late while every legacy reader sees jLate.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": "jAbsent",
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": true,
+        "status": "jLate"
+      }
+    },
+    {
+      "id": "check_in/modern_justified_column_without_derived_status",
+      "desc": "justifyAttendance on a row with no arrival yet writes justified: true and leaves status null, because deriveStatus(null, true) is null. Reading the legacy enum alone would miss that and silently drop the excusal, so the state machine reads the real field first.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 10,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": true
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": true,
+        "status": "jLate"
+      },
+      "divergence": {
+        "refs": [
+          "D5"
+        ],
+        "note": "The read half of D5. The port's AttendanceState carries no justified field, so it can only decode the legacy enum — which is null here — and derives status \"late\" where the spec derives \"jLate\". This is the one case where the port's inability to see the column changes an actual value rather than just omitting one, so it is marked per-case instead of being covered by the skipped-field mechanism.",
+        "cpp": {
+          "action": "check_in",
+          "time_in": "$now",
+          "arrival": "late",
+          "status": "late"
+        }
+      }
+    },
+    {
+      "id": "check_in/modern_justified_column_on_time_drops_excusal",
+      "desc": "Same modern row, but the learner arrives on time. The excusal is dropped rather than carried onto a present day, keeping the triple a fixpoint of deriveStatus/splitStatus.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 9,
+        "minute": 15,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": true
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "present",
+        "justified": false,
+        "status": "present"
+      }
+    },
+    {
+      "id": "check_in/friday_late_10_01",
+      "desc": "The late cutoff is weekday-independent — Friday behaves like any other day.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 10,
+        "minute": 1,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": false,
+        "status": "late"
+      }
+    },
+    {
+      "id": "check_in/beats_locked_window_14_30",
+      "desc": "Step 1 runs before everything else, so a learner whose first tap of the day lands inside the disputed 14:00-17:00 window still checks in. Both sides agree: the C++ Locked branch requires has_time_in.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 14,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": false,
+        "status": "late"
+      }
+    },
+    {
+      "id": "check_in/beats_checkout_17_30",
+      "desc": "Likewise a first tap after checkout time is a check-in, not a checkout.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": null,
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_in",
+        "time_in": "$now",
+        "arrival": "late",
+        "justified": false,
+        "status": "late"
+      }
+    },
+    {
+      "id": "lunch/before_window_12_59_no_action",
+      "desc": "12:59 is outside the window; nothing to record.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 12,
+        "minute": 59,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      }
+    },
+    {
+      "id": "lunch/out_at_13_00_window_opens",
+      "desc": "13:00 exactly opens the window; the first tap toggles the learner out.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 13,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "$now"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lunch/in_at_13_30_writes_present_not_late",
+      "desc": "Returning inside the window sets lunch_status. DEAD BRANCH: the code asks `now >= 14:01 ? late : present`, but this block only runs while hour < 14, so the late arm is unreachable and the window always writes present. Present in BOTH implementations, so it is a shared defect, NOT a divergence. This case pins the current behaviour.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 13,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "present"
+      }
+    },
+    {
+      "id": "lunch/out_again_at_13_45_toggles",
+      "desc": "The window supports several out/in pairs; a trailing in toggles back to out, and an out leg must not set lunch_status.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 13,
+        "minute": 45,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "2026-04-20T11:40:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "2026-04-20T11:40:00.000Z"
+          },
+          {
+            "type": "out",
+            "time": "$now"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lunch/in_at_13_59_last_window_minute",
+      "desc": "13:59 is the last minute of the window and still writes present — the closest the dead late branch ever gets to firing.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 13,
+        "minute": 59,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "present"
+      }
+    },
+    {
+      "id": "lunch/late_return_at_14_00",
+      "desc": "14:00 closes the window and immediately opens late lunch return: LUNCH_LATE_HOUR is 14, so the hour check passes at :00 even though the minute threshold is :01.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 14,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "late_lunch_return",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      }
+    },
+    {
+      "id": "lunch/late_return_at_14_01",
+      "desc": "14:01, the nominal late-lunch minute, behaves identically.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 14,
+        "minute": 1,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "late_lunch_return",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      }
+    },
+    {
+      "id": "lunch/late_return_via_legacy_columns_15_00",
+      "desc": "Pre-lunch_events rows are still honoured: lunch_out set with lunch_in null means mid-lunch, and the synthetic return is appended to an empty events array.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 15,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": "2026-04-20T11:05:00.000Z",
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "late_lunch_return",
+        "lunch_events": [
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      }
+    },
+    {
+      "id": "lunch/late_return_beats_lock_16_00",
+      "desc": "An open lunch still resolves inside the C++ lock window — the device processes mid-lunch returns before it locks. Both sides agree.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 16,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "late_lunch_return",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      }
+    },
+    {
+      "id": "lunch/no_open_lunch_at_14_00",
+      "desc": "14:00 with nothing open. The spec has no more work to do; the device rejects the tap outright.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 14,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      },
+      "divergence": {
+        "refs": [
+          "D3"
+        ],
+        "note": "First minute of the C++-only 14:00-17:00 lock window. Spec: no_action. Device: Locked.",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "lunch/legacy_lunch_already_closed_15_00",
+      "desc": "Legacy lunch_out AND lunch_in both set means lunch is finished, so there is no late return to synthesise.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 15,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": "2026-04-20T11:05:00.000Z",
+        "lunch_in": "2026-04-20T11:40:00.000Z",
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      },
+      "divergence": {
+        "refs": [
+          "D3"
+        ],
+        "note": "Inside the C++-only lock window. Spec: no_action. Device: Locked.",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "lunch/closed_events_mid_afternoon_16_00",
+      "desc": "Matched out/in pair, mid-afternoon: nothing outstanding.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 16,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "2026-04-20T11:40:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      },
+      "divergence": {
+        "refs": [
+          "D3"
+        ],
+        "note": "Inside the C++-only lock window. Spec: no_action. Device: Locked.",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "checkout/16_58_too_early",
+      "desc": "One minute before the spec's cutoff. Neither side checks out.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 16,
+        "minute": 58,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      },
+      "divergence": {
+        "refs": [
+          "D3"
+        ],
+        "note": "Both agree there is no checkout, but disagree on the fallback: spec no_action, device Locked (16:58 < LOCKED_END_HOUR 17).",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "checkout/16_59_spec_cutoff",
+      "desc": "THE cutoff disagreement. TIME_THRESHOLDS puts the cutoff at 16:59, so the spec checks the learner out. The device's constants say 17:00, so 16:59 is still inside its lock window and the tap is refused — a learner leaving at 16:59 is checked out on the dashboard and rejected by the reader.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 16,
+        "minute": 59,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      },
+      "divergence": {
+        "refs": [
+          "D1",
+          "D3"
+        ],
+        "note": "Spec cutoff 16:59 vs device cutoff 17:00 (D1). The device's fallback in that minute is Locked (D3), so the observable difference is check_out vs locked.",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "checkout/17_00_both_agree",
+      "desc": "At 17:00 both cutoffs have passed, so both sides check out. With no open lunch, neither writes lunch fields — the negative half of D2a.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      }
+    },
+    {
+      "id": "checkout/thursday_17_00",
+      "desc": "A second non-Friday weekday, to prove the 17:00 checkout is not accidentally keyed to Monday.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 23,
+        "hour": 17,
+        "minute": 0,
+        "weekday": 4
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      }
+    },
+    {
+      "id": "checkout/17_30_after_cutoff",
+      "desc": "Well past either cutoff.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      }
+    },
+    {
+      "id": "checkout/no_double_checkout_17_30",
+      "desc": "time_out already recorded — checkout must not fire twice.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 30,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": "2026-04-20T15:10:00.000Z",
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      }
+    },
+    {
+      "id": "checkout/open_lunch_17_00_ordering",
+      "desc": "THE ordering disagreement. A learner who never came back from lunch taps at checkout time. The spec evaluates checkout BEFORE late lunch return and emits one combined write. The device evaluates late lunch return first, so it only closes the lunch and never records time_out — the learner stays checked in overnight.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      },
+      "divergence": {
+        "refs": [
+          "D2",
+          "D2a"
+        ],
+        "note": "D2: the device returns LateLunchReturn where the spec returns check_out, so no time_out is ever written. D2a rides along: even if the order were swapped, the device's CheckOut branch sets only time_out_iso, so the lunch close would be dropped instead.",
+        "cpp": {
+          "action": "late_lunch_return",
+          "lunch_events": [
+            {
+              "type": "out",
+              "time": "2026-04-20T11:05:00.000Z"
+            },
+            {
+              "type": "in",
+              "time": "$now"
+            }
+          ],
+          "lunch_status": "late"
+        }
+      }
+    },
+    {
+      "id": "checkout/open_lunch_18_00_lunch_close_lost",
+      "desc": "THE data-loss case. Same shape as the ordering case but framed on what is LOST rather than on which branch wins: the spec's single write closes the lunch and marks it late, and the device produces no equivalent write at any point in the day. The lunch is closed on the dashboard and NEVER on the device, so the device's copy of the record keeps a dangling out event forever. Reordering the C++ steps alone does not fix this — see D2a.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 18,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "2026-04-20T11:40:00.000Z"
+          },
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "2026-04-20T11:40:00.000Z"
+          },
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      },
+      "divergence": {
+        "refs": [
+          "D2a",
+          "D2"
+        ],
+        "note": "D2a: the C++ CheckOut branch populates only time_out_iso — it never sets lunch_events_after or lunch_status, so the combined close the spec performs has no counterpart in the port. Masked today by D2 (LateLunchReturn wins first), which is why the recorded cpp action is late_lunch_return; fixing D2 in isolation would convert this from a wrong-action bug into a silent field-loss bug.",
+        "cpp": {
+          "action": "late_lunch_return",
+          "lunch_events": [
+            {
+              "type": "out",
+              "time": "2026-04-20T11:05:00.000Z"
+            },
+            {
+              "type": "in",
+              "time": "2026-04-20T11:40:00.000Z"
+            },
+            {
+              "type": "out",
+              "time": "2026-04-20T11:05:00.000Z"
+            },
+            {
+              "type": "in",
+              "time": "$now"
+            }
+          ],
+          "lunch_status": "late"
+        }
+      }
+    },
+    {
+      "id": "checkout/open_lunch_via_legacy_columns_17_00",
+      "desc": "Same pair of defects reached through the legacy lunch columns.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 20,
+        "hour": 17,
+        "minute": 0,
+        "weekday": 1
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": "2026-04-20T11:05:00.000Z",
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now",
+        "lunch_events": [
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      },
+      "divergence": {
+        "refs": [
+          "D2",
+          "D2a"
+        ],
+        "note": "Spec: check_out plus a synthetic lunch close. Device: LateLunchReturn only, no time_out, and its CheckOut branch could not have written the lunch fields anyway (D2a).",
+        "cpp": {
+          "action": "late_lunch_return",
+          "lunch_events": [
+            {
+              "type": "in",
+              "time": "$now"
+            }
+          ],
+          "lunch_status": "late"
+        }
+      }
+    },
+    {
+      "id": "friday/lunch_window_13_00_beats_checkout",
+      "desc": "Friday's early checkout does not swallow the lunch window at its start.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 13,
+        "minute": 0,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "$now"
+          }
+        ]
+      }
+    },
+    {
+      "id": "friday/lunch_window_13_59_beats_checkout",
+      "desc": "…nor at its last minute. Still a lunch toggle on both sides.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 13,
+        "minute": 59,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "lunch_event",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "$now"
+          }
+        ]
+      }
+    },
+    {
+      "id": "friday/checkout_at_14_00",
+      "desc": "Friday checks out at 14:00 rather than 16:59/17:00. Both sides agree when no lunch is open: the device's late-lunch step falls through and its lock window is Friday-exempt.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 14,
+        "minute": 0,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      }
+    },
+    {
+      "id": "friday/checkout_at_15_00",
+      "desc": "Later on a Friday afternoon, still a checkout — and notably NOT locked, which is where Friday and the other weekdays part company.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 15,
+        "minute": 0,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now"
+      }
+    },
+    {
+      "id": "friday/no_double_checkout_15_00",
+      "desc": "Friday, already checked out. Confirms the device's lock window really is Friday-exempt: it falls through to NoAction rather than Locked. Compare checkout/16_58_too_early, the same shape on a Monday, which diverges.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 15,
+        "minute": 0,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": "2026-04-24T12:10:00.000Z",
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      }
+    },
+    {
+      "id": "friday/thursday_15_00_is_not_a_checkout",
+      "desc": "The far side of the Friday boundary: at 15:00 on Thursday the early checkout does not apply, so the spec has nothing to do.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 23,
+        "hour": 15,
+        "minute": 0,
+        "weekday": 4
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": null,
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "no_action",
+        "reason": "All check-ins complete for today"
+      },
+      "divergence": {
+        "refs": [
+          "D3"
+        ],
+        "note": "Inside the C++-only lock window, which applies on Thursday but not Friday. Spec: no_action. Device: Locked.",
+        "cpp": {
+          "action": "locked",
+          "reason": "Scans locked 14:00–17:00"
+        }
+      }
+    },
+    {
+      "id": "friday/open_lunch_at_checkout_14_00",
+      "desc": "The ordering and data-loss pair on a Friday, where they bite three hours earlier than on other days.",
+      "now": {
+        "year": 2026,
+        "month": 4,
+        "day": 24,
+        "hour": 14,
+        "minute": 0,
+        "weekday": 5
+      },
+      "state": {
+        "time_in": "2026-04-20T07:55:00.000Z",
+        "time_out": null,
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          }
+        ],
+        "lunch_out": null,
+        "lunch_in": null,
+        "status": null,
+        "lunch_status": null,
+        "justified": false
+      },
+      "expect": {
+        "action": "check_out",
+        "time_out": "$now",
+        "lunch_events": [
+          {
+            "type": "out",
+            "time": "2026-04-20T11:05:00.000Z"
+          },
+          {
+            "type": "in",
+            "time": "$now"
+          }
+        ],
+        "lunch_status": "late"
+      },
+      "divergence": {
+        "refs": [
+          "D2",
+          "D2a"
+        ],
+        "note": "Spec: check_out with the lunch closed as late in the same write. Device: LateLunchReturn only, no time_out.",
+        "cpp": {
+          "action": "late_lunch_return",
+          "lunch_events": [
+            {
+              "type": "out",
+              "time": "2026-04-20T11:05:00.000Z"
+            },
+            {
+              "type": "in",
+              "time": "$now"
+            }
+          ],
+          "lunch_status": "late"
+        }
+      }
+    }
+  ],
+  "absence_sweep": {
+    "divergence": "D4",
+    "note": "findLearnersToMarkAbsent has no C++ counterpart. The Vitest harness runs these against the spec; the PlatformIO harness reports them as unported.",
+    "cases": [
+      {
+        "id": "sweep/before_cutoff_10_29",
+        "desc": "One minute before the 10:30 cutoff the sweep does nothing at all.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 10,
+          "minute": 29,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [],
+        "expect": []
+      },
+      {
+        "id": "sweep/at_cutoff_10_30",
+        "desc": "10:30 exactly is the first sweeping minute; every learner without a record is a candidate.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 10,
+          "minute": 30,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [],
+        "expect": [
+          "lnr_a",
+          "lnr_b"
+        ]
+      },
+      {
+        "id": "sweep/skips_learner_with_time_in",
+        "desc": "A learner who tapped in is never swept, however late they were.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 11,
+          "minute": 0,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [
+          {
+            "learner": "lnr_a",
+            "time_in": "2026-04-20T07:55:00.000Z",
+            "arrival": "late"
+          }
+        ],
+        "expect": [
+          "lnr_b"
+        ]
+      },
+      {
+        "id": "sweep/skips_learner_with_arrival_already_set",
+        "desc": "Idempotence: an arrival a guide already recorded is never overwritten, even with no time_in. This is what stops a repeating sweep timer from clobbering manual calls.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 11,
+          "minute": 0,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [
+          {
+            "learner": "lnr_a",
+            "arrival": "absent"
+          }
+        ],
+        "expect": [
+          "lnr_b"
+        ]
+      },
+      {
+        "id": "sweep/skips_learner_with_legacy_status_only",
+        "desc": "Pre-migration rows carry status but no arrival; treat that as already handled rather than re-marking.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 11,
+          "minute": 0,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [
+          {
+            "learner": "lnr_a",
+            "status": "jAbsent"
+          }
+        ],
+        "expect": [
+          "lnr_b"
+        ]
+      },
+      {
+        "id": "sweep/marks_blank_record",
+        "desc": "A row that exists but is entirely blank is still a candidate.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 20,
+          "hour": 12,
+          "minute": 0,
+          "weekday": 1
+        },
+        "learners": [
+          "lnr_a"
+        ],
+        "records": [
+          {
+            "learner": "lnr_a"
+          }
+        ],
+        "expect": [
+          "lnr_a"
+        ]
+      },
+      {
+        "id": "sweep/skips_saturday",
+        "desc": "No school on Saturday.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 25,
+          "hour": 12,
+          "minute": 0,
+          "weekday": 6
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [],
+        "expect": []
+      },
+      {
+        "id": "sweep/skips_sunday",
+        "desc": "No school on Sunday.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 26,
+          "hour": 12,
+          "minute": 0,
+          "weekday": 0
+        },
+        "learners": [
+          "lnr_a",
+          "lnr_b"
+        ],
+        "records": [],
+        "expect": []
+      },
+      {
+        "id": "sweep/friday_is_a_school_day",
+        "desc": "Friday's early checkout does not make it a non-school day.",
+        "now": {
+          "year": 2026,
+          "month": 4,
+          "day": 24,
+          "hour": 12,
+          "minute": 0,
+          "weekday": 5
+        },
+        "learners": [
+          "lnr_a"
+        ],
+        "records": [],
+        "expect": [
+          "lnr_a"
+        ]
+      }
+    ]
+  }
+}

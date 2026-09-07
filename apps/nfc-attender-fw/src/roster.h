@@ -1,8 +1,13 @@
 #pragma once
 
-// In-memory + LittleFS-backed cache of the learners list. Refreshed once
-// per day from PocketBase; falls back to the cached copy on boot when
-// network is unreachable.
+// In-memory + LittleFS-backed cache of the learners list. init() loads the
+// cached copy from disk before WiFi starts, so a cold boot with no network
+// still resolves every card to a name.
+//
+// Refreshed ONLY on the offline→online WiFi edge (network_task in main.cpp) —
+// not on a timer, unlike the attendance delta poll. A learner added or
+// re-carded mid-day therefore does not reach a device that has stayed online
+// until a WiFi flap or a reboot. Known gap; see docs/OPERATIONS.md.
 
 #include <string>
 #include <vector>

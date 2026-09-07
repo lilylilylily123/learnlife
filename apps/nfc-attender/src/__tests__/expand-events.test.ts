@@ -2,12 +2,23 @@ import { describe, it, expect } from "vitest";
 import { expandEvents } from "@learnlife/shared";
 import type { CalRecord } from "@learnlife/pb-client";
 
+/**
+ * `start` is LOAD-BEARING for weekly cases. `expandEvents` will not emit an
+ * occurrence before a series' own start date, so a weekly fixture whose
+ * `start` falls mid-month silently loses every earlier weekday in that month.
+ * The default is therefore the 1st: early enough that any weekday asserted
+ * anywhere in April 2026 is legitimately on or after it. If you add a weekly
+ * case, keep `start` at or before the earliest day you assert.
+ *
+ * Only the time-of-day of `end` is read (via `formatTimeRange`), never its
+ * date, so cases that override `start` alone are unaffected by it.
+ */
 function makeRecord(overrides: Partial<CalRecord> & { id: string }): CalRecord {
   const base: CalRecord = {
     id: overrides.id,
     title: "Untitled",
-    start: "2026-04-20 09:00:00.000Z",
-    end: "2026-04-20 10:00:00.000Z",
+    start: "2026-04-01 09:00:00.000Z",
+    end: "2026-04-01 10:00:00.000Z",
     color: "#ccc",
     emoji: "",
     type: "event",
