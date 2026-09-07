@@ -1,7 +1,8 @@
 #pragma once
 
-// PN532 wrapper. Mirrors the absent→present edge detection and
-// last-UID dedupe in apps/nfc-attender/src-tauri/src/main.rs:74-97.
+// PN532 wrapper. The UID dedupe originates in
+// apps/nfc-attender/src-tauri/src/main.rs, but this version is NOT the same
+// rule — see poll_uid below.
 
 #include <string>
 
@@ -23,9 +24,14 @@ void scan_i2c();
 // Wire.begin(), i.e. before ui::init().
 void probe_i2c_lines();
 
-// Poll the reader once. If a new card has been presented since the last call
-// (absent→present transition AND uid != previous uid), writes the lowercase
-// hex UID into `out` and returns true. Otherwise returns false.
+// Poll the reader once. If a card is present and its UID has not been emitted
+// within the last 1500 ms, writes the lowercase hex UID into `out` and returns
+// true. Otherwise returns false.
+//
+// A time window, NOT absent→present edge detection: the PN532 occasionally
+// reports "no target" for one poll while a card is still on the reader, and the
+// edge-only rule this replaced counted the next detection as a fresh tap and
+// produced duplicate scans.
 //
 // Called from nfc_task on a 50 ms loop (main.cpp). The PN532's IRQ line is
 // wired to nothing in this build — Adafruit_PN532 is constructed with

@@ -12,10 +12,14 @@
 //
 // LittleFS only exists on the device, so testing that logic against real
 // files would mean testing on hardware, which is exactly where these cases
-// are hardest to provoke. Instead the behaviour lives in pure modules
-// (queue_core, roster) that talk to this interface, and the filesystem is a
-// thin adapter with no branching in it. InMemoryLineStore then lets the host
-// tests provoke a mid-compaction disk failure on demand.
+// are hardest to provoke. Instead the behaviour lives in a pure module
+// (queue_core) that talks to this interface, and the filesystem is a thin
+// adapter with no branching in it. InMemoryLineStore then lets the host tests
+// provoke a mid-compaction disk failure on demand.
+//
+// roster.cpp is the exception, and knowingly so: it uses this interface but
+// instantiates LittleFsLineStore directly and takes a FreeRTOS mutex, so it is
+// Arduino-gated and has NO host test. See docs/TESTING.md.
 //
 // ── FORMAT ───────────────────────────────────────────────────────────────
 //

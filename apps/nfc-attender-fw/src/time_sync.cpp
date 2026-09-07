@@ -29,11 +29,12 @@ bool g_synced = false;
 
 bool init() {
   // The state machine reads `tm_hour` and `tm_wday` against thresholds defined
-  // in school-local time (10:01 late, 13–14 lunch, 16:59 checkout, Friday=5).
+  // in school-local time (10:01 late, 13–14 lunch, 17:00 checkout, Friday=5).
   // Without a TZ set, localtime() returns UTC and those thresholds shift by
   // an hour — letting late tappers slip through. Default to Europe/Madrid
-  // (the deployment locale per docs/capstone-notes.md); reconfigurable from
-  // NVS in a later phase.
+  // (the deployment locale per capstone-notes.md at the repo root); still
+  // compiled in rather than reconfigurable from NVS, so a second site in
+  // another timezone is a rebuild. Known gap; see docs/OPERATIONS.md.
   // POSIX TZ string: `CET-1CEST,M3.5.0,M10.5.0/3` =
   //   standard CET (UTC+1), summer CEST (UTC+2), DST starts last Sun of March
   //   ends last Sun of October at 03:00.

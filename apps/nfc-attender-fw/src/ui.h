@@ -1,7 +1,9 @@
 #pragma once
 
-// OLED + RGB LED + buzzer feedback. The UI feedback grid is documented in
-// /Users/lily/.claude/plans/goofy-spinning-leaf.md.
+// SSD1306 OLED feedback. Buzzer cues are keyed off the same Event enum, in
+// buzzer.cpp. There is no RGB LED in this build (see README.md "Hardware —
+// not fitted"). The render paths and indicator precedence are documented in
+// docs/SOURCE_MAP.md.
 
 #include <string>
 

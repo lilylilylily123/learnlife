@@ -22,4 +22,11 @@ echo "🔨 Building..."
 pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 echo "✅ Build complete!"
-echo "📁 Windows installer: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/NFC Attender_0.1.0_x64-setup.exe"
+
+# Don't hardcode the filename — it embeds the version from tauri.conf.json, and a
+# stale literal here sent people looking for an installer that was never built.
+# List what actually landed instead.
+BUNDLE_DIR="src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+echo "📁 Bundles in ${BUNDLE_DIR}:"
+find "${BUNDLE_DIR}" -maxdepth 2 -type f \( -name '*.exe' -o -name '*.msi' \) 2>/dev/null \
+    || echo "  (none found — check the build output above)"

@@ -1,14 +1,17 @@
 #pragma once
 
-// NTP + DS3231 RTC. The RTC is the source of truth for timestamps so a long
-// offline stretch still produces correct wall-clock times after reconnect.
+// NTP plus the ESP32's internal clock. There is deliberately NO DS3231 fitted
+// (README.md "Hardware — not fitted"), so there is no battery-backed time
+// across a power cut: the clock is untrusted from power-on until the first
+// successful sync, and clock_gate.h is what covers that window by refusing to
+// record attendance until then. The timezone is compiled in — see init().
 
 #include <ctime>
 
 namespace llattender::time_sync {
 
-bool init();          // bring up the RTC and seed the system clock from it
-bool sync_ntp();      // pull from NTP and write through to the DS3231
+bool init();          // set the TZ. Does NOT set the clock — nothing can yet
+bool sync_ntp();      // pull from NTP and wait briefly for a plausible clock
 
 std::time_t now_unix();
 std::tm now_local();  // local-time tm with tm_wday populated

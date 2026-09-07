@@ -175,6 +175,14 @@ export function computeCheckInAction(
     };
 
     // Only set lunch_status when the learner is returning (type === "in").
+    //
+    // NOTE: the "late" arm below is unreachable. This block only runs while
+    // hour < LUNCH_END_HOUR (14), and lunchLateTime is 14:01, so the
+    // comparison is always false and the window always writes "present". A
+    // "late" lunch can therefore only come from the late_lunch_return action
+    // or from check_out closing an open lunch, both of which hard-code it.
+    // The C++ port in apps/nfc-attender-fw/src/state_machine.cpp reproduces
+    // the same dead branch.
     if (nextEventType === "in") {
       const lunchLateTime = new Date(
         now.getFullYear(),
@@ -263,7 +271,8 @@ export function computeCheckInAction(
  *   - `now`         current time (test-mode injectable)
  *
  * Rules:
- *   1. Do nothing before the ABSENT cutoff (noon by default).
+ *   1. Do nothing before the ABSENT cutoff (10:30 local — ABSENT_HOUR /
+ *      ABSENT_MINUTE in pb-client's TIME_THRESHOLDS).
  *   2. Skip weekends (no school).
  *   3. A learner is a candidate iff they have no `time_in` for today AND no
  *      `arrival` has been recorded yet. The `arrival` check makes the sweep
