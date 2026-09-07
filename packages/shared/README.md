@@ -1,6 +1,10 @@
 > [!IMPORTANT]
-> **`attendance.ts` is the specification for the product's core rule, and it is one of three copies of that rule.**
-> See [Three implementations, no parity check](#three-implementations-no-parity-check) before changing anything in this file.
+> **`attendance.ts` is the specification for the product's core rule.** Three
+> other implementations mirror it, one of them in C++. A committed fixture
+> guards two of the four; the other two are unverified against anything.
+> See [Four implementations, one shared fixture, two of them guarded](#four-implementations-one-shared-fixture-two-of-them-guarded)
+> before changing anything in this file — a change here means regenerating
+> `fixtures/attendance-state-machine.json`.
 
 # `@learnlife/shared`
 
@@ -30,6 +34,7 @@ base config.
 | Entry point | `src/index.ts` (source, not built — consumers bundle the TS directly) |
 | Runtime deps | `@learnlife/pb-client` (types + `TIME_THRESHOLDS` only) |
 | Own test script | **none** — see [How this package is checked](#how-this-package-is-checked) |
+| Test fixture | `fixtures/attendance-state-machine.json` — consumed by both the Vitest and PlatformIO suites |
 
 ## Layout
 
@@ -41,6 +46,13 @@ base config.
 | `src/roles.ts` | The three-role model (`learner` / `lg` / `admin`) |
 | `src/rsvp.ts` | RSVP capacity/waitlist state machine |
 | `src/index.ts` | The public surface. Nothing outside this file is a supported import path. |
+| `fixtures/attendance-state-machine.json` | **Generated, committed.** The cross-language conformance fixture. Do not hand-edit. |
+| `scripts/generate-attendance-fixture.ts` | Declares the case inputs; derives every expected value by calling `src/attendance.ts`. |
+| `scripts/attendance-fixture.ts` | Fixture schema, loader and normaliser, shared with the Vitest harness. |
+
+`scripts/` is Node code, not part of the published surface, which is why this
+package carries a `@types/node` devDependency and a second
+`tsconfig.scripts.json`. The purity constraint above applies to `src/` only.
 
 ## Install / run
 
@@ -52,11 +64,15 @@ reads `src/index.ts` directly:
 "@learnlife/shared": "workspace:*"
 ```
 
-The only command this package has, run from the repo root:
+Commands, all from the repo root:
 
 ```bash
-pnpm --filter @learnlife/shared typecheck   # tsc --noEmit
+pnpm --filter @learnlife/shared typecheck   # tsc --noEmit && tsc -p tsconfig.scripts.json
+pnpm gen:attendance-fixture                 # regenerate the conformance fixture, then commit the diff
+pnpm check:attendance-fixture               # fail if the committed fixture is stale
 ```
+
+Both fixture commands run under `TZ=UTC`; see [The fixture](#the-fixture).
 
 ---
 
@@ -65,42 +81,151 @@ pnpm --filter @learnlife/shared typecheck   # tsc --noEmit
 This section is intended to be sufficient on its own. A reader should be able
 to learn the complete rule set here without opening `attendance.ts`.
 
-## Three implementations, no parity check
+## Four implementations, one shared fixture, two of them guarded
 
-The rule exists three times in this repository. Nothing in CI compares them.
+`deriveStatus` and `computeCheckInAction` are implemented four times across
+this repository — once as the specification, once in C++, and twice more as
+partial copies of the status mapping. The fixture's own `implementations` array
+lists all four. **Two are guarded by it; two are not.**
 
-| # | Location | Language | Its own tests |
-|---|---|---|---|
-| 1 | `packages/shared/src/attendance.ts` — `deriveStatus`, `computeCheckInAction` | TypeScript | `apps/nfc-attender/src/__tests__/attendance-state-machine.test.ts` (vitest) |
-| 2 | `packages/pb-client/src/queries/attendance.ts` — a private `deriveStatus` copy | TypeScript | exercised only indirectly, via `batchUpdateAttendance` / `justifyAttendance` cases in `apps/nfc-attender/src/__tests__/pb-client-shared.test.ts` |
-| 3 | `apps/nfc-attender-fw/src/state_machine.cpp` — `derive_status`, `compute_check_in_action` | C++ | `apps/nfc-attender-fw/test/test_state_machine/` (PlatformIO native) |
+| # | Location | Language | Role | Guarded by the fixture |
+|---|---|---|---|---|
+| 1 | `packages/shared/src/attendance.ts` — `deriveStatus`, `computeCheckInAction` | TypeScript | **The specification.** Every expected value in the fixture is derived by calling this. | yes |
+| 2 | `apps/nfc-attender-fw/src/state_machine.cpp` — `derive_status`, `compute_check_in_action` | C++ | Port for the ESP32 reader. | yes |
+| 3 | `packages/pb-client/src/queries/attendance.ts` — a private `deriveStatus` copy | TypeScript | Keeps the legacy `status` enum aligned on write. | **no** |
+| 4 | `packages/pb-client/scripts/backfill-arrival.ts` — a private `splitStatus` copy | TypeScript | The one-off arrival migration. | **no** |
 
-Copy 2 exists because `pb-client` cannot import `shared` at runtime: `shared`
-imports `TIME_THRESHOLDS` from `pb-client`, so the reverse edge would close a
-workspace dependency cycle. Both copies carry a `MUST STAY IN SYNC` banner.
-There is **no test that imports both and asserts they agree**, and there is no
-shared fixture file anywhere in the repo that both the vitest suite and the
-PlatformIO suite consume. The two suites are independently hand-written.
+Copies 3 and 4 exist because `pb-client` cannot import `shared` at runtime:
+`shared` imports `TIME_THRESHOLDS` from `pb-client`, so the reverse edge would
+close a workspace dependency cycle. All of them carry a `MUST STAY IN SYNC`
+banner.
 
-**They have already drifted.** Verified differences between copy 1 (this
-package) and copy 3 (the firmware) as of this writing:
+### The fixture
 
-| Behaviour | `packages/shared` (TS) | `nfc-attender-fw` (C++) |
+**Copies 1 and 2 are compared, in CI, against a single committed fixture:**
+`packages/shared/fixtures/attendance-state-machine.json` — 41 state-machine
+cases (11 of them covering a registered divergence) plus 9 absence-sweep
+cases. Two harnesses read it:
+
+| Harness | Runs via | Runs in CI via |
 |---|---|---|
-| Non-Friday check-out opens at | **16:59** (`CHECKOUT_HOUR: 16`, `CHECKOUT_MINUTE: 59`) | **17:00** (`CHECKOUT_HOUR = 17`, `CHECKOUT_MINUTE = 0`) |
-| Evaluation order | check-out is tested **before** late-lunch-return | late-lunch-return is tested **before** check-out |
-| Tap after check-out time while still out for lunch | one combined write: lunch closed as `late` **and** `time_out` set | `LateLunchReturn` only — `time_out` is never set by that tap |
-| 14:00–17:00 on a non-Friday, already checked in, not at lunch | `no_action` (silent no-op) | `Locked` action — the tap is rejected with "Scans locked 14:00–17:00" |
-| Auto-absent sweep | `findLearnersToMarkAbsent` lives here | not ported; the device does not sweep |
+| `apps/nfc-attender/src/__tests__/attendance-fixture.test.ts` (Vitest) | `pnpm --filter nfc-attender test` | `.github/workflows/nfc-test-build.yml` |
+| `apps/nfc-attender-fw/test/test_state_machine/` (PlatformIO, native env) | `pio test -e native` | `.github/workflows/nfc-fw.yml` |
 
-The firmware's inline `attendance.ts:NNN` line citations are also stale — they
-point at the pre-aggregation layout of this file.
+The file is **generated and must not be hand-edited.** Two commands, both from
+the repo root:
 
-There is **no locked / no-scan window in the TypeScript rule.** It is a
+```bash
+pnpm gen:attendance-fixture      # regenerate, then commit the diff
+pnpm check:attendance-fixture    # fails if the committed fixture is stale
+```
+
+**Neither test suite regenerates the fixture.** That is deliberate: a harness
+that regenerated before asserting would be comparing the specification against
+itself and would pass no matter what the rule did. The generator declares only
+the case *inputs* and derives every expected value by calling
+`packages/shared/src/attendance.ts`, so the committed JSON is the
+specification's behaviour frozen at generation time, and the diff on
+regeneration is the review artefact.
+
+Both harnesses pin `TZ=UTC`. Both implementations read local wall-clock fields
+(`Date.getHours`, `std::tm.tm_hour`), so a host timezone with a DST transition
+inside a case's date could renormalise the hour and surface as a phantom
+divergence. Pinning to UTC removes DST from the comparison entirely.
+
+> [!WARNING]
+> **Two gaps remain.**
+> 1. **The staleness check is not yet wired into CI.**
+>    `pnpm check:attendance-fixture` exists and works, but appears in none of
+>    the six workflows in `.github/workflows/`. Both *conformance* harnesses do
+>    run in CI; the *freshness* guard does not. A fixture left stale after a
+>    change to `attendance.ts` is therefore not caught — both suites keep
+>    passing against the old expectations. Run it locally before committing, or
+>    add it to the nfc workflow.
+> 2. **Copies 3 and 4 are unverified against anything.** The fixture
+>    constrains `computeCheckInAction` across copies 1 and 2 only. `pb-client`'s
+>    private `deriveStatus` is reached solely by indirection, through
+>    `batchUpdateAttendance` / `justifyAttendance` cases in
+>    `apps/nfc-attender/src/__tests__/pb-client-shared.test.ts` that assert
+>    end-result statuses — which would catch a divergence only by luck. Nothing
+>    touches `backfill-arrival.ts`'s `splitStatus` at all.
+
+### Registered divergences
+
+The TS and C++ implementations **have drifted**, and the drift is now recorded
+rather than merely true. Cases covering a divergence carry the expected
+behaviour of *both* sides and print `KNOWN DIVERGENT` instead of failing, so
+the suites stay green while the gap stays visible. Six are registered, all with
+`decision: UNDECIDED`:
+
+| ID | Behaviour | `packages/shared` (TS) | `nfc-attender-fw` (C++) | Observable today |
+|---|---|---|---|---|
+| **D1** | Non-Friday check-out opens at | **16:59** (`CHECKOUT_HOUR: 16`, `CHECKOUT_MINUTE: 59`) | **17:00** (`CHECKOUT_HOUR = 17`, `CHECKOUT_MINUTE = 0`) | yes — for the whole of 16:59 the dashboard checks a learner out while the reader refuses the tap |
+| **D2** | Evaluation order | check-out **before** late-lunch-return, so a learner still at lunch gets one combined write | late-lunch-return **before** check-out, so the same tap only closes the lunch | yes — a learner who never returned from lunch is checked out by the dashboard and left checked in by the device, and no `time_out` is ever recorded on the device path |
+| **D2a** | Does the check-out branch close an open lunch? | yes — sets `lunch_events` plus `lunch_status: "late"` in the same write | **no** — `CheckOut` populates `time_out` only | no, **masked by D2** |
+| **D3** | 14:00–17:00 on a non-Friday, already checked in, not at lunch | `no_action` (silent no-op) | `Locked` — the tap is rejected with "Scans locked 14:00–17:00" | yes — every stray afternoon tap is a silent no-op on one side and a visible rejection on the other |
+| **D4** | Auto-absent sweep | `findLearnersToMarkAbsent` lives here | **not ported** — the device can never mark anyone absent | no — the sweep cases run against the spec only; the C++ harness reports them unported |
+| **D5** | The `justified` column | read **and** written: `AttendanceState` carries it, and `check_in` emits `time_in` + `arrival` + `justified` + `status` | **neither** — the port's `AttendanceState` and `CheckInAction` have no `justified` field, and `fields.cpp` PATCHes only `time_in`, `arrival`, `status` | yes, both halves |
+
+**D2a is the one to understand before touching D2.** No input can separate
+them today: the C++ late-lunch-return step catches every at-lunch state from
+14:00 onward, and both check-out cutoffs are at or after 14:00, so the C++
+`CheckOut` branch is never reached with an open lunch. **Reordering the C++
+steps to fix D2 would unmask D2a and convert a wrong-action bug into a silent
+field-loss bug** — a learner checking out with an open lunch would have it
+closed and marked late on the dashboard and never on the device, leaving a
+dangling `out` event the device has no other route to close. The C++ harness
+asserts the mask directly, so that trap is pinned rather than latent.
+
+**D5 has two halves, and they fail differently.** On the *write* side, a device
+tap on a justified learner leaves the `justified` column at whatever it already
+held — reproducing, against the same PocketBase collection, exactly the
+self-contradicting row the TypeScript path was changed to stop writing. On the
+*read* side, an excusal recorded only in the column is invisible to the port
+(`justifyAttendance` on a row with no `arrival` yet leaves `status` null), so
+the device derives `late` where the specification derives `jLate`. It is
+recorded rather than fixed because altering what the device writes ships to
+physical hardware. The fix is the same shape as the TypeScript one: add
+`justified` to the C++ `AttendanceState` and `CheckInAction`, read it alongside
+the enum, and emit it.
+
+There is **no locked / no-scan window in the TypeScript rule** (D3). It is a
 firmware-only concept, added because a physical terminal in a hallway gets
 idle-curiosity taps that a dashboard operator does not. If you read about a
 locked window elsewhere and expect `computeCheckInAction` to return it, it will
 not.
+
+The firmware's inline `attendance.ts:NNN` line citations are stale — they point
+at the pre-aggregation layout of this file. The fixture's divergence registry
+carries current citations; prefer it.
+
+### How a divergence is pinned
+
+Most divergences are held in place by a per-case `divergence` block carrying
+the C++ side's behaviour in the same shape as `expect`. Three mechanisms exist
+beyond that, and they matter if you add a divergence:
+
+| Field | Used by | What it does |
+|---|---|---|
+| `pinned_by` | D4, D5 | Names what holds a divergence in place when it has no per-case block of its own — for D4, the `absence_sweep` cases; for D5, a named case for the read half plus the field skip for the write half. |
+| `cpp_skips_field` | D5 only | Names one key the C++ comparator skips wholesale and reports **once**. Without it, ten `check_in` cases would all go divergent over the same missing `justified` field and drown out any real difference in the other fields. |
+| absent key in `expect` | D2a | A key that is *absent* must not be set. That negative assertion is what pins D2a, since no positive input can reach the masked branch. |
+
+The C++ comparator also carries an **unknown-key guard**: a key in `expect`
+that the harness does not compare and that is not registered via
+`cpp_skips_field` is a hard failure, not a silent pass. That guard is the
+reason `justified` could not have slipped through unverified on the device
+side, and it is the thing to keep working — a fixture field nobody compares is
+worse than no field, because it reads as covered.
+
+### Known shared defect
+
+One defect is present in **both** implementations and is therefore *not* a
+divergence. It is registered separately as `DEAD_LUNCH_LATE_BRANCH` and pinned
+by two cases (`lunch/in_at_13_30_writes_present_not_late`,
+`lunch/in_at_13_59_last_window_minute`): the lunch window's
+`lunch_status: "late"` arm is unreachable. See
+[the warning under Time thresholds](#time-thresholds).
 
 ## The status model: `arrival` + `justified`, plus a legacy enum
 
@@ -176,9 +301,14 @@ with a configured offset.
 > unreachable and the lunch window always writes `"present"`. A `"late"`
 > lunch status can only come from the `late_lunch_return` action or from
 > check-out closing an open lunch — both of which hard-code `"late"`. The C++
-> port reproduces the same dead branch. This is described here as observed
-> behaviour, not endorsed; whether 14:01 was meant to be compared against
-> `LUNCH_END_HOUR` instead is not recoverable from the repo.
+> port reproduces the same dead branch, so this is a **shared defect, not a
+> divergence**; the fixture registers it as `DEAD_LUNCH_LATE_BRANCH` and pins
+> the current behaviour with two cases
+> (`lunch/in_at_13_30_writes_present_not_late`,
+> `lunch/in_at_13_59_last_window_minute`), which means a "fix" will fail those
+> cases until the fixture is regenerated deliberately. Described here as
+> observed behaviour, not endorsed; whether 14:01 was meant to be compared
+> against `LUNCH_END_HOUR` instead is not recoverable from the repo.
 
 ## `computeCheckInAction(state, now)`
 
@@ -191,7 +321,7 @@ action to take and the exact PocketBase fields to write. **It performs no
 writes** — the caller persists `action.fields`.
 
 `AttendanceState` is the input snapshot. It contains only what the decision
-needs, which is worth noting for a reason that bites later:
+needs:
 
 ```ts
 interface AttendanceState {
@@ -202,13 +332,22 @@ interface AttendanceState {
   lunch_in: string | null;             // legacy, pre-lunch_events
   status: AttendanceStatus | null;     // the legacy enum
   lunch_status: AttendanceStatus | null;
+  justified: boolean;                  // required, not optional — see below
 }
 ```
 
-There is **no `arrival` and no `justified` field on the input.** The state
-machine reads prior justification out of the legacy `status` enum, and can
-never write `justified`. That is the mechanism behind the trap at the end of
-this section.
+There is **no `arrival` field on the input** — the decision never needs to know
+what arrival was previously recorded, only whether `time_in` exists.
+
+**`justified` is required rather than optional, deliberately.** The state
+machine used to infer prior justification from the legacy `status` enum alone,
+which silently lost an excusal recorded on a row whose `status` had never been
+derived — `justifyAttendance` on a record with no `arrival` yet writes
+`justified: true` with `status: null`. Making the field required means a caller
+cannot forget to supply it and quietly get the old lossy behaviour; the type
+checker asks. `computeCheckInAction` reads the real field **first** and falls
+back to decoding the enum, so both the modern column and a pre-migration
+`jAbsent` row are recovered.
 
 ### Decision table
 
@@ -216,7 +355,7 @@ Conditions are evaluated strictly top to bottom; the first match returns.
 
 | # | Condition | Action | Fields written |
 |---|---|---|---|
-| 1 | `!state.time_in` | `check_in` | `time_in`, `arrival`, `status` |
+| 1 | `!state.time_in` | `check_in` | `time_in`, `arrival`, `justified`, `status` |
 | 2 | `13 <= hour < 14` | `lunch_event` | `lunch_events`, plus `lunch_status` if this tap is a return |
 | 3 | at/after check-out time **and** `!state.time_out` | `check_out` | `time_out`, plus `lunch_events` + `lunch_status: "late"` if mid-lunch |
 | 4 | `hour >= 14` **and** currently at lunch | `late_lunch_return` | `lunch_events`, `lunch_status: "late"` |
@@ -240,19 +379,47 @@ morning bound: a learner whose first tap is at 15:00 still gets `check_in`,
 with `arrival: "late"`.
 
 ```ts
-{ type: "check_in", fields: { time_in: string; arrival: ArrivalStatus; status: AttendanceStatus } }
+{
+  type: "check_in",
+  fields: {
+    time_in: string;
+    arrival: ArrivalStatus;
+    justified: boolean;
+    status: AttendanceStatus;
+  }
+}
 ```
 
-`arrival` is `"late"` if `now >= 10:01:00` local, else `"present"`. Two
-consequences worth knowing:
+`arrival` is `"late"` if `now >= 10:01:00` local, else `"present"`.
+
+**All four fields are emitted together, and that is the point.** The split pair
+and the legacy enum are written in one patch so they cannot disagree. Emitting
+`arrival` and `status` while leaving `justified` at whatever the row already
+held produced rows that contradicted themselves in *both* directions: a legacy
+`jAbsent` row became `arrival: "late", justified: false, status: "jLate"`, and
+an already-justified row whose learner then arrived on time became
+`arrival: "present", justified: true` — a pair the schema calls meaningless.
+
+The emitted `justified` is not `wasJustified` passed straight through. It is
+re-derived as `splitStatus(status).justified`, which makes the emitted triple a
+**fixpoint of `deriveStatus`/`splitStatus`** — that is precisely what
+"coherent" means here — and has the useful side effect of dropping the flag for
+an on-time arrival, since `present` has no justified counterpart.
+
+Three consequences worth knowing:
 
 - A learner the sweep already wrote off as `absent` who then walks in gets
   `arrival` flipped back to `present`/`late`. They showed up; `absent` no
   longer holds. `time_in` being `null` is what makes this reachable — the sweep
   writes `arrival` but not `time_in`.
-- Prior justification is preserved through the derived `status`: if the record's
-  legacy `status` was `jLate` or `jAbsent`, the new `status` is derived with
-  `justified: true`, so a guide's excusal survives the learner turning up.
+- **Prior justification survives.** `wasJustified` is
+  `state.justified === true || status === "jLate" || status === "jAbsent"`, so
+  an excusal is recovered whether it lives in the modern column, in the legacy
+  enum, or both. Reading only the enum was the old bug: `justifyAttendance` on
+  a row with no `arrival` yet leaves `justified: true` with `status: null`.
+- **Arriving on time clears the excusal.** A learner marked `jAbsent` who then
+  turns up before 10:01 ends `arrival: "present", justified: false,
+  status: "present"`. There is nothing left to excuse.
 
 **`lunch_event`** — a tap inside 13:00–13:59. Toggles: if the last recorded
 event was `"in"` (or there are none), the next is `"out"`; otherwise `"in"`.
@@ -291,18 +458,34 @@ three real situations, all of which are silent no-ops rather than errors:
 - checked in and checked out, not at lunch
 
 > [!WARNING]
-> **`check_in` can leave `status` and the split fields disagreeing.**
-> When a guide has marked a learner `jAbsent` and the learner then taps in, the
-> action writes `arrival: "late"` and `status: "jLate"` — but `AttendanceState`
-> has no `justified` field, so the state machine cannot write it, and the
-> dashboard caller (`checkLearnerIn` in `apps/nfc-attender/src/app/utils/utils.ts`)
-> writes `action.fields` verbatim through a raw `attendance` update rather than
-> through `batchUpdateAttendance`. The row ends up
-> `arrival: "late"`, `justified: false`, `status: "jLate"`.
-> Because `summarizeAttendance` prefers the split fields, that day is then
-> counted as an unjustified `late`, while any legacy consumer reading `status`
-> sees `jLate`. Not verifiable from the repo: whether this was intended as
-> "the excusal is advisory until re-confirmed" or is simply a missed field.
+> **The TypeScript check-in path is coherent. The device path is not (D5).**
+>
+> This used to be a live bug on both sides: `AttendanceState` had no
+> `justified` field, so the action wrote `arrival: "late"` and
+> `status: "jLate"` for an excused learner who turned up, but could not write
+> `justified` — and the dashboard caller (`checkLearnerIn` in
+> `apps/nfc-attender/src/app/utils/utils.ts`) writes `action.fields` verbatim
+> through a raw `attendance` update rather than through
+> `batchUpdateAttendance`, so nothing filled the gap. Rows ended up
+> `arrival: "late", justified: false, status: "jLate"`, which
+> `summarizeAttendance` counted as an unjustified `late` while legacy consumers
+> reading `status` saw `jLate`.
+>
+> **Fixed here** by making `justified` a required input and emitting it
+> alongside `arrival` and `status`. The intent was never ambiguous, and is
+> verifiable in the repo — the dashboard's manual "morning-in" path already
+> preserved justification and cited the state machine as the shared invariant,
+> `withDerivedStatus` re-derives `status` from the incoming `arrival` plus the
+> existing `justified`, `justifyAttendance` does the mirror-image thing, and
+> `history/page.tsx` carries `justified` across an absent-to-late edit. Every
+> path agreed except the NFC write path.
+>
+> **Still broken on the ESP32.** The C++ port has no `justified` field on
+> either its `AttendanceState` or its `CheckInAction`, and `fields.cpp` PATCHes
+> only `time_in`, `arrival` and `status` — so a device tap on an excused
+> learner writes exactly the self-contradicting row described above, against
+> the same collection. Registered as **D5**; see
+> [Registered divergences](#registered-divergences).
 
 ## `findLearnersToMarkAbsent(records, learners, now)`
 
@@ -559,8 +742,11 @@ going >= capacity`).
 
 | Check | Command (from repo root) | What it actually covers |
 |---|---|---|
-| Types | `pnpm typecheck` → `pnpm -r --filter "./packages/*" typecheck` | The only check that targets this package directly. Runs in CI in both `.github/workflows/calendar-test.yml` and `.github/workflows/nfc-test-build.yml`. |
-| Behaviour, main | `pnpm --filter nfc-attender test` (vitest) | `attendance-state-machine.test.ts`, `attendance-summary.test.ts`, `date-utils.test.ts`, `expand-events.test.ts`, `rsvp.test.ts` — all import `@learnlife/shared` directly. This is where essentially all behavioural coverage of this package lives, and it lives in another package. |
+| Types | `pnpm typecheck` → `pnpm -r --filter "./packages/*" typecheck` | Runs `tsc --noEmit` over `src/` **and** `tsc -p tsconfig.scripts.json` over `scripts/`. Runs in CI in both `.github/workflows/calendar-test.yml` and `.github/workflows/nfc-test-build.yml`. |
+| Conformance, TS | `pnpm --filter nfc-attender test` (vitest, `TZ=UTC`) | `attendance-fixture.test.ts` runs all 41 state-machine cases and all 9 sweep cases in `fixtures/attendance-state-machine.json` against `src/attendance.ts`, and asserts `justified` is present on every `check_in`. |
+| Conformance, C++ | `pio test -e native` in `apps/nfc-attender-fw` | `test_state_machine/` runs the **same fixture** against `state_machine.cpp`. CI: `.github/workflows/nfc-fw.yml`. This is the cross-language parity check. |
+| Fixture freshness | `pnpm check:attendance-fixture` | Fails if the committed fixture no longer matches what the generator derives. **Not yet wired into CI** — run it locally, or add it to the nfc workflow. |
+| Behaviour, main | `pnpm --filter nfc-attender test` (vitest) | `attendance-state-machine.test.ts`, `attendance-summary.test.ts`, `date-utils.test.ts`, `expand-events.test.ts`, `rsvp.test.ts` — all import `@learnlife/shared` directly. The aggregation, calendar, date and RSVP surfaces are covered **only** here. |
 | Behaviour, incidental | `pnpm --filter ll_calendar test` (jest, `TZ=UTC`) | `__tests__/calendar-utils.test.ts` reaches `expandEvents` / `makeDateKey` / `formatTimeRange` through `apps/ll-calendar/lib/calendar-utils.ts`, which re-exports them. |
 
 Both app suites resolve `@learnlife/shared` to `packages/shared/src/index.ts`
@@ -568,8 +754,12 @@ by path mapping (jest `moduleNameMapper` in `apps/ll-calendar/package.json`;
 vitest/tsconfig aliases in `apps/nfc-attender`), so they test the source, not a
 build artefact.
 
-The practical consequence: **deleting `apps/nfc-attender` would silently remove
-almost all test coverage of the repository's core domain logic.**
+The practical consequence: the attendance rule is now pinned by a fixture that
+lives in this package, but **every harness that reads it lives somewhere else.**
+Deleting `apps/nfc-attender` would remove the TS conformance run and all
+coverage of the aggregation, calendar, date and RSVP surfaces; the C++ side
+would keep running, and the fixture would keep sitting here unexercised on the
+TypeScript side.
 
 ## Consumers
 
@@ -577,7 +767,7 @@ almost all test coverage of the repository's core domain logic.**
 |---|---|
 | `apps/nfc-attender` (dashboard) | `computeCheckInAction`, `deriveStatus`, `splitStatus`, `findLearnersToMarkAbsent`, the whole aggregation surface, `countWeekdays` |
 | `apps/ll-calendar` (Expo app) | `expandEvents`, `parsePBDate`, `formatTimeRange`, `makeDateKey`, `dateKeyToOccurrenceDate`, `computeRsvpAction`, `promoteFromWaitlist`, `countRsvps` |
-| `apps/nfc-attender-fw` (ESP32) | Nothing at runtime — it is C++. It carries a hand-written port of `computeCheckInAction` and `deriveStatus`. |
+| `apps/nfc-attender-fw` (ESP32) | Nothing at runtime — it is C++. It carries a hand-written port of `computeCheckInAction` and `deriveStatus`, and its native test suite reads this package's `fixtures/attendance-state-machine.json`. |
 
 ## Related
 
@@ -585,5 +775,5 @@ almost all test coverage of the repository's core domain logic.**
 - [`docs/POCKETBASE.md`](../../docs/POCKETBASE.md) — the backend reference: collections, fields, API rules, and what cannot be verified from the repo
 - [`docs/MONOREPO_ARCHITECTURE.md`](../../docs/MONOREPO_ARCHITECTURE.md)
 - [`docs/GLOSSARY.md`](../../docs/GLOSSARY.md)
-- [`apps/nfc-attender-fw/README.md`](../../apps/nfc-attender-fw/README.md) — the third implementation
+- [`apps/nfc-attender-fw/README.md`](../../apps/nfc-attender-fw/README.md) — the C++ port and its native test suite
 - [`pb_hooks/README.md`](../../pb_hooks/README.md) — server-side rules and hooks

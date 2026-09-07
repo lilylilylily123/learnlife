@@ -12,28 +12,29 @@ uploaded by hand.
 
 ## Read this before your first edit
 
-Five things about this app will mislead you if you assume the defaults:
+Four things about this app will mislead you if you assume the defaults:
 
-1. **Nothing typechecks this app.** No `typecheck` script, `expo lint` is ESLint-only, and the
-   `ts-jest` transform sets `diagnostics: false`. `tsc --noEmit` reports **9 pre-existing errors**.
-   If you see type errors, they are probably not yours — run `npx tsc --noEmit -p tsconfig.json`
-   *before* your change to get a baseline, and compare. Do not "fix" the four route-type errors: they
-   come from a stale generated `.expo/types/router.d.ts` and disappear when `pnpm start` regenerates
-   it.
-2. **Jest only collects `.ts`.** `testMatch` is `**/__tests__/**/*.test.ts`. A `.tsx` test is
-   silently never run. If you write the first component test, widen the pattern to
-   `**/__tests__/**/*.test.ts?(x)` **in the same change**, and prove the test actually executed.
+1. **`pnpm typecheck` is the gate — keep it green.** `expo lint` is ESLint-only and the `ts-jest`
+   transform still sets `diagnostics: false`, so `tsc --noEmit` is the only thing that sees types.
+   It is wired into `.github/workflows/calendar-test.yml` and reports **zero errors** today. Route
+   strings are checked against `.expo/types/router.d.ts`, which is generated and gitignored: if you
+   get route-type errors for routes that plainly exist, your copy is stale — run `pnpm start` once
+   to regenerate it before assuming the error is real.
+2. **Jest collects `.ts` and `.tsx`.** `testMatch` is
+   `["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"]`. Component tests are collected;
+   still confirm your new test actually appears in the run output.
 3. **Most of `components/` and one hook are dead scaffolding.** `create-expo-app` leftovers with zero
-   product imports. Do not extend them, do not use them as a style reference, and do not assume
-   `ThemedText`/`ThemedView`/`useThemeColor` work — two of those files are the source of the five real
-   type errors. The inventory is in
+   product imports. Do not extend them and do not use them as a style reference.
+   `ThemedText`/`ThemedView`/`useThemeColor` do typecheck now — they read `T.colors[theme]` from
+   `constants/theme.ts` — but they are still unused by any product screen. The inventory is in
    [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#components-product-versus-scaffolding).
-4. **RSVP capacity logic exists twice**, in `lib/pocketbase.ts` and `pb_hooks/event_rsvps.pb.js`, and
-   the two disagree about whether `status` on the wire is *intent* or *final state*. Do not touch
-   either side without reading
-   [the analysis](docs/ARCHITECTURE.md#the-rsvp-divergence-client-and-server-both-enforce-capacity).
-   The stale comment in `submitRsvp` claiming hooks cannot run is wrong.
-5. **`pnpm reset-project` deletes the application.** Never run it. Never suggest it.
+4. **RSVP capacity and waitlist are server-owned.** The client sends `status` as *intent*
+   (`"going"` | `"not_going"`); `pb_hooks/event_rsvps.pb.js` computes the stored `status` and
+   `position`, and rejects `"waitlisted"` as an inbound value. Never compute a final RSVP status
+   here, and never write `position`. Two guards in `submitRsvp` *are* client-only and load-bearing —
+   the hook skips every check but ownership on the `not_going` path. Read
+   [the section](docs/ARCHITECTURE.md#rsvp-the-server-owns-capacity-the-client-sends-intent) before
+   touching either side.
 
 ## Commands
 
@@ -45,12 +46,11 @@ pnpm start                              # Expo dev server (also regenerates .exp
 pnpm ios | pnpm android | pnpm web      # dev server + that target
 pnpm lint                               # expo lint (ESLint 9 flat config)
 pnpm test                               # TZ=UTC jest — 1 file, 27 cases
-npx tsc --noEmit -p tsconfig.json       # the only typecheck; not a script, not in CI
-npx expo export --platform web          # the web build → dist/ (no `build` script exists)
+pnpm typecheck                          # tsc --noEmit; also runs in CI
+pnpm build                              # expo export --platform web → dist/
 ```
 
-There is no `build` script, so `pnpm build:calendar` from the repo root fails. Do not add the script
-without being asked — it is a real gap, documented as one, and the owner's decision.
+`pnpm build:calendar` from the repo root resolves to `pnpm build` here.
 
 ## Invariants — do not break these
 
@@ -106,7 +106,7 @@ it belongs in `packages/shared` instead.
 | Concern | Lives in | This app's relationship |
 |---|---|---|
 | Calendar expansion, date parsing/formatting | `packages/shared` (`expandEvents`, `parsePBDate`, `formatTimeRange`, `makeDateKey`, `dateKeyToOccurrenceDate`) | `lib/calendar-utils.ts` is a **pure re-export shim with no logic**. Never add logic to it. Note `lib/pocketbase.ts` also re-exports `expandEvents`, so two import paths reach the same function. |
-| RSVP decisions | `packages/shared` (`computeRsvpAction`, `promoteFromWaitlist`, `countRsvps`) | Called from `lib/pocketbase.ts` and `event-detail.tsx`. The pure functions are tested in `packages/shared`; the orchestration here is not tested at all. |
+| RSVP decisions | **Server-owned** — `pb_hooks/event_rsvps.pb.js`. The client sends intent via `rsvp.submitRsvp` in `packages/pb-client`. | `computeRsvpAction` / `promoteFromWaitlist` in `packages/shared` are **no longer called by this app**; they survive as the only tested specification of the hook's rules. Do not wire them back in. `countRsvps` is still used, for display badges only. |
 | Role predicates | `packages/shared` (`isGuide`, `isAdmin`, `isLearner`) | **Currently duplicated.** Five screens inline `role === "lg" \|\| role === "admin"`, which is byte-for-byte what `isGuide()` does. Use `isGuide(role)` in new code. |
 | Queries, filters, PB types, `PB_URL` | `packages/pb-client` | Reached only through `lib/pocketbase.ts` wrappers (queries) or direct type imports (types). |
 | Design tokens | `packages/design-tokens` | Only `constants/theme.ts` imports it. |
@@ -119,16 +119,18 @@ this app, but if you are asked to change attendance logic, all three need it.
 
 ## Testing guidance
 
-`pnpm test` runs one file. Before adding tests, know the constraints:
+`pnpm test` runs two files. Before adding tests, know the constraints:
 
-- Only `**/__tests__/**/*.test.ts` is collected. `.tsx` is not. (See invariant 2 above.)
+- `**/__tests__/**/*.test.ts` and `**/__tests__/**/*.test.tsx` are collected. (See item 2 above.)
 - `moduleNameMapper` resolves `@learnlife/*` to package **source**, and `pocketbase` to
   `__mocks__/pocketbase.ts` — a 13-line stub whose `collection()` returns empty lists. Anything
   data-dependent needs a better fake, which does not exist yet.
 - `TZ=UTC` is set in the test script. Any test involving dates must assume UTC and must not read the
   host timezone.
-- Highest-value untested surfaces, in order: `lib/errors.ts` (pure, trivial), the RSVP orchestration
-  in `lib/pocketbase.ts`, `AuthContext`. Screens need the `testMatch` fix first.
+- Highest-value untested surfaces, in order: the `not_going` guards in `submitRsvp` (blocked on the
+  PocketBase fake above), `AuthContext`, then screens. `mapRsvpError` is covered by
+  `__tests__/rsvp-errors.test.ts`; the rest of `lib/errors.ts` is not. Screen tests are collected
+  now — write them as `.test.tsx`.
 
 ## Scope boundaries
 

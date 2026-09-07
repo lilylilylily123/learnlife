@@ -40,7 +40,7 @@ Runbook for a device in service: [`OPERATIONS.md`](OPERATIONS.md).
 
 ## `state_machine`
 
-`state_machine.h` · `state_machine.cpp` · pure · **`test_state_machine`** (15 cases)
+`state_machine.h` · `state_machine.cpp` · pure · **`test_state_machine`** (62 cases: 15 hand-written + 47 from the shared cross-language fixture)
 
 The attendance rule. A C++ port of `computeCheckInAction` in
 `packages/shared/src/attendance.ts`, with the thresholds from
@@ -63,8 +63,8 @@ Thresholds, all in **school-local time**:
 | Late | 10:01 | `arrival` becomes `Late` at or after |
 | Lunch window | 13:00–13:59 | taps append a `LunchEvent` |
 | Late lunch return | 14:00+ | returning from an open `out` is `LateLunchReturn`, `lunch_status=late` |
-| Locked window | 14:00–16:59 | non-Friday, already checked in, not at lunch → `Locked` |
-| Check-out | 17:00 | 14:00 on Friday (`tm_wday == 5`) |
+| Locked window | 14:00–16:59 | non-Friday, already checked in, not at lunch → `Locked`. **No TS equivalent** (divergence D3) |
+| Check-out | 17:00 | 14:00 on Friday (`tm_wday == 5`). **TS says 16:59** (divergence D1) |
 
 Invariants and gotchas:
 
@@ -79,10 +79,30 @@ Invariants and gotchas:
 - **A prior excusal survives a late arrival.** `status ∈ {jLate, jAbsent}` on
   the existing row makes the new check-in `jLate`; arriving on time drops it,
   because `derive_status` never justifies `Present`.
-- **This is one of three implementations of the same rule** — the TS original,
-  the hand-duplicated `deriveStatus` in
-  `packages/pb-client/src/queries/attendance.ts`, and this port. Nothing in CI
-  compares them. Changing a threshold means changing all three.
+- **This is one of four implementations of the same rule** — the TS
+  specification in `packages/shared/src/attendance.ts`, this port, the
+  hand-duplicated `deriveStatus` in
+  `packages/pb-client/src/queries/attendance.ts`, and a duplicated
+  `splitStatus` in `packages/pb-client/scripts/backfill-arrival.ts`.
+- **Two of the four are now compared by a build.**
+  `packages/shared/fixtures/attendance-state-machine.json` is read by both this
+  suite's `fixture_runner.cpp` and the Vitest harness in `apps/nfc-attender`,
+  so drift between the spec and this port fails a build. The two `pb-client`
+  copies are still unguarded — changing a threshold means changing all four.
+- **Known TS/C++ divergences are pinned, not fixed** — six entries under five
+  numbered IDs (D1, D2, D2a, D3, D4, D5), all `UNDECIDED`. Two of the
+  thresholds above are among them. Before changing any threshold, reordering
+  the steps, or touching the emitted field set, read
+  [`TESTING.md`](TESTING.md#known-divergences-are-pinned-not-hidden) — in
+  particular D2a, a silent-data-loss bug currently *masked* by the step
+  ordering, which reordering would unmask.
+- **`AttendanceState` and `CheckInAction` have no `justified` field**
+  (divergence D5, observable today). The spec carries one, so prior
+  justification can only be decoded here from the legacy `status` enum: an
+  excusal recorded *only* in PocketBase's `justified` column is invisible to
+  this port, which then derives `late` where the spec derives `jLate`. The
+  write half of the same divergence is under `fields` below. Adding the field
+  to both structs is the read half of the fix.
 
 ## `fields`
 
@@ -104,6 +124,17 @@ std::string json_escape(const std::string&)          // no surrounding quotes
   as an array. That matches what the TS client writes, so a row looks identical
   regardless of which client produced it. Getting this wrong produces rows the
   dashboard silently mis-renders.
+- **The `CheckIn` arm does NOT emit `justified` — divergence D5, observable
+  today.** It writes `time_in`, `arrival` and `status` only. The spec's
+  `check_in` also emits `justified`, and the three form a triple that
+  round-trips through `deriveStatus`/`splitStatus`. So a device tap on a
+  justified learner leaves that column at whatever it already held and the row
+  contradicts itself — the same defect the TypeScript side was fixed to stop
+  producing, against the same collection. The fixture pins the current
+  behaviour by skipping exactly the `justified` key
+  (`cpp_skips_field`), so every other field on those cases stays compared.
+  Not fixed here because changing what the device writes ships to hardware; see
+  [`TESTING.md`](TESTING.md#how-a-partially-ported-field-is-compared).
 - `NoAction` and `Locked` return `""`; `processor_task` skips both before
   reaching here, so those arms are unreachable today. They exist so the
   `switch` stays exhaustive and `-Wswitch` fires if a new `ActionType` appears.
@@ -729,6 +760,19 @@ bool poll_uid(std::string& out_uid_hex);
   Excluded from the sweep: 34/35/36/39 (input-only, can never be discharged),
   1/3 (UART0 — driving them destroys this very log), 6–11 (SPI flash), and 0
   (its onboard boot-button pull-up always reads as present).
+- **`probe_i2c_lines` ends with `release_bus()` on every path.** Driving the
+  lines to measure them is bus traffic to every slave listening: SDA falling
+  while SCL is high is a START, and the SCL pulse from the next check clocks a
+  stale bit into whatever woke up. Measured on hardware: with the line checks
+  in front of it, the first transaction after `Wire.begin()` returns 2 (address
+  NACK) and every one after it returns 0; without them the first returns 0.
+  That single lost transaction was `ui::init()`'s display probe, so the
+  diagnostic reported the display it had just disturbed as absent — an OLED
+  wired correctly booted headless. `release_bus` is the standard recovery:
+  release SDA, clock SCL nine times so a slave holding a partial byte runs off
+  the end of it and sees the NACK, then a real STOP (SDA low, SCL released
+  high, SDA released high), all bit-banged open-drain because this runs before
+  `Wire.begin()` owns the pins.
 - **`init()` runs once with no retry.** A failed probe means `nfc_task` polls a
   wedged bus forever and nothing clears `ui::set_reader_error`. See
   [`OPERATIONS.md`](OPERATIONS.md#known-gaps).
@@ -765,7 +809,12 @@ someone to type the password into a phone.
   is worse than silence: it certifies the I2C bus as healthy and sends whoever
   is debugging the PN532 to the wrong end of it. A failed probe means
   `g_have_oled = false` and the device runs headless — every render is a no-op,
-  and Serial is the only surface.
+  and Serial is the only surface. The probe gets **three attempts, 5 ms apart**:
+  a display whose lines have just been pulsed NACKs exactly one address cycle
+  before answering normally, `nfc::release_bus` is the only thing keeping that
+  from happening on every boot, and `[ui] SSD1306 not found at 0x3C` is
+  documented as a wiring fault — so a false negative here costs an hour with a
+  multimeter.
 - **`set_reader_error` is deliberately not a reuse of `set_network_error`.**
   `network_task` clears the network flag on every WiFi state change, so a device
   whose PN532 never came up showed a clean screen within seconds of boot. A dead

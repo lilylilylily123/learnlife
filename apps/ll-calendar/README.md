@@ -77,29 +77,30 @@ Run these from `apps/ll-calendar` unless noted.
 | `pnpm android` | `expo start --android` — dev server plus Android emulator. |
 | `pnpm web` | `expo start --web` — dev server plus browser, `react-native-web`. |
 | `pnpm lint` | `expo lint` (ESLint 9 flat config). |
-| `pnpm test` | `TZ=UTC jest` — see [Testing](#testing-one-file-and-a-trap) for what this does and does not cover. |
-| `pnpm reset-project` | **Destructive `create-expo-app` leftover. Do not run.** See below. |
+| `pnpm test` | `TZ=UTC jest` — see [Testing](#testing-two-files) for what this does and does not cover. |
+| `pnpm typecheck` | `tsc --noEmit`. Also runs in `calendar-test.yml`. |
+| `pnpm build` | `expo export --platform web` → `dist/`. See below. |
 
 From the repo root:
 
 ```bash
 pnpm dev:calendar                            # == pnpm --filter ll_calendar start
 pnpm --filter ll_calendar lint
+pnpm --filter ll_calendar typecheck
 pnpm --filter ll_calendar test
+pnpm build:calendar                          # == pnpm --filter ll_calendar build
 ```
 
 ### The web build
 
-`package.json` defines no `build` script, so the root shortcut **`pnpm build:calendar` fails**
-(`pnpm --filter ll_calendar build` → `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`). Nothing in the repo pins
-the web build, but the command that actually works is Expo's static export:
+`pnpm build` is Expo's static web export:
 
 ```bash
 # from apps/ll-calendar
-npx expo export --platform web
+pnpm build          # expo export --platform web
 ```
 
-Verified: exit 0 in ~24 s, writing `dist/` at 3.3 MB. `app.json` sets `web.output: "static"`, which
+Verified: exit 0 in ~10 s, writing `dist/`. `app.json` sets `web.output: "static"`, which
 is what makes this a directory of prerendered HTML rather than a single-page bundle — one `.html`
 per route plus `_expo/` and `assets/`. Two details worth knowing:
 
@@ -110,17 +111,8 @@ per route plus `_expo/` and `assets/`. Two details worth knowing:
   [the routing section](docs/ARCHITECTURE.md#routing-and-the-expo-router-group-conventions). Expo
   Router also generates `+not-found.html` and `_sitemap.html`.
 
-The gap: because no `build` script exists, this command is not recorded anywhere the tooling can
-see, the root `build:calendar` shortcut is broken, and CI never exercises the export — so a change
-that breaks the web build lands green. Adding the script is the owner's call, not this document's.
-
-### `pnpm reset-project` will delete the app
-
-`scripts/reset-project.js` is the untouched scaffold script from `create-expo-app`. Its own header
-comment says it "deletes or moves the /app, /components, /hooks, /scripts, and /constants
-directories" and replaces `app/` with a hello-world screen. Running it in this repo destroys the
-entire application. It survives only because nobody deleted it; the script's own comment tells you
-to remove it after first use, and that never happened.
+CI still does not exercise the export, so a change that breaks the web build lands green; the
+script at least makes the command discoverable and fixes the root `build:calendar` shortcut.
 
 ## Running on each platform
 
@@ -220,43 +212,50 @@ whatever the platform defaults to. `public/` is Expo's static-asset directory an
 copied into the export output — verified: an `expo export --platform web` run produced
 `dist/_headers`.
 
-The build command is [`npx expo export --platform web`](#the-web-build), verified working. What is
-**not** verifiable from the repo: which host actually serves the result, whether that host is
-configured to run that command, and whether the project root is `apps/ll-calendar` or the standalone
-mirror repo. There is no `.vercel/` directory, no `build` script and no CI deploy step — the
+The build command is [`pnpm build`](#the-web-build) (`expo export --platform web`), verified
+working. What is **not** verifiable from the repo: which host actually serves the result, whether
+that host is configured to run that command, and whether the project root is `apps/ll-calendar` or
+the standalone mirror repo. There is no `.vercel/` directory and no CI deploy step — the
 `vercel.json` filename is the only evidence pointing at Vercel at all.
 
-## Testing: one file, and a trap
+## Testing: two files
 
-The app has **one** test file: `__tests__/calendar-utils.test.ts` — 27 cases in 9 `describe` blocks, all covering
-`expandEvents`, `makeDateKey` and `formatTimeRange` — which since the shim refactor live in
-`@learnlife/shared`, not in this app. The suite is genuinely good where it reaches: it pins the
-Monday-first weekday convention, PocketBase's space-separated datetime format, `recurrence_days`
-being `undefined`/`null`/`[]`, the `recurrence_end` inclusive boundary, and composite occurrence IDs.
+`__tests__/calendar-utils.test.ts` — 27 cases in 9 `describe` blocks, all covering `expandEvents`,
+`makeDateKey` and `formatTimeRange`, which since the shim refactor live in `@learnlife/shared`, not
+in this app. The suite is genuinely good where it reaches: it pins the Monday-first weekday
+convention, PocketBase's space-separated datetime format, `recurrence_days` being
+`undefined`/`null`/`[]`, the `recurrence_end` inclusive boundary, and composite occurrence IDs.
 `TZ=UTC` is set in the test script so date arithmetic does not depend on the developer's locale.
+
+`__tests__/rsvp-errors.test.ts` — 13 cases over `mapRsvpError`. Since the client stopped computing
+capacity, that function is the entire user-facing feedback for RSVP failures, so it pins each
+distinct hook rejection, that an unrecognised body is not echoed, and that the client-only guards
+(plain `Error`s with no `status`) are not misreported as network failures. See
+[the RSVP section](docs/ARCHITECTURE.md#rsvp-the-server-owns-capacity-the-client-sends-intent).
 
 Everything else is untested. Notably:
 
 | Untested | Why it matters |
 |---|---|
-| RSVP submit, capacity, waitlist promotion | The most recent feature, and the client duplicates capacity logic that `pb_hooks/event_rsvps.pb.js` also implements — in a way the two disagree about. See [the RSVP divergence](docs/ARCHITECTURE.md#the-rsvp-divergence-client-and-server-both-enforce-capacity). The pure decision functions are tested in `@learnlife/shared`; the orchestration in this app is not. |
+| RSVP submit orchestration | The `not_going` guards in `submitRsvp` are the only enforcement of `rsvp_enabled` / `rsvp_deadline` on withdrawal — the hook skips both on that path. Testing them needs a PocketBase fake that does not exist yet. Capacity and waitlist themselves are server-owned and tested nowhere, since `pb_hooks/` has no tests. |
 | `AuthContext` | Token expiry, role derivation, the program fetch. |
 | Every screen | No render test exists for any route. |
-| `lib/errors.ts` | Pure functions with a status→string table; trivially testable, untested. |
+| `lib/errors.ts` beyond `mapRsvpError` | `mapPbError`, `mapLoginError` and `mapInviteError` are pure status→string tables; trivially testable, untested. |
 
-### The `testMatch` trap
+### `testMatch` collects `.ts` and `.tsx`
 
 `package.json` sets:
 
 ```json
-"testMatch": ["**/__tests__/**/*.test.ts"]
+"testMatch": [
+  "**/__tests__/**/*.test.ts",
+  "**/__tests__/**/*.test.tsx"
+]
 ```
 
-That pattern does **not** match `.tsx`. A component test written as
-`__tests__/event-detail.test.tsx` is silently never collected — Jest reports success on the one
-existing file and nobody notices the new test never ran. If you add the first component test, widen
-the pattern to `**/__tests__/**/*.test.ts?(x)` in the same commit. Nothing in the repo enforces this;
-it is a footgun waiting for the next person.
+It used to be `.ts` only, which meant a component test written as `__tests__/event-detail.test.tsx`
+was silently never collected — Jest reported success on the one existing file and nobody noticed the
+new test never ran. Both extensions are collected now.
 
 `moduleNameMapper` already points `@learnlife/*` at package **source** (not build output) and maps
 `pocketbase` to `__mocks__/pocketbase.ts`, a 13-line stub that returns empty lists — so unit tests
@@ -266,32 +265,29 @@ never hit the network, but also cannot exercise anything data-dependent without 
 
 [`.github/workflows/calendar-test.yml`](../../.github/workflows/calendar-test.yml) runs on pushes and
 PRs to `main` that touch `apps/ll-calendar/**`, `packages/**`, or the workspace/lock/root manifests.
-On Node 22 with pnpm it does three things:
+On Node 22 with pnpm it does four things:
 
 1. `pnpm --filter ll_calendar lint`
 2. `pnpm -r --filter "./packages/*" typecheck`
-3. `pnpm --filter ll_calendar test`
+3. `pnpm --filter ll_calendar typecheck`
+4. `pnpm --filter ll_calendar test`
 
-### TypeScript is never enforced in this app
+### TypeScript enforcement
 
-Not in CI, not locally, not by any script. Three independent layers each decline to check it:
+`pnpm typecheck` (`tsc --noEmit`) is step 3 above and is the only layer that sees types: `expo lint`
+is ESLint-only and the `ts-jest` transform sets `"diagnostics": false`, so type errors are invisible
+during test runs — `ts-jest` is being used purely as a transpiler.
 
-| Layer | Why it does not typecheck |
-|---|---|
-| CI | Step 2 above is `--filter "./packages/*"` — it covers the shared packages only. The root `pnpm typecheck` has the same filter. |
-| Scripts | `package.json` defines no `typecheck` script, so there is nothing for `pnpm -r` to pick up even without the filter. |
-| Tests | The `ts-jest` transform sets `"diagnostics": false`, which switches off type errors *during test runs* too. `ts-jest` is being used purely as a transpiler. |
+`tsc --noEmit` reports **zero errors** today. It used to report nine: five real ones where
+`hooks/use-theme-color.ts` and `components/ui/collapsible.tsx` indexed a `Colors.light` /
+`Colors.dark` this app's `constants/theme.ts` never had — both now read `T.colors[theme]`, which is
+the real light/dark pair — and four route-string errors, of which one was a stale
+`.expo/types/router.d.ts` artefact and three were genuine (`"/(tabs)/"` with a trailing slash is not
+a route expo-router emits; it is `"/(tabs)"`).
 
-The consequence, spelled out: `npx tsc --noEmit -p tsconfig.json` in this directory reports **9
-errors** today and no gate anywhere would notice a tenth. Five are real — `hooks/use-theme-color.ts`
-and `components/ui/collapsible.tsx` index `Colors.light` / `Colors.dark`, which this app's
-`constants/theme.ts` does not have. They survive only because both files are dead scaffolding; the
-full breakdown is in
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#the-dead-theming-layer-and-9-type-errors-nothing-checks).
-
-Combined with [the `testMatch` trap](#the-testmatch-trap), that means two whole classes of mistake
-reach `main` in silence: a type error, and a component test that was never collected. If you fix one
-thing about this app's tooling, add a `typecheck` script and wire it into `calendar-test.yml`.
+`.expo/types/router.d.ts` is generated and gitignored, so it does not exist in CI and the route
+strings are only checked locally, after `pnpm start` has regenerated it. A stale copy reports false
+errors for routes that do exist — regenerate before believing one.
 
 ## Repository layout
 
@@ -300,16 +296,15 @@ thing about this app's tooling, add a `typecheck` script and wire it into `calen
 | `app/` | Expo Router routes. See the [route table](#routes). |
 | `components/` | UI. `bottom-nav.tsx` is the only one the product actually uses; the rest is `create-expo-app` scaffolding — [audited here](docs/ARCHITECTURE.md#components-product-versus-scaffolding). |
 | `context/AuthContext.tsx` | `AuthProvider` + `useAuth()`: `user`, `isAuthenticated`, `role`, `program`. |
-| `hooks/` | `use-color-scheme.ts` (+ `.web.ts`), `use-theme-color.ts` (dead). |
+| `hooks/` | `use-color-scheme.ts` (+ `.web.ts`), `use-theme-color.ts` (unused by product screens). |
 | `lib/pocketbase.ts` | The single PocketBase client, its platform-specific auth store, and singleton-bound wrappers around every `@learnlife/pb-client` query. |
 | `lib/errors.ts` | PocketBase error → neutral user-facing copy. |
 | `lib/calendar-utils.ts` | Re-export shim over `@learnlife/shared`; contains no logic. |
 | `constants/theme.ts` | `Colors` + `Fonts` derived from `@learnlife/design-tokens`. Light mode only. |
-| `__tests__/`, `__mocks__/` | The one test file and the PocketBase stub. |
+| `__tests__/`, `__mocks__/` | Two test files and the PocketBase stub. |
 | `stitch/` | Google Stitch design mockups (HTML + PNG). Reference only, and stale — [details](docs/ARCHITECTURE.md#stitchhtml--generated-mockups-not-runtime-code). |
 | `.full-review/` | An abandoned audit. Read [`.full-review/README.md`](.full-review/README.md) first — several of its findings are already fixed and one is a false lead. |
 | `public/_headers` | Netlify/Cloudflare-format header + cache rules for the web export. |
-| `scripts/reset-project.js` | Destructive scaffold leftover. Do not run. |
 
 ## Related docs
 

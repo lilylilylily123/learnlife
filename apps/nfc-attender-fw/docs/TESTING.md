@@ -1,6 +1,6 @@
 # Testing
 
-This firmware has 13 Unity suites and **134 test cases**, and every one of them
+This firmware has 13 Unity suites and **181 test cases**, and every one of them
 runs on your laptop with no ESP32 plugged in. That is not an accident of the
 code being simple — it is the reason the code is shaped the way it is. The
 interesting failures in an attendance terminal are a power cut halfway through
@@ -12,8 +12,9 @@ hardware, into pure modules, and the Arduino files were reduced to adapters
 thin enough not to need testing.
 
 This document is how to run the suites, what each one covers, how the host
-build is possible at all, and — most importantly — the one trap that will
-silently swallow a new test.
+build is possible at all, how the shared cross-language attendance fixture
+works, and — most importantly — the one trap that will silently swallow a new
+test.
 
 Per-module detail, including which suite covers which module:
 [`SOURCE_MAP.md`](SOURCE_MAP.md).
@@ -23,7 +24,7 @@ Per-module detail, including which suite covers which module:
 All commands run **from `apps/nfc-attender-fw/`**.
 
 ```bash
-# Everything — 13 suites, 134 cases
+# Everything — 13 suites, 181 cases
 pio test -e native
 
 # One suite
@@ -180,6 +181,12 @@ add — and both `clock_gate.h` and `version.h` say so in a comment, so the
 absence reads as deliberate rather than as an oversight. Their tests still need
 a `test_filter` entry like any other.
 
+**Helper `.cpp` files inside an already-listed `test_*` directory need no entry
+in either list.** The whole directory is compiled as one binary, which is why
+`test_state_machine/fixture_runner.cpp` works without appearing anywhere in
+`platformio.ini`. Only `src/` modules and test *directories* are allow-listed.
+`platformio.ini` records this next to the warning.
+
 **Also update** the pure-logic table in [the README's source map](../README.md#source-map)
 and the module entry in [`SOURCE_MAP.md`](SOURCE_MAP.md). A module with tests
 nobody can find is only half-covered.
@@ -188,7 +195,7 @@ nobody can find is only half-covered.
 
 | Suite | Cases | Covers |
 |---|---:|---|
-| `test_state_machine` | 15 | The attendance rule end to end: present before 10:01, late at 10:01, `jLate`/`jAbsent` excusal inheritance, on-time arrival dropping an excusal, no-action mid-morning, lunch out at 13:00, lunch in after out, late lunch return, 17:00 weekday check-out, Friday 14:00 check-out, the 14:00–16:59 lock including at 16:59, lunch-return beating the lock, and no double check-out |
+| `test_state_machine` | 62 | **15 hand-written** — present before 10:01, late at 10:01, `jLate`/`jAbsent` excusal inheritance, on-time arrival dropping an excusal, no-action mid-morning, lunch out at 13:00, lunch in after out, late lunch return, 17:00 weekday check-out, Friday 14:00 check-out, the 14:00–16:59 lock including at 16:59, lunch-return beating the lock, no double check-out. **Plus 47 from the shared fixture** — see [below](#the-cross-language-attendance-fixture) |
 | `test_pb_response` | 19 | Login token extraction; learner and attendance page parsing; bad JSON rejection; rows without an `id` skipped; the "no match is not an error" contract; legacy `lunch_out`/`lunch_in` propagation; and five streaming cases — 61 rows without OOM, the field filter dropping unread keys, a sink stopping early, a truncated body returning false, and `meta` being populated before the first row |
 | `test_queue_core` | 14 | Queue behaviour: append/size, survives a reboot, drain-all empties, `RetryLater` stopping and preserving order, `PermanentFail` moving to dead and continuing, a corrupt line skipped not fatal, the entry cap dropping oldest and reporting it, dropping never silent, a failed compaction leaving the live store intact, a failed append reported, an empty store loading clean, the dead-letter store being append-only, full field round-trip, and the empty-`attendance_id` first-scan case |
 | `test_jwt` | 12 | `exp` extraction from a realistic token; the base64url alphabet; padded and unpadded payloads; and every rejection path — missing `exp`, non-numeric `exp`, negative or zero `exp`, not-a-JWT, invalid base64, payload that is not JSON. Plus `is_usable` honouring the skew and rejecting missing inputs |
@@ -201,10 +208,18 @@ nobody can find is only half-covered.
 | `test_queue_format` | 7 | Round-trip of a check-in; an empty `attendance_id` (first scan of the day) accepted; rejection of a wrong version, too few fields, too many fields, and an empty `learner_id`; and JSON brace characters preserved inside the fields column |
 | `test_json_source` | 5 | The load-bearing one: ArduinoJson deserialising through a virtual `ByteSource`, and through an abstract-base reference specifically; a filter applying while streaming; truncated input reporting an error rather than crashing; and the `read`/`readBytes` end-of-input semantics |
 | `test_clock_gate` | 4 | Blocked before NTP; allowed after; allowed on an override with no NTP; allowed when both hold |
-| **Total** | **134** | |
+| **Total** | **181** | |
 
-Counts are `RUN_TEST` invocations, verified by counting them in
-`test/*/*.cpp`. If you add a case, this table and the two counts in
+Counting method, because it is no longer uniform: twelve suites are one
+`RUN_TEST` per case, countable by grepping `test/*/*.cpp`. `test_state_machine`
+is 15 `RUN_TEST` calls plus 47 cases that `fixture_runner.cpp` drives through
+`UnityDefaultTestRun` in a loop, so grep undercounts it by 47 and reports 134
+for the repo. The 47 breaks down as 41 fixture entries (`cases` in the fixture
+JSON) plus six fixed cases: `fixture/loaded`, `fixture/thresholds`,
+`fixture/guard_D2a_mask`, `fixture/report_D5_unported`,
+`fixture/report_D4_unported` and `fixture/report_divergences`.
+
+If you add a case, this table and the three counts in
 [the README](../README.md) go stale — they are maintained by hand.
 
 `test_json_source` is worth its own note. It exists because the entire
@@ -215,6 +230,107 @@ through it, which is what makes an abstract base with virtual
 dispatch virtually. That is documented behaviour, but it is documented behaviour
 this firmware cannot function without, so it is pinned by a test rather than
 trusted.
+
+## The cross-language attendance fixture
+
+The attendance rule is implemented **four** times in this repo:
+
+| Implementation | Role | Guarded by the fixture? |
+|---|---|---|
+| `packages/shared/src/attendance.ts` | The specification | Yes |
+| `apps/nfc-attender-fw/src/state_machine.cpp` | C++ port for this reader | Yes |
+| `packages/pb-client/src/queries/attendance.ts` | Duplicated `deriveStatus` | **No** |
+| `packages/pb-client/scripts/backfill-arrival.ts` | Duplicated `splitStatus` | **No** |
+
+They had already drifted. `packages/shared/fixtures/attendance-state-machine.json`
+is the structural fix: one committed JSON file of cases, read by **two**
+harnesses that must agree with it —
+`apps/nfc-attender/src/__tests__/attendance-fixture.test.ts` (Vitest) and
+`test/test_state_machine/fixture_runner.cpp` (this suite). A case both harnesses
+run is a case where drift fails a build.
+
+**Scope, precisely:** the fixture pins `computeCheckInAction` across the spec
+and this port. Neither `pb-client` copy is on that path — `deriveStatus` there
+is a duplicate of a four-line pure mapping and `splitStatus` is its inverse —
+so nothing in this harness constrains them. They remain unguarded, and changing
+a threshold still means changing all four by hand.
+
+### How the C++ side works
+
+- `test_state_machine.cpp`'s `main()` calls `llattender_fixture::run_all()`
+  after the 15 hand-written `RUN_TEST` lines, between `UNITY_BEGIN()` and
+  `UNITY_END()`. The runner drives Unity itself via `UnityDefaultTestRun`,
+  emitting one named case per fixture entry (`fixture/<id>`).
+- The fixture path arrives as `-DLL_ATTENDANCE_FIXTURE` in `[env:native]`'s
+  `build_flags`. **`fixture_runner.cpp` `#error`s if that define is missing**,
+  so the harness can never silently run zero cases — which is the same class of
+  failure as [the allow-list trap](#the-allow-list-trap), closed deliberately.
+  If the file is present but unreadable or unparseable, `run_all` emits a single
+  failing `fixture/load` or `fixture/parse` case and returns, so the rest of the
+  suite still reports.
+- **Both harnesses pin `TZ=UTC`.** Both implementations read local wall-clock
+  fields (`Date.getHours`, `std::tm.tm_hour`), so a host timezone with a DST
+  transition inside a case's date could renormalise the hour and surface as a
+  phantom divergence. The C++ side calls `setenv("TZ","UTC",1)` + `tzset()` in
+  `main` before any `mktime`, so it holds however the binary is invoked rather
+  than depending on the runner's environment. Each harness then re-reads
+  hour/minute/weekday back off the clock it built and fails with an explicit
+  message if it does not match the fixture — asserting on a shifted time would
+  be worse than failing.
+- The JSON is a **generated file, not hand-edited.** Regenerate deliberately
+  with `pnpm gen:attendance-fixture` and commit the diff;
+  `pnpm check:attendance-fixture` fails when it is stale. Neither test suite
+  runs the generator.
+
+### Known divergences are pinned, not hidden
+
+Cases carrying a `divergence` block assert against the **recorded C++
+behaviour** and report `KNOWN DIVERGENT` instead of failing. That keeps both
+behaviours pinned while the product decision is outstanding, rather than
+deleting the case or letting the suite go red permanently. The registry holds
+**six entries under five numbered IDs** — D1, D2, D2a, D3, D4, D5, where D2a is
+a distinct defect filed under D2's number because D2 masks it. All are
+`UNDECIDED`:
+
+| ID | Divergence | Observable today? |
+|---|---|---|
+| **D1** | Non-Friday check-out: TS says **16:59**, this port says **17:00**. For the whole of 16:59 the dashboard checks a learner out while the reader refuses the tap | Yes |
+| **D2** | Ordering: TS evaluates check-out **before** late-lunch-return, this port evaluates late-lunch-return **first**. A learner who never returned from lunch is checked out by the dashboard and left checked in by the device | Yes |
+| **D2a** | This port's `CheckOut` branch writes `time_out` only — it never closes an open lunch, where TS sets `lunch_events` plus `lunch_status='late'` in the same write. Silent data loss, distinct from D2's ordering question | No — **masked by D2**: the late-lunch-return step catches every at-lunch state from 14:00 onward, and both check-out cutoffs are at or after 14:00, so the branch is never reached with an open lunch. Fixing D2 by reordering would unmask it, which is what `fixture/guard_D2a_mask` exists to catch |
+| **D3** | The 14:00–17:00 no-scan window (`ActionType::Locked`) has no TS equivalent — TS falls through to no-action. Every stray afternoon tap is a silent no-op on one side and a visible rejection on the other | Yes |
+| **D4** | `findLearnersToMarkAbsent` was never ported. The device can never mark anyone absent; the fixture's `absence_sweep` cases run against the spec only, and this harness reports them unported via `fixture/report_D4_unported` | No |
+| **D5** | This port **neither reads nor writes the `justified` column.** Two halves, needing different fixes. **WRITE:** `fields.cpp`'s `CheckIn` arm PATCHes only `time_in`, `arrival` and `status`, while the spec's `check_in` also emits `justified` — so a device tap on a justified learner leaves that column at whatever it held and the row contradicts itself. That is the same defect the TypeScript side was just fixed to stop producing, against the same PocketBase collection. **READ:** `state_machine.h`'s `AttendanceState` has no `justified` field, so prior justification can only be decoded from the legacy `status` enum; an excusal recorded *only* in the column is invisible and this port derives `late` where the spec derives `jLate` | Yes |
+
+There is also one **shared defect**, recorded but deliberately *not* marked as a
+divergence because both implementations have it: inside the lunch window
+`lunch_status` is computed as `now >= 14:01 ? late : present`, but that branch
+only runs while `hour < 14`, so the late arm is unreachable and the window
+always writes `present`. Two fixture cases pin the current behaviour.
+
+Note that D1 means the check-out threshold in this port (17:00, documented under
+`state_machine` in [`SOURCE_MAP.md`](SOURCE_MAP.md)) is **not** the same as the
+dashboard's. Do not "fix" one side without a decision on both.
+
+### How a partially-ported field is compared
+
+D5 would otherwise turn every `check_in` case divergent, which would hide all
+the fields that *do* agree. Instead the harness reads a `cpp_skips_field` key
+off the divergence registry (`"justified"` for D5) and skips exactly that one
+key when comparing, reporting D5 once via `fixture/report_D5_unported`. Every
+other field on those cases stays compared. The READ half is pinned separately,
+per-case, by `check_in/modern_justified_column_without_derived_status`.
+
+The comparator also has an **unknown-key guard**: a fixture key it does not
+compare is a hard failure with an actionable message, not a silent skip. Without
+it, `cpp_skips_field` would be a hole — a new field added to the spec would be
+quietly ignored by the C++ side and the harness would still pass, which is
+exactly the drift this fixture exists to stop.
+
+**The D5 fix is known and deliberately not applied.** It is the same shape as
+the TypeScript one — add `justified` to the C++ `AttendanceState` and
+`CheckInAction`, read it alongside the enum, emit it from `fields.cpp` — but
+changing what the device writes ships to physical hardware, so it is recorded
+rather than dropped.
 
 ## What is not covered
 

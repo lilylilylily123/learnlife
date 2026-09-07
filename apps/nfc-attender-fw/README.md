@@ -12,7 +12,7 @@ CSV export. This device is the **tap terminal**.
 ## Quick start
 
 ```bash
-# Native unit tests (no hardware needed) — 134 cases
+# Native unit tests (no hardware needed) — 181 cases
 pio test -e native
 
 # Build
@@ -201,12 +201,23 @@ Worked detail for every command, plus the boot log line by line:
 ## Testing
 
 ```bash
-pio test -e native        # all 134
+pio test -e native        # all 181
 pio test -e native -f test_queue_core
 ```
 
 Covers pure logic only. Anything touching Arduino, WiFi or LittleFS is compiled
 out — those paths are verified on-device (see [Verification](#verification)).
+
+47 of those 181 cases come from the shared-fixture harness — 41 entries in
+`packages/shared/fixtures/attendance-state-machine.json` plus six guard and
+report cases. That fixture is the same file the Vitest suite in
+`apps/nfc-attender` reads. The attendance rule is implemented
+four times across this repo, and the copies had already drifted; a case both
+harnesses run is now a case where drift fails a build. Known TS/C++
+divergences are pinned rather than hidden — they report `KNOWN DIVERGENT`
+instead of failing. Six are recorded, including one (D5) that reproduces on
+the device path a self-contradicting write the dashboard was just fixed to
+stop making. See [`docs/TESTING.md`](docs/TESTING.md#the-cross-language-attendance-fixture).
 
 ⚠️ `build_src_filter` and `test_filter` in `platformio.ini` are **explicit
 allow-lists**. A new pure module missing from both is silently never compiled
@@ -332,7 +343,7 @@ path at all. Provision first. This and eight other verified gaps are listed in
 
 ```
 src/                     firmware — 46 files (docs/SOURCE_MAP.md)
-test/                    13 Unity suites, 134 cases, native only
+test/                    13 Unity suites, 181 cases, native only
 docs/
   SOURCE_MAP.md          per-module reference
   TESTING.md             how to run and extend the suites

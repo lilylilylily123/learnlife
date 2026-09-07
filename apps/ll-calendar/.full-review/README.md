@@ -138,19 +138,23 @@ Each verified by reading the current code.
 Not criticism of the audit — most of this post-dates it — but a reader should not treat these files as
 a complete problem list. Verified issues that appear nowhere in phases 1 or 2:
 
-- **TypeScript is enforced nowhere in this app.** No `typecheck` script, `expo lint` is ESLint only,
-  and the `ts-jest` transform sets `diagnostics: false`. `tsc --noEmit` reports 9 errors today, five
-  of them real, and no gate would catch a tenth. See
-  [the README](../README.md#typescript-is-never-enforced-in-this-app).
-- **The jest `testMatch` cannot collect `.tsx`**, so the first component test anyone writes will
-  silently never run. See [the README](../README.md#the-testmatch-trap).
-- **RSVP capacity logic is implemented twice** — in `lib/pocketbase.ts` and in
-  `pb_hooks/event_rsvps.pb.js` — and the two disagree about what `status` means on the wire, so only
-  one of them can work at a time. This is the most consequential undocumented issue in the app:
-  [full analysis](../docs/ARCHITECTURE.md#the-rsvp-divergence-client-and-server-both-enforce-capacity).
-- **`pnpm build:calendar` is broken** at the repo root because this app defines no `build` script.
-- **`pnpm reset-project` deletes the application.** It is the unmodified `create-expo-app` scaffold
-  script and it moves or deletes `app/`, `components/`, `hooks/`, `constants/` and `scripts/`.
+- **TypeScript was enforced nowhere in this app.** *Now closed:* a `typecheck` script exists and
+  runs in `calendar-test.yml`, and the 9 errors `tsc --noEmit` used to report are fixed. `expo lint`
+  is still ESLint-only and `ts-jest` still sets `diagnostics: false`. See
+  [the README](../README.md#typescript-enforcement).
+- **The jest `testMatch` could not collect `.tsx`.** *Now closed:* both `.test.ts` and `.test.tsx`
+  are collected. See [the README](../README.md#testmatch-collects-ts-and-tsx).
+- **RSVP capacity logic was implemented twice** — in `lib/pocketbase.ts` and in
+  `pb_hooks/event_rsvps.pb.js` — and the two disagreed about what `status` means on the wire, so
+  only one could work at a time. RSVPing to a full waitlist-enabled event returned a 400.
+  *Now closed:* the client sends intent and the server owns capacity, waitlist and promotion. The
+  client-side capacity math, the `position` write and the non-functional client promotion path are
+  gone; two `not_going`-only guards remain because the hook skips them on that path. See
+  [the RSVP section](../docs/ARCHITECTURE.md#rsvp-the-server-owns-capacity-the-client-sends-intent).
+- **`pnpm build:calendar` was broken** at the repo root because this app defined no `build` script.
+  *Now closed:* `pnpm build` runs `expo export --platform web`.
+- **`pnpm reset-project` deleted the application.** *Now closed:* the scaffold script and its
+  `package.json` entry are removed.
 - **`HapticTab` can never render**, because the tab bar it is attached to has `display: "none"`.
 - **`stitch/*.html` is stale**, and its palette is the source of the very hardcoded hexes the audit
   flagged in H-4.

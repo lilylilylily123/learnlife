@@ -30,6 +30,9 @@ bool g_synced = false;
 bool init() {
   // The state machine reads `tm_hour` and `tm_wday` against thresholds defined
   // in school-local time (10:01 late, 13–14 lunch, 17:00 checkout, Friday=5).
+  // NB: 17:00 is this port's value. The TS spec says 16:59 — divergence D1,
+  // undecided; see packages/shared/fixtures/attendance-state-machine.json and
+  // docs/TESTING.md. Do not "align" either side without a decision on both.
   // Without a TZ set, localtime() returns UTC and those thresholds shift by
   // an hour — letting late tappers slip through. Default to Europe/Madrid
   // (the deployment locale per capstone-notes.md at the repo root); still

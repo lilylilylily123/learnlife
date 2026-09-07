@@ -1,6 +1,6 @@
 > [!IMPORTANT]
-> **`src/queries/attendance.ts` contains a hand-duplicated copy of `deriveStatus` from `@learnlife/shared`, and a third copy exists in C++.**
-> Nothing in CI compares them. See [The duplicated `deriveStatus`](#the-duplicated-derivestatus).
+> **`src/queries/attendance.ts` duplicates `deriveStatus` from `@learnlife/shared`, and `scripts/backfill-arrival.ts` duplicates `splitStatus`. Two further implementations live in `packages/shared` and in C++.**
+> The `shared`/C++ pair is now compared in CI against a shared fixture; these two copies are not. See [The duplicated `deriveStatus`](#the-duplicated-derivestatus).
 
 # `@learnlife/pb-client`
 
@@ -400,32 +400,66 @@ The function reads the record first to get its current `arrival`, so it costs a
 `getOne` plus an `update`. It takes `userId` as an argument rather than reading
 `pb.authStore`, keeping the module free of ambient auth state.
 
+### Who writes `justified`, and which writers are coherent
+
+`arrival`, `justified` and `status` encode the same fact twice, so any writer
+that touches one and not the others can leave a row contradicting itself. Four
+writers hit this collection; they do not all get it right.
+
+| Writer | Path | Coherent? |
+|---|---|---|
+| `batchUpdateAttendance` | this package | yes — `withDerivedStatus` re-derives `status` from the incoming `arrival` plus the existing `justified` |
+| `justifyAttendance` | this package | yes — re-derives `status` from the existing `arrival` plus the incoming `justified` |
+| `computeCheckInAction` → dashboard | `packages/shared`, written by `checkLearnerIn` in `apps/nfc-attender` | yes — emits `time_in` + `arrival` + `justified` + `status` in one patch, as a fixpoint of `deriveStatus`/`splitStatus`. **Note this path bypasses `batchUpdateAttendance`** and PATCHes `action.fields` directly, so the coherence has to come from the action itself |
+| `compute_check_in_action` → ESP32 | `apps/nfc-attender-fw`, written by `fields.cpp` | **no** — PATCHes only `time_in`, `arrival`, `status`, leaving `justified` at whatever the row held. Registered as divergence **D5** |
+
+The device path therefore still writes rows like
+`arrival: "late", justified: false, status: "jLate"` for an excused learner who
+turns up. `summarizeAttendance` prefers the split pair and counts that day as
+an unjustified `late`, while anything reading the legacy enum sees `jLate`.
+See [Registered divergences](../shared/README.md#registered-divergences).
+
+`resetAttendance` sets `justified: false` and nulls `arrival` and `status`
+together, so it is coherent by construction.
+
 ### The duplicated `deriveStatus`
 
 > [!WARNING]
 > `deriveStatus` at the top of `src/queries/attendance.ts` is a hand-written
-> copy of the function in `packages/shared/src/attendance.ts`. A **third**
-> implementation, `derive_status`, exists in C++ at
-> `apps/nfc-attender-fw/src/state_machine.cpp`. All three carry
-> stay-in-sync comments. **Nothing in CI compares any pair of them**, no test
-> imports two copies and asserts they agree, and no shared fixture file exists
-> that both the vitest suite and the firmware's PlatformIO suite consume.
+> copy of the function in `packages/shared/src/attendance.ts`. Two more copies
+> exist: `derive_status` in C++ at
+> `apps/nfc-attender-fw/src/state_machine.cpp`, and a private `splitStatus` in
+> this package's own `scripts/backfill-arrival.ts`. All of them carry
+> stay-in-sync comments.
+>
+> There are **four** implementations in total, and the fixture's own
+> `implementations` array names all of them. `packages/shared` and the C++ port
+> are compared in CI against that committed conformance fixture,
+> `packages/shared/fixtures/attendance-state-machine.json`. **The two copies in
+> this package are guarded by nothing** — the fixture constrains
+> `computeCheckInAction` across the other two only, and nothing anywhere
+> imports these alongside `shared` and asserts they agree.
 
-The copy exists because the dependency edge only runs one way:
+The copies exist because the dependency edge only runs one way:
 `packages/shared` imports `TIME_THRESHOLDS` from this package, so importing
 `shared` from here would close a workspace cycle. The choice was a duplicated
 six-line pure function over a cycle or a fourth package.
 
-What that costs, concretely: this copy is exercised only *indirectly*, through
-`batchUpdateAttendance` and `justifyAttendance` cases in
-`apps/nfc-attender/src/__tests__/pb-client-shared.test.ts`, which assert
+What that costs, concretely: `deriveStatus` here is exercised solely by
+*indirection*, through `batchUpdateAttendance` and `justifyAttendance` cases in
+`apps/nfc-attender/src/__tests__/pb-client-shared.test.ts` that assert
 end-result statuses (`"jLate"`, `"late"`) rather than comparing against
-`shared`. A divergence in the mapping would be caught only if it happened to
-break one of those specific cases. The TS/C++ pair **has already drifted** on
-other parts of the rule — the divergence table is in
-[`packages/shared/README.md`](../shared/README.md#three-implementations-no-parity-check).
+`shared`. **A divergence in the mapping would be caught only by luck** — if it
+happened to break one of those specific cases. `backfill-arrival.ts`'s
+`splitStatus` is covered by nothing at all. Both are pure six-line functions
+and would be cheap to fold into the fixture harness.
 
-When you change one, change all three.
+The TS/C++ pair **has already drifted** on other parts of the rule; six
+divergences are registered in the fixture and tabulated in
+[`packages/shared/README.md`](../shared/README.md#registered-divergences).
+
+When you change one, change all four — and regenerate the fixture with
+`pnpm gen:attendance-fixture`.
 
 ## `auth`
 

@@ -41,8 +41,14 @@ struct LunchEvent {
   std::string time_iso;
 };
 
-// Snapshot of today's PocketBase row for one learner. Mirrors the
-// `AttendanceState` struct in attendance.ts:9-17.
+// Snapshot of today's PocketBase row for one learner. NO LONGER a full mirror
+// of the `AttendanceState` struct in attendance.ts: the spec carries a
+// `justified` field and this does not, so prior justification can only be
+// decoded here from the legacy `status` enum. An excusal recorded only in
+// PocketBase's `justified` column is invisible to this port, which then
+// derives `late` where the spec derives `jLate` — divergence D5, undecided.
+// See packages/shared/fixtures/attendance-state-machine.json and
+// docs/TESTING.md. The write half of D5 is in fields.cpp.
 struct AttendanceState {
   bool has_time_in = false;
   bool has_time_out = false;

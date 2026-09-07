@@ -10,18 +10,18 @@ PocketBase stays in one file, and client-side role gates are UX affordances rath
 
 Read [`../README.md`](../README.md) first for the route table and the commands. This document goes
 one level deeper and is honest about the dead code: a meaningful fraction of `components/` and
-`hooks/` is untouched `create-expo-app` scaffolding, and some of it does not even typecheck.
+`hooks/` is untouched `create-expo-app` scaffolding that no product screen imports.
 
 ## Contents
 
 - [Auth flow, exactly what happens](#auth-flow-exactly-what-happens)
 - [Data access: one client, one module](#data-access-one-client-one-module)
-- [The RSVP divergence: client and server both enforce capacity](#the-rsvp-divergence-client-and-server-both-enforce-capacity)
+- [RSVP: the server owns capacity, the client sends intent](#rsvp-the-server-owns-capacity-the-client-sends-intent)
 - [Routing and the Expo Router group conventions](#routing-and-the-expo-router-group-conventions)
 - [Navigation: two tab bars, one visible](#navigation-two-tab-bars-one-visible)
 - [Components: product versus scaffolding](#components-product-versus-scaffolding)
 - [Hooks](#hooks)
-- [The dead theming layer, and 9 type errors nothing checks](#the-dead-theming-layer-and-9-type-errors-nothing-checks)
+- [The dead theming layer, and the 9 type errors that are now gone](#the-dead-theming-layer-and-the-9-type-errors-that-are-now-gone)
 - [Platform-specific file conventions](#platform-specific-file-conventions)
 - [`lib/calendar-utils.ts` is a shim](#libcalendar-utilsts-is-a-shim)
 - [`constants/theme.ts` versus `@learnlife/design-tokens`](#constantsthemets-versus-learnlifedesign-tokens)
@@ -134,104 +134,87 @@ Two properties of this design are load-bearing and easy to break:
    instead of `invites.listInvites(pb, …)`. The wrapper exists purely so no screen has to know about
    `pb`; that is what keeps the client swappable and keeps `pb` out of sixteen files.
 
-Everything except RSVP is a one-line delegation. If you are looking for a filter string or a
-`getFullList` call, it is in [`packages/pb-client`](../../../packages/pb-client/), not here. RSVP is
-the exception, and it needs its own section.
+Everything here is a one-line delegation, including RSVP. That was not always true — RSVP used to
+carry a second implementation of the capacity rules — and the design that replaced it is worth its
+own section.
 
-## The RSVP divergence: client and server both enforce capacity
+## RSVP: the server owns capacity, the client sends intent
 
-`lib/pocketbase.ts` contains three functions with real logic — `submitRsvp`, `cancelRsvp`, and the
-private `promoteWaitlistAfterDeparture`. Together they implement capacity checking, waitlist
-assignment and waitlist promotion **on the client**, using the pure state machine in
-[`packages/shared/src/rsvp.ts`](../../../packages/shared/src/rsvp.ts) (`computeRsvpAction`,
-`promoteFromWaitlist`).
+**The contract.** The client sends `status` as the user's *intent* — `"going"` or `"not_going"`,
+never anything else. [`pb_hooks/event_rsvps.pb.js`](../../../pb_hooks/event_rsvps.pb.js) computes
+the persisted `status` and `position`, rewriting `"going"` to `"waitlisted"` with a queue position
+when the event is full. `"waitlisted"` is a server-assigned *outcome*; the hook rejects it as an
+inbound value with `BadRequestError("status must be 'going' or 'not_going' on submit")`.
 
-**[`pb_hooks/event_rsvps.pb.js`](../../../pb_hooks/event_rsvps.pb.js) implements the same rules
-server-side.** It hooks `onRecordCreateRequest`, `onRecordUpdateRequest` and
-`onRecordAfterDeleteSuccess` on `event_rsvps`, and it does strictly more than the client does: an
-`assertOwner` identity check that rejects RSVPing on behalf of another user, `^[a-zA-Z0-9]{15}$`
-validation on record IDs, `^\d{4}-\d{2}-\d{2}$` validation on `occurrence_date`, and — crucially —
-capacity counting inside the request rather than across three separate round-trips.
+**Why the server has to own it.** Capacity is a read-then-write. Two learners pressing "Going"
+simultaneously would both read the same going-count and both conclude a seat was free. The hook
+counts inside the request handler, so the check and the write are close enough together that the
+window is not practically exploitable at this concurrency. No client can offer that.
 
-### The comment in `lib/pocketbase.ts` is stale
+`lib/pocketbase.ts` therefore delegates: `submitRsvp` calls `rsvp.submitRsvp` from
+[`packages/pb-client`](../../../packages/pb-client/), which sends intent and no `position` at all;
+`cancelRsvp` calls `rsvp.cancelRsvp` and does nothing else. Waitlist promotion after a departure is
+entirely server-side, via the hook's `maybePromoteWaitlist` on `onRecordUpdateRequest` (after a
+`going → not_going` change) and `onRecordAfterDeleteSuccess`.
 
-The `submitRsvp` docblock says:
+### What the client still enforces, and why it is not redundant
 
-> NOTE: this is a stop-gap. The intended design is a PocketBase JS hook on `event_rsvps` […] which
-> would enforce capacity atomically on the server. Pockethost's free tier doesn't run custom hooks,
-> so we do the math here.
+Two checks remain in `submitRsvp`, and they are **load-bearing rather than leftover**. `applyRsvpRules`
+returns early for `not_going` — it clears `position` and stops — so on a withdrawal the server checks
+nothing beyond `assertOwner`:
 
-That describes the hook as unbuilt and unrunnable. As a description of the repo, both halves are
-wrong: the hook exists, written against the PocketBase 0.31+ JS API, and
-[`docs/RSVP_MIGRATION.md`](../../../docs/RSVP_MIGRATION.md) records it as shipped. Whether it is
-*loaded on the live instance* is a separate question this repo cannot answer — hooks are uploaded by
-hand through the PocketHost admin file browser and no CI covers it (see
-[`pb_hooks/README.md`](../../../pb_hooks/README.md)).
-
-### The two paths are not redundant — they contradict each other
-
-This is the part to know before touching either side. The duplication is not two implementations
-that happen to agree; on the waitlist branch they are **mutually incompatible**, because they
-disagree about what the `status` field means on the wire.
-
-| | Client (`submitRsvp`) | Hook (`applyRsvpRules`) |
+| Check | `going` | `not_going` |
 |---|---|---|
-| Meaning of `status` in the request | the **final computed state** — `computeRsvpAction` returns `"going" \| "not_going" \| "waitlisted"` and `submitRsvp` writes `decision.status` verbatim | the user's **intent**, and only `"going"` or `"not_going"`; the hook rewrites it to `"waitlisted"` itself |
-| Anything else | — | `throw new BadRequestError("status must be 'going' or 'not_going' on submit")` |
+| ownership (`assertOwner`) | hook | hook |
+| `rsvp_enabled` | hook (`event_rsvps.pb.js:61-63`) | **client only** |
+| `rsvp_deadline` | hook (`event_rsvps.pb.js:65-68`) | **client only** |
+| ID / `occurrence_date` format | hook | not reached |
+| capacity, waitlist, `position` | hook | n/a |
+| waitlist promotion | hook | hook |
 
-So if the hook is loaded, a learner who RSVPs "going" to a **full** event with the waitlist enabled
-has the submission rejected with a 400: the client computed `"waitlisted"`, and the hook refuses
-`"waitlisted"` as an inbound value. The same collision hits `promoteWaitlistAfterDeparture`, which
-issues renumbering patches with `status: "waitlisted"` — those 400 too, and the client
-`.catch(console.warn)`s them, so the waitlist would silently stop renumbering rather than surface an
-error.
+So `submitRsvp` gates `rsvp_enabled` and `rsvp_deadline` on the `not_going` path only. Duplicating
+them on the `going` path would add a round-trip and a stale second opinion; omitting them on
+`not_going` would mean a learner could withdraw after RSVPs closed, freeing a seat and triggering a
+promotion past the deadline. If you are tempted to delete those two guards as duplication, they are
+not.
 
-### What was determined, and what could not be
+**Known gap, deliberately not closed here:** `cancelRsvp` (a record *delete*) has no deadline gate on
+either side. The hook's only delete handler is `onRecordAfterDeleteSuccess`, which runs after the
+fact and cannot reject. The UI hides the "Clear RSVP" control past the deadline
+(`event-detail.tsx`), so this is not reachable through the app, but it is not enforced either. The
+`not_going` guard above is trivially bypassable via delete for anyone calling the API directly.
+Closing it properly needs a hook change, which this app does not own.
 
-- **Determined:** the comment is factually stale. The hook is written and present in the repo, and
-  server-side enforcement is no longer merely "intended".
-- **Determined:** the client path is not harmless duplication. Only one of the two can be in force,
-  and the seam is observable — the `"waitlisted"` value on submit either works (hook not loaded) or
-  400s (hook loaded).
-- **Could not determine:** which one is live. Nothing in the repo records what is uploaded to
-  PocketHost. The codebase hedges in both directions: `event-detail.tsx`'s catch comment says "Server
-  hook throws `BadRequestError` with a useful `.message` — surface it", while `lib/pocketbase.ts`
-  says "server hook (if running) would re-validate; without a hook, we trust this". The code itself
-  does not know.
+### Error copy is the whole of the user feedback
 
-**The one-minute test that resolves it**, following the verification steps in
-[`docs/RSVP_MIGRATION.md`](../../../docs/RSVP_MIGRATION.md): set an event to `rsvp_enabled = true`,
-`capacity = 1`, `allow_waitlist = true`; have one learner press "Going", then a second learner press
-"Going".
+Because the client no longer computes capacity, the *only* way a user learns "this event is full" is
+the message derived from the server's rejection. `mapRsvpError` in `lib/errors.ts` maps the hook's
+fixed set of `BadRequestError` sentences onto our own copy and sends everything else through
+`mapPbError`, so no raw PocketBase body reaches the UI. It matches on known sentences rather than
+echoing `err.message`.
 
-| Observed | Conclusion |
-|---|---|
-| Second learner lands on the waitlist at `position = 1` | The hook is **not** enforcing. The client path is load-bearing and the race window its comment describes is real. |
-| Second learner gets an error containing "status must be 'going' or 'not_going' on submit" | The hook **is** loaded, and the client's waitlist path is broken by it. |
-| Second learner is told the event is full with no waitlist offered | Neither path assigned a waitlist — check that `allow_waitlist` actually saved on the calendar record. |
+It also has to catch the two client-only guards above: those throw plain `Error`s with no `status`,
+and `mapPbError` reads a missing status as `0` — a network failure. An unmatched client guard would
+tell the user their connection was down. `__tests__/rsvp-errors.test.ts` pins that, and it is the
+only test coverage the RSVP feature has, since `pb_hooks/` has none.
 
-Whichever way it comes out, one of the two implementations should then be deleted rather than left as
-a second source of truth. **That is a code change and deliberately not part of this documentation
-pass.** Until it happens, treat the docblock in `lib/pocketbase.ts` as untrustworthy and this section
-as the current description.
+**Keep `mapRsvpError` in sync with the throws in `event_rsvps.pb.js`.** Nothing enforces that link.
 
 ### The rest of the RSVP client path
 
-Independent of the above, these behaviours are what the client code does today:
-
-- `submitRsvp` loads the calendar record, the current roster and the caller's existing RSVP **in
-  parallel** (`Promise.all`), then decides. Three reads plus one write means the capacity count is
-  already stale by the time the write lands — the acknowledged race is that two simultaneous "Going"
-  submissions can both believe they took the last seat. Accepted for a school-sized user base.
-- `submitRsvp` refuses to create a row at all when the choice is `"not_going"` and no row exists —
+- `submitRsvp` no longer pre-reads the roster. `rsvp.submitRsvp` does one `fetchMyRsvp` to choose
+  create vs update; the `not_going` path adds one calendar read for the guards above. The old code
+  did three reads before every write to feed a capacity calculation the server redid anyway.
+- `event-detail.tsx` refuses to submit at all when the choice is `"not_going"` and no row exists —
   there is nothing to record, and a `not_going` row with no history is noise on the roster.
-- `cancelRsvp` reads the row **before** deleting it, because it needs the prior `status`, `event`,
-  `occurrence_date` and the event's `capacity` to decide whether a promotion is warranted, and
-  PocketBase does not reliably return the deleted record. If that lookup fails the delete still
-  proceeds and promotion is skipped — losing a promotion beats leaving a stale RSVP.
-- `promoteWaitlistAfterDeparture` applies each promotion as an independent update and swallows
-  individual failures on purpose: one stuck row must not roll back the actor's own submission or
-  block the other promotions.
+- `countRsvps` from [`packages/shared`](../../../packages/shared/) still runs client-side, for the
+  "12/20 going · 3 waitlisted" badge. That is aggregation of server-assigned state for display, not
+  enforcement, and it stays.
+- `computeRsvpAction` and `promoteFromWaitlist` in
+  [`packages/shared/src/rsvp.ts`](../../../packages/shared/src/rsvp.ts) are **no longer called by
+  this app**. They are kept because their ~15 tests are the only executable specification of the
+  hook's rules anywhere in the repo — `pb_hooks/` has no tests and cannot easily get them. Treat them
+  as a spec fixture, not as app code, and do not wire them back into the submit path.
 - Every read-back after a mutation goes through `loadAll()` in `event-detail.tsx`, so the counts the
   user sees come from the server rather than from optimistic local state.
 
@@ -267,9 +250,10 @@ This tells Expo Router which route to treat as the back-stack root, so a deep li
 modal (`llcalendar://chat?...`) has `(tabs)` beneath it to go back to rather than an empty stack.
 
 `typedRoutes` (`app.json` → `experiments`) generates `.expo/types/router.d.ts` from the file tree, so
-route strings are typechecked *when someone runs `tsc`* — which, in this app, nothing does. That file
-is generated and gitignored, and a **stale** copy reports false errors for routes that do exist; see
-[the type-error breakdown](#the-dead-theming-layer-and-9-type-errors-nothing-checks).
+route strings are typechecked by `pnpm typecheck` — but only where that file exists. It is generated
+and gitignored, so it is absent in CI (route strings go unchecked there) and a **stale** local copy
+reports false errors for routes that do exist; see
+[the type-error breakdown](#the-dead-theming-layer-and-the-9-type-errors-that-are-now-gone).
 
 ## Navigation: two tab bars, one visible
 
@@ -308,12 +292,12 @@ and was never deleted. The status column comes from grepping imports across `app
 |---|---|---|
 | `bottom-nav.tsx` | **Product** | Imported by all three tab screens. The visible bottom bar. |
 | `haptic-tab.tsx` | **Wired but unreachable** | Passed as `tabBarButton` in `(tabs)/_layout.tsx`, but that tab bar is hidden, so it never renders. Adds iOS haptics on tab press-in — a feature the app therefore does not have. |
-| `themed-text.tsx` | Scaffolding | `ThemedText` — imported only by `ui/collapsible.tsx`, which is itself unused. Depends on `useThemeColor`, which does not typecheck. |
+| `themed-text.tsx` | Scaffolding | `ThemedText` — imported only by `ui/collapsible.tsx`, which is itself unused. Reads the `ink` token through `useThemeColor`. |
 | `themed-view.tsx` | Scaffolding | `ThemedView` — imported only by `ui/collapsible.tsx` and `parallax-scroll-view.tsx`, both unused. |
 | `hello-wave.tsx` | Scaffolding | Zero imports anywhere. A waving-hand emoji with a Reanimated keyframe. Pure `create-expo-app` demo content. |
 | `parallax-scroll-view.tsx` | Scaffolding | Zero imports anywhere. Also carries a `styles.container` its own JSX never uses. This is the **only** consumer of `react-native-reanimated`'s animation API in the app — see [Known gaps](#known-gaps). |
 | `external-link.tsx` | Scaffolding | Zero imports anywhere. The `expo-web-browser` dependency exists for it. |
-| `ui/collapsible.tsx` | Scaffolding, **broken** | Zero imports anywhere. Reads `Colors.light.icon` / `Colors.dark.icon`, neither of which exists on this app's `Colors`. Two of the nine type errors. |
+| `ui/collapsible.tsx` | Scaffolding | Zero imports anywhere. Reads `T.colors.light.muted` / `T.colors.dark.muted` for the chevron; used to read a non-existent `Colors.light.icon`, which was two of the nine type errors. |
 | `ui/icon-symbol.tsx` | Scaffolding | Zero imports anywhere. SF Symbols → Material Icons mapping table with four entries. |
 | `ui/icon-symbol.ios.tsx` | Scaffolding | iOS variant of the same, using `expo-symbols`' native `SymbolView`. |
 
@@ -322,9 +306,9 @@ in each screen — `IconSymbol` is not on that path at all.
 
 **Deleting the scaffolding** (`hello-wave`, `parallax-scroll-view`, `external-link`,
 `ui/collapsible`, `ui/icon-symbol*`, `themed-text`, `themed-view`, `hooks/use-theme-color.ts`) would
-remove all five genuine type errors and let `expo-web-browser`, `expo-symbols` and the Reanimated
-animation surface go with them. It has not been done, and this pass is not doing it — but it is the
-single highest-value cleanup available in this app.
+let `expo-web-browser`, `expo-symbols` and the Reanimated animation surface go with them. It has not
+been done, and this pass is not doing it — but it is the single highest-value cleanup available in
+this app.
 
 ## Hooks
 
@@ -332,34 +316,39 @@ single highest-value cleanup available in this app.
 |---|---|---|
 | `use-color-scheme.ts` | **Product** | One line: re-exports React Native's `useColorScheme`. Used by `app/_layout.tsx` to pick `DarkTheme` vs `DefaultTheme` for the navigation `ThemeProvider`. |
 | `use-color-scheme.web.ts` | **Product** | The web override. Returns `'light'` until an effect confirms hydration, then the real scheme. Without this, a static web export renders with the server's assumption and then flips, producing a hydration mismatch. |
-| `use-theme-color.ts` | Scaffolding, **broken** | Indexes `Colors.light[...]` / `Colors.dark[...]`, which this app's `Colors` does not have. Three of the nine type errors. Used only by the unused themed components. |
+| `use-theme-color.ts` | Scaffolding | Indexes `T.colors[theme]` from `constants/theme.ts` and takes a real token key. Used only by the unused themed components. Used to index a non-existent `Colors.light`/`Colors.dark`, which was three of the nine type errors. |
 
-## The dead theming layer, and 9 type errors nothing checks
+## The dead theming layer, and the 9 type errors that are now gone
 
-`npx tsc --noEmit -p tsconfig.json` in `apps/ll-calendar` currently reports **9 errors**, and
-**nothing in the repo would ever tell you** — this app has no typecheck at any layer. See
-[the README](../README.md#typescript-is-never-enforced-in-this-app) for why. The errors split into
-two groups.
+`pnpm typecheck` (`tsc --noEmit`) in `apps/ll-calendar` reports **zero errors** and runs in
+[`calendar-test.yml`](../../../.github/workflows/calendar-test.yml). It used to report **9** with no
+gate anywhere; see [the README](../README.md#typescript-enforcement). What those nine were, because
+the shape they describe still matters:
 
 **Five real errors — the scaffolding theme layer.** `create-expo-app` ships a `constants/theme.ts`
 shaped `Colors = { light: {...}, dark: {...} }` with keys like `text` and `icon`. This app replaced
-that file wholesale with a flat, semantic, light-only palette derived from `@learnlife/design-tokens`
-— no `light`/`dark` nesting, no `text`/`icon` keys. The scaffolding components were never updated:
+that file wholesale with a flat, semantic, light-only `Colors` derived from
+`@learnlife/design-tokens`, and kept the light/dark pair on a separate export, `T.colors`. The
+scaffolding components had never been updated:
 
-| Location | Error |
-|---|---|
-| `hooks/use-theme-color.ts` (3) | `Property 'light' does not exist` / `'dark' does not exist` in the `colorName` constraint, plus the resulting implicit-`any` index. |
-| `components/ui/collapsible.tsx` (2) | `Colors.light.icon` and `Colors.dark.icon`. |
+| Location | Was | Now |
+|---|---|---|
+| `hooks/use-theme-color.ts` (3) | `keyof typeof Colors.light & keyof typeof Colors.dark`, then `Colors[theme][colorName]` | the same against `T.colors`, whose `light`/`dark` really exist and share a key set |
+| `components/ui/collapsible.tsx` (2) | `Colors.light.icon` / `Colors.dark.icon` | `T.colors.light.muted` / `T.colors.dark.muted` — there is no `icon` token |
 
-At runtime these would throw (`Colors.light` is `undefined`), but nothing imports them, so the app
-runs. They are the residue of a half-finished migration, not a live bug.
+Tightening `useThemeColor`'s constraint to real token keys also moved its three call sites onto
+token names: `'background'` → `'bg'` in `themed-view.tsx` and `parallax-scroll-view.tsx`, `'text'` →
+`'ink'` in `themed-text.tsx`. Those components now typecheck; they are still imported by no product
+screen.
 
-**Four artefacts of stale generated route types.** `.expo/types/router.d.ts` is regenerated by the
-Expo CLI from the file tree. The copy on disk predates `app/change-password.tsx`, so
-`router.push("/change-password")` in `app/settings.tsx` is reported as an unknown route, and three
-`"/(tabs)/"` hrefs are flagged with "did you mean `"/(tabs)"`?". Running `pnpm start` regenerates the
-file. If you are chasing type errors here, regenerate first and re-measure — otherwise you will
-"fix" four routes that are correct.
+**Four route-string errors — one artefact, three real.** `.expo/types/router.d.ts` is generated by
+the Expo CLI from the file tree and is gitignored, so it does not exist in CI at all. The copy on
+disk predated `app/change-password.tsx`, so `router.push("/change-password")` in `app/settings.tsx`
+was reported as an unknown route — a pure staleness artefact, and `pnpm start` regenerating the file
+cleared it. The other three were **not** artefacts: expo-router never emits a trailing-slash form of
+a group route, so `"/(tabs)/"` in `app/register.tsx`, `app/(tabs)/calendar.tsx` and
+`app/(tabs)/inbox.tsx` was simply wrong and is now `"/(tabs)"`. If you hit route-type errors,
+regenerate first and re-measure — but do not assume every one is stale.
 
 ## Platform-specific file conventions
 
@@ -484,9 +473,9 @@ closed — are tracked separately in [`../.full-review/README.md`](../.full-revi
 
 | Gap | Where | Consequence |
 |---|---|---|
-| TypeScript is never enforced | no `typecheck` script; `expo lint` is ESLint only; `ts-jest` runs with `diagnostics: false` | 9 type errors sit in the tree with no gate that would catch a tenth. Detail in [the README](../README.md#typescript-is-never-enforced-in-this-app). |
+| Type errors are invisible during tests | `ts-jest` runs with `diagnostics: false` | `pnpm typecheck` is the gate and does run in CI, but a test run will never surface a type error, and `.expo/types/router.d.ts` is absent in CI so route strings go unchecked there. Detail in [the README](../README.md#typescript-enforcement). |
 | No token refresh anywhere | `authRefresh` appears in **no** source file in the repo | An expired token leaves `isAuthenticated` true (nothing re-renders on expiry) while every request 401s. `mapPbError` turns those into "Your session expired. Please sign in again.", but the user is never actually signed out and there is no recovery path short of a manual log out. |
-| Duplicated RSVP enforcement | `lib/pocketbase.ts` vs `pb_hooks/event_rsvps.pb.js` | Two implementations that disagree about the wire meaning of `status`. Full analysis [above](#the-rsvp-divergence-client-and-server-both-enforce-capacity). |
+| Withdrawal is gated only client-side | `applyRsvpRules` returns early for `not_going`; delete has no gate at all | `rsvp_enabled` and `rsvp_deadline` on withdrawal are enforced in `submitRsvp` only, and a direct `delete` bypasses even that. Detail [above](#what-the-client-still-enforces-and-why-it-is-not-redundant). |
 | No error boundary | no `ErrorBoundary` in `app/` | Any unhandled render error takes down the app with no recovery UI. |
 | No auth-hydration guard | `app/_layout.tsx` | On native, `initial` is a promise; the first render happens before the token is read, so a signed-in user can see the login screen flash. |
 | Unbounded calendar fetch | `fetchCalendarEvents` in `packages/pb-client` uses `getFullList` with no date filter | Every calendar focus downloads every visible record; the month is applied client-side by `expandEvents`. Fine at school scale, linear growth forever. |
@@ -499,15 +488,19 @@ closed — are tracked separately in [`../.full-review/README.md`](../.full-revi
 | Avatar URLs hardcode the host | `inbox.tsx`, `new-conversation.tsx` build `https://learnlife.pockethost.io/api/files/users/...` by hand | Bypasses `PB_URL`. If the backend moves, avatars break in exactly two files nobody would think to grep. |
 | Reanimated paid for, barely used | `app/_layout.tsx` imports `react-native-reanimated` for side effects | The only consumers of its animation API are the two unused scaffolding components. |
 | `create-event.tsx` is 1212 lines | | Both the guide and learner forms plus ~320 lines of styles. The app's largest file by a wide margin and the obvious split candidate (guide form / learner form / shared field primitives). |
-| Only `.ts` tests are collected | `package.json` → `jest.testMatch` | A `.tsx` component test is silently never run. See [the README](../README.md#the-testmatch-trap). |
+| The web export is not exercised in CI | `calendar-test.yml` runs lint, typecheck and test only | `pnpm build` (`expo export --platform web`) exists and works, but a change that breaks the web build still lands green. |
 
 ## Not verifiable from the repo
 
 Honest list of what a reader will want and cannot get from these files:
 
-- **Whether `pb_hooks/event_rsvps.pb.js` is loaded on the live instance.** Decisive for the RSVP
-  question above. The test that settles it is
-  [in that section](#the-rsvp-divergence-client-and-server-both-enforce-capacity).
+- **Whether `pb_hooks/event_rsvps.pb.js` is loaded on the live instance.** The app now depends on it
+  for all capacity and waitlist behaviour, so this matters more than it used to: if the hook is not
+  loaded, a "going" submission to a full event simply succeeds as `going` and capacity is not
+  enforced at all. The smoke test that settles it is step 4-5 of
+  [`docs/RSVP_MIGRATION.md`](../../../docs/RSVP_MIGRATION.md). Indirect evidence that hooks do run:
+  `POST /api/redeem-invite` is created only by `pb_hooks/invites.pb.js`, and invite registration is
+  a working, load-bearing flow.
 - **PocketBase collection rules.** The expected rules are documented as comments in
   `packages/pb-client/src/queries/*.ts` and in [`docs/POCKETBASE.md`](../../../docs/POCKETBASE.md),
   but the live rules are configured in the PocketHost admin UI. Nothing in this repo can confirm what
